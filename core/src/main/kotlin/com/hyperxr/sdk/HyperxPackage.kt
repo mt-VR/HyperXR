@@ -144,10 +144,17 @@ object HyperxPackage {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /** Reads at most [limit] bytes (InputStream.readNBytes is unavailable before Android 13). */
     private fun readBounded(input: InputStream, limit: Int): ByteArray = input.use {
-        val bytes = it.readNBytes(limit + 1)
-        require(bytes.size <= limit) { "file exceeds $limit bytes" }
-        bytes
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        while (true) {
+            val n = it.read(buf)
+            if (n < 0) break
+            out.write(buf, 0, n)
+            require(out.size() <= limit) { "file exceeds $limit bytes" }
+        }
+        out.toByteArray()
     }
 
     /**

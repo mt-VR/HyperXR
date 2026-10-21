@@ -1,5 +1,177 @@
 package com.hyperxr.ui2d
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hyperxr.HyperXRApp
+import com.hyperxr.settings.HyperSettings
+import com.hyperxr.xr.XrActivity
+import java.util.concurrent.Executors
 
-class MainActivity : ComponentActivity()
+/**
+ * First screen: a conventional 2D landscape management UI. It never renders VR/MR elements;
+ * the immersive experience starts only from "Iniciar experiência XR".
+ */
+class MainActivity : ComponentActivity() {
+    val app: HyperXRApp get() = HyperXRApp.instance
+    val io = Executors.newFixedThreadPool(2)
+    var settingsState by mutableStateOf(HyperSettings())
+    /** Bumped when something outside settings changed (permissions, installs) to recompose. */
+    var refresh by mutableIntStateOf(0)
+
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        io.execute { app.capabilities.probe(app.runtimeBroker); runOnUiThread { refresh++ } }
+    }
+    val pickPackage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { onPackagePicked(it) } }
+    val pickDetector = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { importModel(it, detector = true) } }
+    val pickLandmarks = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { importModel(it, detector = false) } }
+    var pendingInstall by mutableStateOf<Pair<java.io.File, com.hyperxr.sdk.InspectionResult>?>(null)
+    var message by mutableStateOf<String?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        settingsState = app.settings.current
+        io.execute {
+            app.packages.installBundled()
+            app.capabilities.probe(app.runtimeBroker)
+            runOnUiThread { refresh++ }
+        }
+        setContent {
+            MaterialTheme(colorScheme = HxColorScheme) {
+                DisposableEffect(Unit) {
+                    val l: (HyperSettings) -> Unit = { s -> runOnUiThread { settingsState = s } }
+                    app.settings.addListener(l)
+                    onDispose { app.settings.removeListener(l) }
+                }
+                Root(this)
+            }
+        }
+    }
+
+    fun requestRuntimePermissions() {
+        val perms = mutableListOf(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= 31) perms += Manifest.permission.BLUETOOTH_CONNECT
+        permissionLauncher.launch(perms.toTypedArray())
+    }
+
+    fun hasPermission(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+
+    fun startXr() {
+        startActivity(Intent(this, XrActivity::class.java))
+    }
+
+    private fun onPackagePicked(uri: android.net.Uri) {
+        io.execute {
+            val r = try { app.packages.inspectUri(uri) } catch (t: Throwable) { null }
+            runOnUiThread { if (r == null) message = "Não foi possível ler o arquivo" else pendingInstall = r }
+        }
+    }
+
+    fun confirmInstall() {
+        val (file, result) = pendingInstall ?: return
+        pendingInstall = null
+        io.execute {
+            val msg = try { val p = app.packages.commitInstall(file, result); "Instalado: ${p.manifest.name} ${p.manifest.version}" } catch (t: Throwable) { "Falha: ${t.message}" }
+            runOnUiThread { message = msg; refresh++ }
+        }
+    }
+
+    private fun importModel(uri: android.net.Uri, detector: Boolean) {
+        io.execute {
+            val models = com.hyperxr.handtracking.HandModels(this)
+            val msg = try {
+                models.import(this, uri, if (detector) models.detector else models.landmarks)
+                "Modelo importado (${if (detector) "detector" else "landmarks"})"
+            } catch (t: Throwable) { "Falha ao importar: ${t.message}" }
+            runOnUiThread { message = msg; refresh++ }
+        }
+    }
+
+    override fun onResume() { super.onResume(); refresh++ }
+    override fun onDestroy() { io.shutdown(); super.onDestroy() }
+}
+
+enum class Section(val title: String) {
+    HOME("Início"), LAUNCHER("Launcher"), GRAPHICS("Gráficos"), PERFORMANCE("Desempenho"),
+    HEAD("Head tracking"), HANDS("Hand tracking"), CONTROLS("Controles"), PERMISSIONS("Permissões e pacotes"),
+    RUNTIME("OpenXR, Monado e Broker"), ENVIRONMENTS("Ambientes 3D"), APPS("Apps XR e Web"), AUDIO("Áudio"),
+    DEVICE("Dispositivo e diagnóstico"), ACCESSIBILITY("Acessibilidade"), NETWORK("Rede"),
+}
+
+@Composable
+private fun Root(a: MainActivity) {
+    var section by remember { mutableStateOf(Section.HOME) }
+    Row(Modifier.fillMaxSize().background(HxColors.bg)) {
+        Column(
+            Modifier.width(250.dp).fillMaxHeight().background(Color(0xFF101020)).verticalScroll(rememberScrollState()).padding(12.dp),
+        ) {
+            Text("HyperXR", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = HxColors.text, modifier = Modifier.padding(8.dp))
+            Text("Configurações e gerenciamento", fontSize = 12.sp, color = HxColors.dim, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
+            Section.entries.forEach { s ->
+                val sel = s == section
+                Text(
+                    s.title,
+                    modifier = Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(12.dp))
+                        .background(if (sel) HxColors.accent.copy(alpha = 0.25f) else Color.Transparent)
+                        .clickableNoRipple { section = s }.padding(horizontal = 14.dp, vertical = 11.dp).width(210.dp),
+                    color = if (sel) HxColors.text else HxColors.dim, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
+                Text(section.title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = HxColors.text, modifier = Modifier.padding(bottom = 16.dp))
+                @Suppress("UNUSED_EXPRESSION") a.refresh // recompose on refresh
+                when (section) {
+                    Section.HOME -> HomeSection(a)
+                    Section.LAUNCHER -> LauncherSection(a)
+                    Section.GRAPHICS -> GraphicsSection(a)
+                    Section.PERFORMANCE -> PerformanceSection(a)
+                    Section.HEAD -> HeadSection(a)
+                    Section.HANDS -> HandsSection(a)
+                    Section.CONTROLS -> ControlsSection(a)
+                    Section.PERMISSIONS -> PermissionsSection(a)
+                    Section.RUNTIME -> RuntimeSection(a)
+                    Section.ENVIRONMENTS -> EnvironmentsSection(a)
+                    Section.APPS -> AppsSection(a)
+                    Section.AUDIO -> AudioSection(a)
+                    Section.DEVICE -> DeviceSection(a)
+                    Section.ACCESSIBILITY -> AccessibilitySection(a)
+                    Section.NETWORK -> NetworkSection(a)
+                }
+            }
+            Dialogs(a)
+        }
+    }
+}

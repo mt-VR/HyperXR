@@ -388,11 +388,23 @@ class GameRuntimeContent(private val pkg: InstalledPackage, private val onExit: 
             c.setRequestProperty("User-Agent", "HyperXR-Game/${pkg.manifest.id}")
             if (body.isNotEmpty() && method != "GET") { c.doOutput = true; c.outputStream.use { it.write(body.toByteArray()) } }
             val code = c.responseCode
-            val text = (if (code < 400) c.inputStream else c.errorStream)?.use { it.readNBytes(MAX_RESPONSE).toString(Charsets.UTF_8) } ?: ""
+            val text = (if (code < 400) c.inputStream else c.errorStream)?.use { readBounded(it, MAX_RESPONSE).toString(Charsets.UTF_8) } ?: ""
             events += NetResult(id, code, text)
         } catch (t: Throwable) {
             events += NetResult(id, -1, t.message ?: "network error")
         }
+    }
+
+    /** InputStream.readNBytes is API 33; this reads at most [limit] bytes on any API level. */
+    private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(16 * 1024)
+        while (out.size() < limit) {
+            val n = input.read(buf, 0, minOf(buf.size, limit - out.size()))
+            if (n < 0) break
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
     }
 
     companion object {

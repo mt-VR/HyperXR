@@ -1,0 +1,253 @@
+package com.hyperxr.ui2d
+
+import android.Manifest
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hyperxr.capabilities.XrModeResolver
+import com.hyperxr.handtracking.HandTrackingService
+import com.hyperxr.joycon.JoyConManager
+import com.hyperxr.launcher.BuiltinApps
+import com.hyperxr.launcher.LauncherModel
+import com.hyperxr.settings.ControllerAction
+import com.hyperxr.settings.HeadTrackingSource
+import com.hyperxr.settings.HyperSettings
+import com.hyperxr.settings.InferenceBackend
+import com.hyperxr.settings.LauncherMode
+import com.hyperxr.settings.XrModePreference
+
+private fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.settings.update(f) }
+
+@Composable
+fun HomeSection(a: MainActivity) {
+    val s = a.settingsState
+    val caps = a.app.capabilities.last
+    val decision = XrModeResolver.resolve(caps, s.xrMode)
+    SectionCard("Experiência imersiva", "O HyperXR inicia em realidade mista quando o aparelho permite; senão, em VR SBS para o VR Box.") {
+        Segmented(
+            listOf("AUTO" to "Automático", "MIXED_REALITY" to "Realidade mista", "VR_SBS" to "VR SBS", "OPENXR_RUNTIME" to "Runtime OpenXR"),
+            s.xrMode.name,
+        ) { k -> a.app.settings.update { it.copy(xrMode = XrModePreference.valueOf(k)) } }
+        KeyValue("Modo que será usado", decision.mode.name)
+        KeyValue("Rastreamento de cabeça", decision.headTracking)
+        decision.reasons.forEach { Note("• $it") }
+        if (!a.hasPermission(Manifest.permission.CAMERA)) {
+            Note("A câmera é necessária para realidade mista e hand tracking.", HxColors.warn)
+            OutlinedButton(onClick = { a.requestRuntimePermissions() }) { Text("Conceder permissões") }
+        }
+        Button(onClick = { a.startXr() }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent), modifier = Modifier.padding(top = 6.dp)) {
+            Text("Iniciar experiência XR", fontSize = 18.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
+        }
+        Note("Coloque o celular no VR Box após iniciar. Toque na tela (ou no botão do visor) para selecionar.")
+    }
+    SectionCard("Resumo do aparelho") {
+        KeyValue("Aparelho", "${caps.manufacturer} ${caps.model} • Android ${caps.androidRelease} (API ${caps.androidSdk})")
+        KeyValue("SoC", "${caps.socManufacturer} ${caps.socModel}")
+        KeyValue("Tela", "${caps.displayWidthPx}x${caps.displayHeightPx} @ ${"%.0f".format(caps.displayRefreshHz)} Hz, ${"%.0f".format(caps.displayXdpi)} dpi")
+        CapabilityRow("ARCore", caps.arCore)
+        CapabilityRow("Runtime OpenXR", caps.openXrRuntime)
+        CapabilityRow("NNAPI", caps.nnapi)
+        KeyValue("Joy-Cons conectados", caps.joyConsConnected.toString())
+    }
+}
+
+@Composable
+fun LauncherSection(a: MainActivity) {
+    val s = a.settingsState.launcher
+    val model = remember { LauncherModel { BuiltinApps.all } }
+    SectionCard("Estilo do launcher", "A mesma preferência pode ser trocada dentro do XR (Ajustes rápidos ou barra da dock).") {
+        Segmented(listOf("DOCK" to "Dock", "NEW" to "New"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
+        Note(if (s.mode == LauncherMode.DOCK) "Dock: barra espacial com apps fixados, painel inicial com relógio e recentes."
+        else "New: apps flutuam ao seu redor em 3D. Segure um ícone para movê-lo; a posição é salva.")
+    }
+    SectionCard("Apps fixados na dock", "Reordene ou remova. Para fixar novos apps use a Biblioteca no XR.") {
+        model.dockApps(s).forEachIndexed { i, app ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${i + 1}. ${app.title}", Modifier.weight(1f), color = HxColors.text)
+                OutlinedButton(onClick = { a.update { it.copy(launcher = model.move(it.launcher, app.id, i - 1)) } }, enabled = i > 0) { Text("↑") }
+                OutlinedButton(onClick = { a.update { it.copy(launcher = model.move(it.launcher, app.id, i + 1)) } }, enabled = i < s.pinned.size - 1) { Text("↓") }
+                OutlinedButton(onClick = { a.update { it.copy(launcher = model.unpin(it.launcher, app.id)) } }) { Text("Remover") }
+            }
+        }
+        val unpinned = BuiltinApps.all.filter { it.id !in s.pinned }
+        var choice by remember { mutableStateOf(unpinned.firstOrNull()) }
+        if (choice != null && s.pinned.size < LauncherModel.MAX_DOCK) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceRow("Adicionar", unpinned, choice!!, { it.title }) { choice = it }
+                Button(onClick = { a.update { it.copy(launcher = model.pin(it.launcher, choice!!.id)) } }) { Text("Fixar") }
+            }
+        }
+        OutlinedButton(onClick = { a.update { it.copy(launcher = model.resetLayout(it.launcher)) } }) { Text("Restaurar posições do modo New") }
+    }
+}
+
+@Composable
+fun GraphicsSection(a: MainActivity) {
+    val g = a.settingsState.graphics
+    SectionCard("Renderização") {
+        SliderRow("Escala de resolução por olho", g.renderScale, 0.5f..1.2f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(graphics = it.graphics.copy(renderScale = v)) } }
+        SliderRow("Campo de visão (FOV)", g.fovDegrees, 70f..110f, { "%.0f°".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(fovDegrees = v)) } }
+        ChoiceRow("Taxa alvo", listOf(60, 72, 90, 120), g.targetFps, { "$it fps" }) { v -> a.update { it.copy(graphics = it.graphics.copy(targetFps = v)) } }
+        Note("A taxa real é limitada pela tela (vsync) e pela GPU; veja Diagnóstico para medições.")
+    }
+    SectionCard("Lentes do visor (VR Box)") {
+        ToggleRow("Correção de distorção da lente", g.lensDistortion) { v -> a.update { it.copy(graphics = it.graphics.copy(lensDistortion = v)) } }
+        SliderRow("Coeficiente k1", g.distortionK1, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK1 = v)) } }
+        SliderRow("Coeficiente k2", g.distortionK2, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK2 = v)) } }
+        SliderRow("Distância interpupilar (IPD)", g.ipdMm, 54f..74f, { "%.1f mm".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(ipdMm = v)) } }
+        SliderRow("Separação entre lentes", g.lensSeparationMm, 50f..70f, { "%.1f mm".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(lensSeparationMm = v)) } }
+    }
+}
+
+@Composable
+fun PerformanceSection(a: MainActivity) {
+    val p = a.settingsState.performance
+    val caps = a.app.capabilities.last
+    SectionCard("Desempenho e temperatura") {
+        ToggleRow("Modo de desempenho sustentado", p.sustainedPerformanceMode, caps.sustainedPerformance.detail.ifEmpty { "Evita picos que causam throttling" }) { v -> a.update { it.copy(performance = it.performance.copy(sustainedPerformanceMode = v)) } }
+        ToggleRow("Resolução dinâmica", p.dynamicResolution) { v -> a.update { it.copy(performance = it.performance.copy(dynamicResolution = v)) } }
+        ToggleRow("Reagir ao aquecimento", p.thermalThrottleAware) { v -> a.update { it.copy(performance = it.performance.copy(thermalThrottleAware = v)) } }
+        ToggleRow("Modo de baixa latência", p.lowLatencyMode) { v -> a.update { it.copy(performance = it.performance.copy(lowLatencyMode = v)) } }
+        SliderRow("Inferências de mão por segundo", p.handInferenceHz.toFloat(), 10f..60f, { "%.0f Hz".format(it) }, steps = 9) { v -> a.update { it.copy(performance = it.performance.copy(handInferenceHz = v.toInt())) } }
+    }
+    DiagnosticsCard()
+}
+
+@Composable
+fun HeadSection(a: MainActivity) {
+    val h = a.settingsState.headTracking
+    val caps = a.app.capabilities.last
+    SectionCard("Rastreamento de cabeça") {
+        ChoiceRow("Fonte", HeadTrackingSource.entries, h.source, { when (it) {
+            HeadTrackingSource.AUTO -> "Automática"; HeadTrackingSource.ARCORE_6DOF -> "ARCore (6DoF)"
+            HeadTrackingSource.ROTATION_VECTOR_3DOF -> "Sensores (3DoF)"; HeadTrackingSource.OPENXR_RUNTIME -> "Runtime OpenXR" } }) { v ->
+            a.update { it.copy(headTracking = it.headTracking.copy(source = v)) }
+        }
+        SliderRow("Predição de movimento", h.predictionMs, 0f..40f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(headTracking = it.headTracking.copy(predictionMs = v)) } }
+        ToggleRow("Recentralizar ao iniciar", h.recenterOnStart) { v -> a.update { it.copy(headTracking = it.headTracking.copy(recenterOnStart = v)) } }
+        CapabilityRow("Vetor de rotação", caps.rotationVector)
+        CapabilityRow("Giroscópio", caps.gyroscope)
+        CapabilityRow("ARCore (6DoF)", caps.arCore)
+        Note("6DoF só é anunciado quando o ARCore rastreia de fato. Sem ARCore o rastreamento é 3DoF com modelo de pescoço.")
+    }
+}
+
+@Composable
+fun HandsSection(a: MainActivity) {
+    val h = a.settingsState.handTracking
+    val models = remember(a.refresh) { com.hyperxr.handtracking.HandModels(a) }
+    var bench by remember { mutableStateOf<List<String>>(emptyList()) }
+    var running by remember { mutableStateOf(false) }
+    SectionCard("Hand tracking", "Pipeline próprio: câmera → detector → landmarks → profundidade → filtro temporal → gestos.") {
+        ToggleRow("Ativado", h.enabled) { v -> a.update { it.copy(handTracking = it.handTracking.copy(enabled = v)) } }
+        ChoiceRow("Backend de inferência", InferenceBackend.entries, h.backend, { when (it) {
+            InferenceBackend.AUTO -> "Automático (GPU→CPU)"; InferenceBackend.CPU -> "CPU (XNNPACK)"; InferenceBackend.GPU -> "GPU"; InferenceBackend.NNAPI -> "NNAPI (NPU/DSP)" } }) { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(backend = v)) }
+        }
+        Note("Se o backend escolhido falhar, o HyperXR usa o próximo e informa qual está em uso.")
+        ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
+        ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
+        ToggleRow("Mostrar aura preta das mãos", h.showAura, "Oculta automaticamente quando Joy-Cons estão conectados") { v -> a.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) } }
+        SliderRow("Opacidade da aura", h.auraOpacity, 0.1f..0.9f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
+        SliderRow("Limiar de pinça", h.pinchThreshold * 1000, 10f..50f, { "%.0f mm".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(pinchThreshold = v / 1000)) } }
+        SliderRow("Filtro: corte mínimo", h.filterMinCutoff, 0.2f..4f, { "%.2f Hz".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterMinCutoff = v)) } }
+        SliderRow("Filtro: beta (resposta a velocidade)", h.filterBeta, 0f..0.2f, { "%.3f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterBeta = v)) } }
+        SliderRow("Predição", h.predictionMs, 0f..50f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(predictionMs = v)) } }
+    }
+    SectionCard("Modelos de inferência", "O HyperXR não embute modelos de mão. Importe arquivos .tflite cuja licença você aceite (formato em docs/HAND_TRACKING.md).") {
+        KeyValue("Detector", if (models.detector.isFile) "instalado (${models.detector.length() / 1024} KB)" else "não instalado")
+        KeyValue("Landmarks", if (models.landmarks.isFile) "instalado (${models.landmarks.length() / 1024} KB)" else "não instalado")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { a.pickDetector.launch(arrayOf("*/*")) }) { Text("Importar detector") }
+            OutlinedButton(onClick = { a.pickLandmarks.launch(arrayOf("*/*")) }) { Text("Importar landmarks") }
+        }
+        Button(enabled = !running, onClick = {
+            running = true
+            a.io.execute {
+                val svc = HandTrackingService(a)
+                val r = svc.benchmark()
+                svc.shutdown()
+                a.runOnUiThread { bench = r; running = false }
+            }
+        }) { Text(if (running) "Executando…" else "Benchmark CPU / GPU / NNAPI") }
+        bench.forEach { Mono(it) }
+    }
+}
+
+@Composable
+fun ControlsSection(a: MainActivity) {
+    val c = a.settingsState.controllers
+    val connected = remember(a.refresh) { JoyConManager.connectedJoyCons() }
+    SectionCard("Joy-Cons e controles", "Pareie os Joy-Cons nas configurações de Bluetooth do Android; o HyperXR os detecta automaticamente.") {
+        ToggleRow("Usar Joy-Cons", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
+        if (connected.isEmpty()) Note("Nenhum Joy-Con conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
+        CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
+        Note("Sem IMU exposta pelo driver, o apontamento usa a direção da cabeça a partir da posição da mão.")
+        val actions = ControllerAction.entries
+        fun name(x: ControllerAction) = when (x) {
+            ControllerAction.SELECT -> "Selecionar"; ControllerAction.BACK -> "Voltar"; ControllerAction.MENU -> "Menu"
+            ControllerAction.GRAB -> "Agarrar"; ControllerAction.RECENTER -> "Recentralizar"; ControllerAction.NONE -> "Nada"
+        }
+        ChoiceRow("Botão R", actions, c.buttonR, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonR = v)) } }
+        ChoiceRow("Botão L", actions, c.buttonL, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonL = v)) } }
+        ChoiceRow("Botão ZR", actions, c.buttonZR, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonZR = v)) } }
+        ChoiceRow("Botão ZL", actions, c.buttonZL, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonZL = v)) } }
+        ChoiceRow("Botão +", actions, c.buttonPlus, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonPlus = v)) } }
+        ChoiceRow("Botão HOME", actions, c.buttonHome, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonHome = v)) } }
+        ToggleRow("Toque na tela seleciona (VR Box)", c.screenTapSelects) { v -> a.update { it.copy(controllers = it.controllers.copy(screenTapSelects = v)) } }
+    }
+}
+
+@Composable
+fun AudioSection(a: MainActivity) {
+    val s = a.settingsState.audio
+    val caps = a.app.capabilities.last
+    SectionCard("Áudio") {
+        SliderRow("Volume principal", s.masterVolume, 0f..1f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(audio = it.audio.copy(masterVolume = v)) } }
+        ToggleRow("Áudio espacial (pan estéreo + distância)", s.spatialAudio) { v -> a.update { it.copy(audio = it.audio.copy(spatialAudio = v)) } }
+        ToggleRow("Saída de baixa latência", s.lowLatencyOutput) { v -> a.update { it.copy(audio = it.audio.copy(lowLatencyOutput = v)) } }
+        ToggleRow("Sons da interface", s.uiSounds) { v -> a.update { it.copy(audio = it.audio.copy(uiSounds = v)) } }
+        CapabilityRow("Baixa latência", caps.lowLatencyAudio)
+        CapabilityRow("Pro audio", caps.proAudio)
+        KeyValue("Saída nativa", "${caps.audioSampleRate} Hz, ${caps.audioFramesPerBuffer} frames/buffer")
+    }
+}
+
+@Composable
+fun AccessibilitySection(a: MainActivity) {
+    val s = a.settingsState.accessibility
+    SectionCard("Acessibilidade") {
+        SliderRow("Escala do texto", s.textScale, 0.8f..1.6f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(accessibility = it.accessibility.copy(textScale = v)) } }
+        ToggleRow("Alto contraste", s.highContrast) { v -> a.update { it.copy(accessibility = it.accessibility.copy(highContrast = v)) } }
+        ToggleRow("Reduzir movimento", s.reduceMotion, "Desliga a flutuação dos ícones e animações amplas") { v -> a.update { it.copy(accessibility = it.accessibility.copy(reduceMotion = v)) } }
+        ToggleRow("Modo sentado", s.seatedMode) { v -> a.update { it.copy(accessibility = it.accessibility.copy(seatedMode = v)) } }
+        ToggleRow("Uso com uma mão", s.oneHandedMode) { v -> a.update { it.copy(accessibility = it.accessibility.copy(oneHandedMode = v)) } }
+    }
+}
+
+@Composable
+fun NetworkSection(a: MainActivity) {
+    val s = a.settingsState.network
+    val unmetered = remember(a.refresh) { a.app.environments.isUnmeteredNetwork() }
+    SectionCard("Rede") {
+        KeyValue("Rede atual", if (unmetered) "sem limite de dados (Wi-Fi)" else "limitada ou sem conexão")
+        ToggleRow("Permitir downloads de ambientes", s.allowEnvironmentDownloads) { v -> a.update { it.copy(network = it.network.copy(allowEnvironmentDownloads = v)) } }
+        ToggleRow("Baixar apenas em Wi-Fi", s.downloadsOnWifiOnly) { v -> a.update { it.copy(network = it.network.copy(downloadsOnWifiOnly = v)) } }
+        ToggleRow("Apps web em modo desktop", s.webAppsDesktopMode, "Igual ao \"site para computador\" dos navegadores") { v -> a.update { it.copy(network = it.network.copy(webAppsDesktopMode = v)) } }
+        Note("Pacotes .hyperx só acessam a rede com a permissão 'network' e apenas hosts HTTPS declarados no manifesto.")
+    }
+}
