@@ -83,6 +83,8 @@ class XrContext(
     /** Run on the UI thread (start activities, web views...). */
     fun ui(block: () -> Unit) = activity.runOnUiThread(block)
     var requestRecenter: () -> Unit = {}
+    /** Set by content; the engine fills it with the left-eye image after the next composite. */
+    @Volatile var captureRequest: ((android.graphics.Bitmap) -> Unit)? = null
     var trackingDescription = ""
 }
 
@@ -278,9 +280,22 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
                 renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
             }
             compositor.composite(settings.graphics)
+            ctx.captureRequest?.let { cb -> ctx.captureRequest = null; cb(readLeftHalf()) }
         }
         Diagnostics.record(Stage.RENDER_CPU, System.nanoTime() - r0)
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
+    }
+
+    /** Reads the left half of the composited screen (what the left eye sees) into a bitmap. */
+    private fun readLeftHalf(): android.graphics.Bitmap {
+        val w = width / 2; val h = height
+        val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.copyPixelsFromBuffer(buf)
+        val flip = android.graphics.Matrix().apply { preScale(1f, -1f) }
+        return android.graphics.Bitmap.createBitmap(bmp, 0, 0, w, h, flip, false).also { bmp.recycle() }
     }
 
     private fun renderEye(eye: EyeView, target: RenderTarget, camera: CameraImageSource?) {

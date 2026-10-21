@@ -1,0 +1,296 @@
+package com.hyperxr.xr
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.hyperxr.HyperXRApp
+import com.hyperxr.diagnostics.Diagnostics
+import com.hyperxr.environments.CatalogItem
+import com.hyperxr.environments.EnvironmentEntry
+import com.hyperxr.environments.EnvironmentKind
+import com.hyperxr.launcher.AppCategory
+import com.hyperxr.launcher.AppEntry
+import com.hyperxr.permissions.GrantPolicy
+import com.hyperxr.permissions.HyperPermission
+import com.hyperxr.rendering.IconFactory
+import com.hyperxr.settings.LauncherMode
+import com.hyperxr.spatialui.PanelCanvas
+import com.hyperxr.spatialui.XrPanel
+import com.hyperxr.spatialui.XrTheme
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.Executors
+
+/** Actions the launcher exposes to its panels. */
+interface LauncherActions {
+    fun launch(app: AppEntry)
+    fun togglePin(app: AppEntry)
+    fun isPinned(app: AppEntry): Boolean
+    fun setMode(mode: LauncherMode)
+    fun mode(): LauncherMode
+    fun recenter()
+    fun exitToSettings()
+    fun selectEnvironment(entry: EnvironmentEntry)
+    fun currentEnvironmentId(): String
+    fun capture()
+    fun allApps(): List<AppEntry>
+    fun icons(): IconFactory
+    fun resetLayout()
+    val trackingDescription: String
+    val modeDescription: String
+}
+
+private val background = Executors.newSingleThreadExecutor()
+
+/** Status + clock + recents (Dock mode home). */
+class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = "") {
+    init { closable = false }
+    private var lastMinute = -1
+    private val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val dateFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
+
+    override fun update(dt: Float) {
+        val m = (System.currentTimeMillis() / 60000).toInt()
+        if (m != lastMinute) { lastMinute = m; dirty = true }
+    }
+
+    override fun draw(c: PanelCanvas) {
+        c.label(fmt.format(Date()), c.pad, 30f, 96f, XrTheme.text, bold = true)
+        c.label(dateFmt.format(Date()), c.pad + 4f, 150f, 30f, XrTheme.textDim)
+        var x = c.pad
+        x += c.chip(a.modeDescription, x, 200f, XrTheme.accent) + 10f
+        c.chip(a.trackingDescription, x, 200f, android.graphics.Color.rgb(60, 60, 96))
+        c.label("Recentes", 560f, 36f, 30f, XrTheme.textDim, bold = true)
+        val recents = a.allApps().let { all -> HyperXRApp.instance.settings.current.launcher.recents.mapNotNull { id -> all.firstOrNull { it.id == id } } }.take(4)
+        if (recents.isEmpty()) c.label("Nenhum app aberto ainda", 560f, 90f, 26f, XrTheme.textDim)
+        recents.forEachIndexed { i, app ->
+            c.button("recent:${app.id}", app.title, 560f + (i % 2) * 230f, 84f + (i / 2) * 100f, 218f, 86f, icon = a.icons().icon(app.iconKey, 96)) { a.launch(app) }
+        }
+    }
+}
+
+/** Dock controls strip: library, quick settings, mode switch, recenter. */
+class DockControls(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.1f, 0.13f, title = "") {
+    init { closable = false }
+    override fun draw(c: PanelCanvas) {
+        val bw = (c.w - c.pad * 2 - 3 * 16f) / 4
+        val y = 16f
+        c.button("lib", "Biblioteca", c.pad, y, bw, 86f) { open("library") }
+        c.button("qs", "Ajustes rápidos", c.pad + (bw + 16f), y, bw, 86f) { open("settings") }
+        c.button("mode", if (a.mode() == LauncherMode.DOCK) "Modo: Dock" else "Modo: New", c.pad + 2 * (bw + 16f), y, bw, 86f, accent = true) {
+            a.setMode(if (a.mode() == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)
+        }
+        c.button("rc", "Recentralizar", c.pad + 3 * (bw + 16f), y, bw, 86f) { a.recenter() }
+    }
+}
+
+class LibraryPanel(private val a: LauncherActions) : XrPanel(1.3f, 0.95f, title = "Biblioteca") {
+    private var category: AppCategory? = null
+    private var page = 0
+    override fun draw(c: PanelCanvas) {
+        val cats = listOf(null to "Todos", AppCategory.HYPERXR_GAME to "Jogos", AppCategory.WEB to "Web",
+            AppCategory.CARDBOARD to "Cardboard", AppCategory.OPENXR to "OpenXR", AppCategory.SYSTEM to "Sistema")
+        val bw = (c.w - 2 * c.pad - 5 * 10f) / 6
+        cats.forEachIndexed { i, (cat, label) ->
+            c.button("cat$i", label, c.pad + i * (bw + 10f), c.y, bw, 70f, accent = category == cat) { category = cat; page = 0; dirty = true }
+        }
+        c.y += 90f
+        val apps = a.allApps().filter { category == null || it.category == category }
+        val perPage = 8
+        val pages = maxOf(1, (apps.size + perPage - 1) / perPage)
+        page = page.coerceIn(0, pages - 1)
+        val colW = (c.w - 2 * c.pad - 20f) / 2
+        apps.drop(page * perPage).take(perPage).forEachIndexed { i, app ->
+            val x = c.pad + (i % 2) * (colW + 20f)
+            val y = c.y + (i / 2) * 120f
+            c.button("open:${app.id}", app.title, x, y, colW - 110f, 104f, icon = a.icons().icon(app.iconKey, 128)) { a.launch(app) }
+            c.button("pin:${app.id}", if (a.isPinned(app)) "Soltar" else "Fixar", x + colW - 100f, y, 100f, 104f, accent = a.isPinned(app)) { a.togglePin(app); dirty = true }
+        }
+        val by = c.h - 110f
+        c.button("prev", "‹ Anterior", c.pad, by, 220f, 80f, enabled = page > 0) { page--; dirty = true }
+        c.label("Página ${page + 1} de $pages  •  ${apps.size} apps", c.w / 2 - 150f, by + 22f, 28f, XrTheme.textDim)
+        c.button("next", "Próxima ›", c.w - c.pad - 220f, by, 220f, 80f, enabled = page < pages - 1) { page++; dirty = true }
+    }
+}
+
+class QuickSettingsPanel(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.0f, 1.0f, title = "Ajustes rápidos") {
+    override fun draw(c: PanelCanvas) {
+        val s = HyperXRApp.instance.settings
+        c.paragraph("${a.modeDescription} • ${a.trackingDescription}", 26f)
+        c.toggle("mode", "Launcher no modo New", a.mode() == LauncherMode.NEW) { a.setMode(if (it) LauncherMode.NEW else LauncherMode.DOCK); dirty = true }
+        c.toggle("aura", "Aura das mãos", s.current.handTracking.showAura) { v -> s.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) }; dirty = true }
+        c.toggle("dt", "Direct Touch", s.current.handTracking.directTouch) { v -> s.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) }; dirty = true }
+        c.row("env", "Ambientes…") { open("environments") }
+        c.row("reset", "Reorganizar ícones (modo New)") { a.resetLayout() }
+        c.row("rc", "Recentralizar visão") { a.recenter() }
+        c.row("exit", "Sair para as configurações 2D", accent = true) { a.exitToSettings() }
+    }
+}
+
+class EnvironmentsPanel(private val a: LauncherActions) : XrPanel(1.25f, 1.0f, title = "HyperXR Environments") {
+    private val repo = HyperXRApp.instance.environments
+    @Volatile private var catalog: List<CatalogItem>? = null
+    @Volatile private var status = ""
+    private var showCatalog = false
+    override fun draw(c: PanelCanvas) {
+        c.button("tabInst", "Instalados", c.pad, c.y, 260f, 70f, accent = !showCatalog) { showCatalog = false; dirty = true }
+        c.button("tabCat", "Catálogo (Poly Haven, CC0)", c.pad + 280f, c.y, 460f, 70f, accent = showCatalog) {
+            showCatalog = true; dirty = true
+            if (catalog == null) loadCatalog()
+        }
+        c.y += 90f
+        if (status.isNotEmpty()) c.paragraph(status, 26f, XrTheme.accent2)
+        if (!showCatalog) {
+            for (e in repo.installed()) {
+                val kind = when (e.kind) { EnvironmentKind.SCENE_3D -> "Cena 3D"; EnvironmentKind.PANORAMA_360 -> "Panorama 360° (sem geometria)"; else -> "Procedural" }
+                c.row("env:${e.id}", e.name, accent = e.id == a.currentEnvironmentId(), detail = "$kind • ${e.license} • ${e.author}") { a.selectEnvironment(e); dirty = true }
+            }
+        } else {
+            val list = catalog
+            if (list == null) { c.paragraph("Carregando catálogo…"); return }
+            for (item in list.take(6)) {
+                val kind = if (item.kind == EnvironmentKind.SCENE_3D) "Cena 3D" else "Panorama 360°"
+                c.row("dl:${item.id}", "Baixar: ${item.name}", detail = "$kind • CC0 • ${item.author}") { download(item) }
+            }
+            c.paragraph("Catálogo completo, prévias e tamanhos: app 2D > Ambientes.", 24f)
+        }
+    }
+
+    private fun loadCatalog() {
+        status = "Buscando catálogo…"
+        background.execute {
+            status = try { catalog = repo.fetchCatalog(); "" } catch (t: Throwable) { "Sem conexão com a Poly Haven: ${t.message}" }
+            dirty = true
+        }
+    }
+
+    private fun download(item: CatalogItem) {
+        status = "Preparando ${item.name}…"; dirty = true
+        background.execute {
+            val entry = try { repo.resolve(item) } catch (t: Throwable) { null }
+            if (entry == null) { status = "Falha ao obter arquivos de ${item.name}"; dirty = true; return@execute }
+            val wifiOnly = HyperXRApp.instance.settings.current.network.downloadsOnWifiOnly
+            repo.download(entry, wifiOnly) { done, total -> status = "Baixando ${item.name}: ${done * 100 / maxOf(1, total)}%"; dirty = true }
+                .onSuccess { status = "${it.name} instalado (${it.license}, ${it.author})" }
+                .onFailure { status = "Falhou: ${it.message}" }
+            dirty = true
+        }
+    }
+}
+
+class FilesPanel : XrPanel(1.2f, 0.95f, title = "Arquivos") {
+    override fun draw(c: PanelCanvas) {
+        val app = HyperXRApp.instance
+        c.heading("Pacotes .hyperx")
+        for (p in app.packages.list()) {
+            val perms = p.grants.granted.joinToString { it.key }.ifEmpty { "nenhuma" }
+            c.row("pkg:${p.manifest.id}", "${p.manifest.name} ${p.manifest.version}", detail = "${p.manifest.id} • permissões: $perms${if (p.bundled) " • embutido" else ""}") {}
+        }
+        c.heading("Armazenamento")
+        fun size(f: File): Long = f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        val files = app.filesDir
+        c.paragraph("Ambientes: ${size(File(files, "environments")) / 1_048_576} MB • Capturas: ${File(files, "captures").listFiles()?.size ?: 0} • " +
+            "Modelos de mão: ${if (File(files, "models/hand_landmark.tflite").isFile) "instalados" else "não instalados"}")
+        c.paragraph("Instale, remova pacotes e gerencie permissões no app 2D.", 24f)
+    }
+}
+
+class GalleryPanel : XrPanel(1.3f, 0.95f, title = "Galeria") {
+    private val thumbs = LinkedHashMap<String, Bitmap>()
+    override fun draw(c: PanelCanvas) {
+        val dir = File(HyperXRApp.instance.filesDir, "captures")
+        val files = dir.listFiles()?.sortedByDescending { it.lastModified() }?.take(12).orEmpty()
+        if (files.isEmpty()) { c.paragraph("Nenhuma captura ainda. Use o app Captura para salvar o que você está vendo."); return }
+        val tw = (c.w - 2 * c.pad - 3 * 16f) / 4
+        val th = tw * 9 / 16
+        files.forEachIndexed { i, f ->
+            val b = thumbs.getOrPut(f.name) { BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = 4 }) ?: return@forEachIndexed }
+            c.image(b, c.pad + (i % 4) * (tw + 16f), c.y + (i / 4) * (th + 16f), tw, th)
+        }
+    }
+}
+
+class MessagesPanel : XrPanel(1.3f, 0.95f, title = "Mensagens do sistema") {
+    private var count = -1
+    override fun update(dt: Float) {
+        val n = Diagnostics.recentEvents().size
+        if (n != count) { count = n; dirty = true }
+    }
+    override fun draw(c: PanelCanvas) {
+        val crashDir = File(HyperXRApp.instance.filesDir, "crash")
+        crashDir.listFiles()?.forEach { f -> c.paragraph("⚠ ${f.nameWithoutExtension}: ${f.readText().take(200)}", 26f, XrTheme.danger) }
+        val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        for (e in Diagnostics.recentEvents().takeLast(14).reversed()) {
+            val ts = e.substringBefore(' ').toLongOrNull()
+            c.paragraph("${ts?.let { fmt.format(Date(it)) } ?: ""}  ${e.substringAfter(' ')}", 24f)
+            if (c.y > c.h - 60f) break
+        }
+    }
+}
+
+class HelpPanel : XrPanel(1.3f, 1.0f, title = "Central de ajuda") {
+    override fun draw(c: PanelCanvas) {
+        c.heading("Interação")
+        c.paragraph("Olhar + toque na tela (ou botão do VR Box): seleciona o que está no centro da visão.")
+        c.paragraph("Mãos: toque diretamente nos botões com o indicador (Direct Touch). Pinça para selecionar à distância nos jogos.")
+        c.paragraph("Joy-Con: aponte e pressione R para selecionar, L para voltar. Segure em um ícone (modo New) para movê-lo. HOME recentraliza.")
+        c.heading("Modos")
+        c.paragraph("Realidade mista usa a câmera quando o aparelho permite; em VR SBS um ambiente 3D substitui a câmera. A imagem da câmera é mono (não estéreo).")
+        c.heading("Privacidade")
+        c.paragraph("Imagens da câmera são processadas no aparelho e nunca são enviadas para a rede pelo HyperXR.")
+    }
+}
+
+class TvPanel(private val a: LauncherActions) : XrPanel(1.0f, 0.7f, title = "TV") {
+    override fun draw(c: PanelCanvas) {
+        c.paragraph("Vídeo na web dentro do HyperXR:")
+        for (id in listOf("web:youtube", "web:twitch", "web:tiktok")) {
+            val app = a.allApps().firstOrNull { it.id == id } ?: continue
+            c.row("tv:$id", app.title, icon = a.icons().icon(app.iconKey, 96), detail = app.target) { a.launch(app) }
+        }
+    }
+}
+
+class XrAppsPanel(private val a: LauncherActions) : XrPanel(1.3f, 1.0f, title = "Apps XR (Cardboard e OpenXR)") {
+    private val apps by lazy { HyperXRApp.instance.xrApps.discover() }
+    override fun draw(c: PanelCanvas) {
+        if (apps.isEmpty()) {
+            c.paragraph("Nenhum app Cardboard/OpenXR instalado foi encontrado. Apps são detectados pelas categorias de intent que declaram (CARDBOARD, DAYDREAM, IMMERSIVE_HMD).")
+            return
+        }
+        for (x in apps.take(7)) {
+            val icon = x.icon?.let { d -> Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { b -> d.setBounds(0, 0, 96, 96); d.draw(android.graphics.Canvas(b)) } }
+            c.row("xr:${x.packageName}", x.entry.title, icon = icon, detail = "${x.entry.runtime} • ${x.entry.compatibility} • ${x.entry.limitations}") { a.launch(x.entry) }
+        }
+    }
+}
+
+class InfoPanel(title: String, private val text: String) : XrPanel(1.0f, 0.5f, title = title) {
+    override fun draw(c: PanelCanvas) { c.paragraph(text) }
+}
+
+/** Asks for prompted permissions before a package starts. `unsafe` is only grantable in the 2D app. */
+class PermissionPromptPanel(private val app: AppEntry, private val packageId: String, private val onDone: (Boolean) -> Unit) :
+    XrPanel(1.1f, 0.85f, title = "Permissões de ${app.title}") {
+    override fun draw(c: PanelCanvas) {
+        val repo = HyperXRApp.instance.packages
+        val pkg = repo.load(packageId) ?: run { c.paragraph("Pacote não instalado"); return }
+        val pending = pkg.pendingPrompts
+        if (pending.isEmpty()) { onDone(true); visible = false; return }
+        c.paragraph("Este pacote pede acesso a:", 30f, XrTheme.text)
+        for (p in pending) {
+            if (p.policy == GrantPolicy.EXPLICIT_DANGEROUS) {
+                c.paragraph("• unsafe — só pode ser concedida no app 2D, com confirmação explícita. Sem ela o pacote roda no sandbox.", 26f, XrTheme.danger)
+                continue
+            }
+            c.paragraph("• ${p.key}: ${p.description}", 26f)
+            val y = c.y
+            c.button("allow:${p.key}", "Permitir", c.pad, y, 240f, 76f, accent = true) { repo.decide(packageId, p, true); dirty = true }
+            c.button("deny:${p.key}", "Negar", c.pad + 260f, y, 200f, 76f) { repo.decide(packageId, p, false); dirty = true }
+            c.y += 92f
+        }
+        if (pending.all { it == HyperPermission.UNSAFE }) c.row("go", "Abrir sem 'unsafe'", accent = true) { onDone(true); visible = false }
+        c.row("cancel", "Cancelar") { onDone(false); visible = false }
+    }
+}
