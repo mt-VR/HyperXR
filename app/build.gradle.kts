@@ -89,3 +89,12 @@ dependencies {
     implementation(libs.browser)
     testImplementation(libs.junit)
 }
+
+// Host JNI bridge tests: ./gradlew :app:testDebugUnitTest -Phyperxr.hostBridge=<dir with libhyperxr.so>
+tasks.withType<Test>().configureEach {
+    val dir = providers.gradleProperty("hyperxr.hostBridge").orNull
+    if (dir != null) {
+        systemProperty("hyperxr.hostBridge", dir)
+        systemProperty("java.library.path", dir)
+    }
+}

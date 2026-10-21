@@ -9,6 +9,8 @@ import java.nio.FloatBuffer
  * (tag + double per slot) and [LuaVm.strArgs]; results are written back the same way.
  */
 interface LuaHost {
+    /** Called before the VM boots: the bootstrap already performs host calls while being created. */
+    fun onAttach(vm: LuaVm) {}
     fun hostCall(name: String, argc: Int): Int
     fun onLog(level: Int, message: String)
 }
@@ -106,6 +108,7 @@ class LuaVm private constructor(val host: LuaHost) {
 
         fun create(host: LuaHost, sdkSources: Map<String, String>, c: Config): LuaVm {
             val vm = LuaVm(host)
+            host.onAttach(vm)
             val names = sdkSources.keys.toTypedArray()
             val sources = names.map { sdkSources.getValue(it) }.toTypedArray()
             vm.handle = nativeCreate(

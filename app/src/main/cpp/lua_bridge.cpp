@@ -7,6 +7,7 @@
 // calls do not allocate.
 #include <jni.h>
 #include <android/log.h>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <string>
