@@ -1,0 +1,13 @@
+{
+  "id": "com.hyperxr.clock",
+  "name": "Relógio",
+  "version": "1.0.0",
+  "sdk": 1,
+  "mode": "window",
+  "entry": "main.lua",
+  "permissions": ["ui", "input"],
+  "author": "HyperXR",
+  "license": "MIT",
+  "description": "Clock, date and stopwatch",
+  "window": { "width": 0.7, "height": 0.5, "resizable": true }
+}

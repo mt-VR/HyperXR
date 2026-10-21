@@ -1,0 +1,12 @@
+{
+  "id": "com.hyperxr.stillshot",
+  "name": "STILLSHOT",
+  "version": "1.0.0",
+  "sdk": 1,
+  "mode": "scene",
+  "entry": "main.lua",
+  "permissions": ["ui", "audio", "input", "spatial", "physics", "hand_tracking"],
+  "author": "HyperXR",
+  "license": "MIT",
+  "description": "Time only moves when you move. Original HyperXR game with procedural art and sound."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "com.hyperxr.calendar",
+  "name": "Calendário",
+  "version": "1.0.0",
+  "sdk": 1,
+  "mode": "window",
+  "entry": "main.lua",
+  "permissions": ["ui", "input", "filesystem"],
+  "author": "HyperXR",
+  "license": "MIT",
+  "description": "Month calendar with day markers saved locally",
+  "window": { "width": 0.85, "height": 0.7, "resizable": true }
+}

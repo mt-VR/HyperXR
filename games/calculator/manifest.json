@@ -1,0 +1,13 @@
+{
+  "id": "com.hyperxr.calculator",
+  "name": "Calculadora",
+  "version": "1.0.0",
+  "sdk": 1,
+  "mode": "window",
+  "entry": "main.lua",
+  "permissions": ["ui", "input"],
+  "author": "HyperXR",
+  "license": "MIT",
+  "description": "Calculator with operator precedence",
+  "window": { "width": 0.6, "height": 0.75, "resizable": true }
+}

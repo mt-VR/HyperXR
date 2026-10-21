@@ -1,0 +1,12 @@
+{
+  "id": "com.hyperxr.forgelab",
+  "name": "FORGE LAB",
+  "version": "1.0.0",
+  "sdk": 1,
+  "mode": "scene",
+  "entry": "main.lua",
+  "permissions": ["ui", "audio", "input", "spatial", "physics", "hand_tracking"],
+  "author": "HyperXR",
+  "license": "MIT",
+  "description": "Physics sandbox lab: grab, throw, smash and solve mechanical challenges. Original HyperXR game."
+}
