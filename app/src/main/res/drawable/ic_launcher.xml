@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon composed from the author-provided headset artwork (see docs/ICONS.md). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_app_remote_desktop_bg" />
+    <item android:drawable="@drawable/ic_app_remote_desktop_fg" />
+</layer-list>
