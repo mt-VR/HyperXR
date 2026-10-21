@@ -159,8 +159,9 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         ctx = XrContext(activity, settings, decision, renderer, images, icons, audio, scene, input)
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
 
+        val forced3Dof = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.ROTATION_VECTOR_3DOF
         when (decision.mode) {
-            XrMode.MIXED_REALITY_ARCORE -> {
+            XrMode.MIXED_REALITY_ARCORE -> if (forced3Dof) startCameraPassthrough() else {
                 val ar = ArCoreSession(activity)
                 val depth = ar.create(settings.handTracking.useArCoreDepth)
                 app.capabilities.updateDepthSupport(depth)
