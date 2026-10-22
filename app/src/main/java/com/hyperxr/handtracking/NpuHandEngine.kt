@@ -27,6 +27,8 @@ class RawHand(
     val image: FloatArray,
     /** Metric landmarks (metres, hand-centred) per joint, or null. */
     val world: FloatArray?,
+    /** Model probability of a right hand in the (non-mirrored) image, NaN when not exposed. */
+    val rightScore: Float = Float.NaN,
 )
 
 /**
@@ -36,7 +38,7 @@ class RawHand(
  *  - the dedicated accelerator is picked by name from what NNAPI reports (Samsung Eden, MediaTek
  *    APU/MDLA, Qualcomm HTA/HTP/DSP, Google EdgeTPU...), with fp16, sustained-speed scheduling and
  *    the compiled model cached on disk, so the second start skips compilation;
- *  - palm detection runs only when a hand is missing (every frame with none, every 6th frame while
+ *  - palm detection runs only when a hand is missing (every frame with none, every 3rd frame while
  *    one is tracked): a tracked hand costs one landmark inference per frame, cropped from where
  *    the previous frame put it;
  *  - each crop is a rotated square aligned to the hand, so the model always sees an upright hand;
@@ -190,7 +192,8 @@ class NpuHandEngine(private val context: Context) {
         val lm = landmarks ?: return emptyList()
         frame++
         val rois = ArrayList(tracked)
-        if (rois.size < 2 && (rois.isEmpty() || frame % 6 == 0L)) {
+        // the second hand is looked for every 3rd frame (~100 ms at 30 fps) so it shows up fast
+        if (rois.size < 2 && (rois.isEmpty() || frame % 3 == 0L)) {
             val t0 = System.nanoTime()
             fillPalmInput(bmp)
             det.runForMultipleInputsOutputs(arrayOf(palmIn), mapOf(0 to regressors, 1 to logits))
@@ -232,7 +235,7 @@ class NpuHandEngine(private val context: Context) {
             val dup = out.indexOfFirst { o -> dist(o.image[0] * bmp.width, o.image[1] * bmp.height, pts[0], pts[1]) < roi.size * 0.15f }
             if (dup >= 0) { if (out[dup].presence >= presence) continue else { out.removeAt(dup); tracked.removeAt(dup) } }
             val handed = outHanded[0][0]
-            out += RawHand(if (handed > 0.5f) "Right" else "Left", if (handed > 0.5f) handed else 1 - handed, presence, image, world)
+            out += RawHand(if (handed > 0.5f) "Right" else "Left", if (handed > 0.5f) handed else 1 - handed, presence, image, world, handed)
             tracked += HandRoi.fromLandmarks(pts)
         }
         return out

@@ -1,5 +1,7 @@
 package com.hyperxr.mixedreality
 
+import android.os.SystemClock
+
 import android.app.Activity
 import android.media.Image
 import android.opengl.Matrix
@@ -27,7 +29,8 @@ import java.nio.ByteOrder
  * session is opened in this mode.
  */
 class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSource {
-    override val description: String get() = "6DoF (ARCore${if (depthEnabled) " + Depth" else ""})"
+    override val description: String get() = "6DoF (ARCore${if (fps60) " 60 fps" else ""}${if (depthEnabled) " + Depth" else ""}${if (gyro != null) " + gyro" else ""})"
+    @Volatile var fps60 = false; private set
     override val sixDof = true
 
     var session: Session? = null; private set
@@ -81,12 +84,28 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             val depthSupported = s.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
             if (useDepth && depthSupported) config.depthMode = Config.DepthMode.AUTOMATIC
             depthEnabled = useDepth && depthSupported
-            if (lightweight) runCatching {
-                // smallest CPU image at 30 fps: enough for 6DoF and the hand model, least work
-                val filter = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30))
-                s.getSupportedCameraConfigs(filter).minByOrNull { it.imageSize.width * it.imageSize.height }?.let { s.cameraConfig = it }
+            // 60 fps camera where ARCore offers it: twice the pose and hand updates, half the age
+            var chosen60 = false
+            runCatching {
+                val f60 = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_60))
+                val c60 = s.getSupportedCameraConfigs(f60)
+                val pool = if (c60.isNotEmpty()) c60 else if (lightweight)
+                    s.getSupportedCameraConfigs(com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30))) else emptyList()
+                // streaming: smallest CPU image; otherwise the sharpest passthrough texture
+                val pick = if (lightweight) pool.minByOrNull { it.imageSize.width * it.imageSize.height }
+                else pool.maxByOrNull { it.textureSize.width * it.textureSize.height }
+                pick?.let { s.cameraConfig = it; chosen60 = it.fpsRange.upper >= 60 }
             }
-            s.configure(config)
+            try { s.configure(config) } catch (t: Throwable) {
+                if (!chosen60) throw t
+                // 60 fps and this configuration (e.g. depth) do not mix on this phone: back to 30
+                Diagnostics.log("ARCore 60 fps refused (${t.message}); using 30 fps")
+                s.getSupportedCameraConfigs(com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30)))
+                    .firstOrNull()?.let { s.cameraConfig = it }
+                chosen60 = false
+                s.configure(config)
+            }
+            fps60 = chosen60
             textureId = Gl.externalTexture()
             s.setCameraTextureName(textureId)
             session = s
@@ -143,6 +162,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             val p = frame.camera.displayOrientedPose
             headPose.position.set(p.tx(), p.ty(), p.tz())
             headPose.orientation.set(p.qx(), p.qy(), p.qz(), p.qw())
+            onArPose(frame.timestamp)
             if (recenterPending) {
                 // origin so that the current head yaw faces -Z and the floor estimate is 1.6 m below the eyes
                 val yaw = com.hyperxr.input.ControllerPoseFusion.yawOnly(headPose.orientation, Quat())
@@ -156,12 +176,96 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     }
 
     override fun pose(predictionNs: Long, out: Pose) {
-        // pose relative to the recentred origin
+        // pose relative to the recentred origin, as of the camera frame
         val inv = origin.inverse()
         inv.compose(headPose, out)
+        val g = gyro ?: return
+        if (frameTs == 0L) return
+        // ARCore's pose is as old as the camera frame (30-60 Hz, tens of ms): the gyroscope
+        // supplies the rotation since then and up to the moment the frame reaches the eyes
+        val now = SystemClock.elapsedRealtimeNanos()
+        var tc = frameTs
+        if (kotlin.math.abs(now - tc) > 500_000_000L) tc = now - 35_000_000L  // camera clock not REALTIME
+        val target = now + predictionNs
+        if (g.delta(tc, target, dDev)) {
+            toHead(dDev, fix, dHead)
+            out.orientation.mul(dHead, out.orientation).normalize()
+        }
+        // translation: the head's recent velocity carried forward the same span (capped)
+        val dt = ((target - tc) / 1e9f).coerceIn(0f, 0.06f)
+        out.position.addScaled(velocity, dt)
     }
 
-    override fun recenter() { recenterPending = true }
+    override fun recenter() { recenterPending = true; velocity.set(0f, 0f, 0f); prevTs = 0L }
+
+    // ---------------------------------------------------------------- gyro fusion
+    /** Full-rate gyroscope history (set by the engine); null = ARCore pose only. */
+    var gyro: com.hyperxr.headtracking.GyroHistory? = null
+    private var frameTs = 0L
+    private var prevTs = 0L
+    private val prevRel = Vec3()
+    private val velocity = Vec3()
+    private val dDev = Quat(); private val dHead = Quat()
+    private val prevOri = Quat()
+
+    /**
+     * Head frame (display-oriented) from the phone's sensor frame: a rotation about the screen
+     * normal that depends on how the phone lies in the viewer. Rather than trust one guess, the
+     * four candidates are scored against ARCore's own rotation between frames during the first
+     * seconds and the best one is kept.
+     */
+    private val candidates = Array(4) { k -> Quat.fromAxisAngle(0f, 0f, 1f, (k * Math.PI / 2).toFloat()) }
+    private val candidateError = FloatArray(4)
+    private var calibrationSamples = 0
+    private var fix = Quat.fromAxisAngle(0f, 0f, 1f, (-Math.PI / 2).toFloat())
+    private val tmpA = Quat(); private val tmpB = Quat()
+
+    var displayRotation: Int = android.view.Surface.ROTATION_90
+        set(v) {
+            field = v
+            fix = Quat.fromAxisAngle(0f, 0f, 1f, (if (v == android.view.Surface.ROTATION_270) Math.PI / 2 else -Math.PI / 2).toFloat())
+        }
+
+    /** dHead = fix⁻¹ · dDev · fix (head = device · fix). */
+    private fun toHead(d: Quat, f: Quat, out: Quat) {
+        f.conjugate(tmpA).mul(d, tmpB)
+        tmpB.mul(f, out)
+    }
+
+    private fun onArPose(ts: Long) {
+        val rel = origin.inverse().compose(headPose)
+        val g = gyro
+        if (prevTs != 0L && ts > prevTs) {
+            val dt = (ts - prevTs) / 1e9f
+            if (dt in 0.005f..0.2f) {
+                val vx = (rel.position.x - prevRel.x) / dt; val vy = (rel.position.y - prevRel.y) / dt; val vz = (rel.position.z - prevRel.z) / dt
+                // smoothed and capped: tracking jitter must not turn into prediction jitter
+                velocity.set(velocity.x * 0.6f + vx * 0.4f, velocity.y * 0.6f + vy * 0.4f, velocity.z * 0.6f + vz * 0.4f)
+                val sp = velocity.length()
+                if (sp > 3f) velocity.scale(3f / sp)
+            }
+            // score the sensor-to-head candidates while the head turns
+            if (g != null && calibrationSamples < 90 && g.delta(prevTs, ts, dDev)) {
+                prevOri.conjugate(tmpA).mul(headPose.orientation, dHead)  // ARCore's own rotation
+                if (dHead.angleTo(Quat()) > 0.03f) {
+                    for (k in 0..3) {
+                        val c = Quat(); toHead(dDev, candidates[k], c)
+                        candidateError[k] += c.angleTo(dHead)
+                    }
+                    calibrationSamples++
+                    if (calibrationSamples == 90) {
+                        val best = candidateError.indices.minByOrNull { candidateError[it] }!!
+                        fix = candidates[best]
+                        Diagnostics.log("Gyro fusion: sensor-to-head rotation ${best * 90} deg (errors ${candidateError.joinToString { "%.2f".format(it) }})")
+                    }
+                }
+            }
+        }
+        prevOri.set(headPose.orientation)
+        prevRel.set(rel.position)
+        prevTs = ts
+        frameTs = ts
+    }
 
     /** Camera intrinsics of the CPU image (for hand tracking). */
     fun cpuIntrinsics(): CameraIntrinsics? {

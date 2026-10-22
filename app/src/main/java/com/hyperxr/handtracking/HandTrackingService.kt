@@ -38,6 +38,8 @@ class HandTrackingService(private val context: Context) {
     @Volatile private var npu: NpuHandEngine? = null
     /** Rejects what is not the user's hand (feet, curtains, other people), for both engines. */
     val verifier = HandVerifier()
+    /** Decides left/right itself (3D chirality + continuity), whatever the engine says. */
+    private val handedness = HandednessResolver()
     @Volatile var status: String = "parado"; private set
     @Volatile var backendInUse: String = "-"; private set
 
@@ -130,7 +132,7 @@ class HandTrackingService(private val context: Context) {
         handler.post {
             landmarker?.close(); landmarker = null
             npu?.close(); npu = null
-            verifier.reset()
+            verifier.reset(); handedness.reset()
             if (backend == InferenceBackend.NNAPI) {
                 val e = NpuHandEngine(context)
                 val ok = runCatching { e.start() }.getOrDefault(false)
@@ -313,12 +315,12 @@ class HandTrackingService(private val context: Context) {
         var n = 0
         val debug = debugListener
         val debugLms = if (debug != null) ArrayList<FloatArray>(2) else null
-        for (h in hands) {
+        // size and proportions first: a foot or a fold of cloth never reaches the trackers
+        val real = hands.filter { h -> h.world == null || verifier.shape(h.world) == null }.take(2)
+        val sides = handedness.resolve(real.map { h -> HandednessResolver.Input(h.world, h.image[0], h.image[1], h.rightScore) })
+        for ((idx, h) in real.withIndex()) {
             if (n == 2) break
-            // the models' labels assume a mirrored (selfie) image; the back camera is not mirrored
-            val label = if (h.modelLabel == "Left") Handedness.RIGHT else Handedness.LEFT
-            // size and proportions first: a foot or a fold of cloth never reaches the trackers
-            if (h.world != null && verifier.shape(h.world) != null) continue
+            val label = sides[idx]
             val obs = observations.getValue(label)[n]
             obs.score = h.labelScore
             h.image.copyInto(obs.image)
@@ -352,7 +354,14 @@ class HandTrackingService(private val context: Context) {
         }
         verifier.endFrame()
         for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
-        synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
+        synchronized(lock) {
+            for ((side, tracker) in trackers) {
+                val dst = published.getValue(side)
+                copy(tracker.state, dst)
+                dst.timestampNs = System.nanoTime()  // when this state became current (extrapolation base)
+                updateVelocity(side, dst)
+            }
+        }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
         if (debug != null) slot.bitmap?.let { runCatching { debug(it, debugLms!!) } }
@@ -379,11 +388,44 @@ class HandTrackingService(private val context: Context) {
         }
     }
 
-    /** Thread-safe copy of the latest hand states. */
+    /** Per side: joint velocities (m/s) between the last two results, for display-rate extrapolation. */
+    private val velocity = mapOf(Handedness.LEFT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() }, Handedness.RIGHT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() })
+    private val prevJoints = mapOf(Handedness.LEFT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() }, Handedness.RIGHT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() })
+    private val prevTime = HashMap<Handedness, Long>()
+
+    /** Called with [lock] held after a new result: updates the velocities used by snapshot(). */
+    private fun updateVelocity(side: Handedness, s: HandState) {
+        val v = velocity.getValue(side); val p = prevJoints.getValue(side)
+        val t0 = prevTime[side] ?: 0L
+        val dt = (s.timestampNs - t0) / 1e9f
+        val ok = s.state == TrackingState.TRACKING && t0 != 0L && dt in 0.005f..0.2f
+        for (j in 0 until HandJoint.COUNT) {
+            if (ok) {
+                // smoothed so one noisy result does not fling the hand
+                val nx = (s.joints[j].x - p[j].x) / dt; val ny = (s.joints[j].y - p[j].y) / dt; val nz = (s.joints[j].z - p[j].z) / dt
+                v[j].set(v[j].x * 0.4f + nx * 0.6f, v[j].y * 0.4f + ny * 0.6f, v[j].z * 0.4f + nz * 0.6f)
+            } else v[j].set(0f, 0f, 0f)
+            p[j].set(s.joints[j])
+        }
+        prevTime[side] = s.timestampNs
+    }
+
+    /**
+     * Thread-safe copy of the latest hand states, moved forward to now: the camera gives a result
+     * every 33 ms but the display draws every 8-16 ms, so between results the joints keep moving
+     * at their measured velocity (up to 50 ms ahead) instead of standing still.
+     */
     fun snapshot(left: HandState, right: HandState) {
+        val now = System.nanoTime()
         synchronized(lock) {
-            copy(published.getValue(Handedness.LEFT), left)
-            copy(published.getValue(Handedness.RIGHT), right)
+            for ((side, out) in listOf(Handedness.LEFT to left, Handedness.RIGHT to right)) {
+                val src = published.getValue(side)
+                copy(src, out)
+                if (src.state != TrackingState.TRACKING || src.timestampNs == 0L) continue
+                val dt = ((now - src.timestampNs) / 1e9f).coerceIn(0f, 0.05f)
+                val v = velocity.getValue(side)
+                for (j in 0 until HandJoint.COUNT) out.joints[j].addScaled(v[j], dt)
+            }
         }
     }
 

@@ -3,14 +3,16 @@ package com.hyperxr.rendering
 import com.hyperxr.handtracking.Gesture
 import com.hyperxr.handtracking.HandJoint
 import com.hyperxr.handtracking.HandState
+import com.hyperxr.handtracking.Handedness
 import com.hyperxr.handtracking.TrackingState
 import com.hyperxr.math.Mat4
 import com.hyperxr.math.Quat
 import com.hyperxr.math.Vec3
 
 /**
- * Tracked hands drawn as a skeleton: a sphere per joint and a capsule-like bone per segment, lit
- * and shadow-casting, so contact with virtual objects reads correctly. Allocation-free per frame.
+ * Tracked hands drawn as a very thin skeleton: hairline bones (2 mm) and tiny joint balls (5 mm),
+ * green for the right hand and blue for the left (the side HyperXR itself decided). No shadows:
+ * lines this thin only need to be seen. Allocation-free per frame.
  */
 class HandSkeletonRenderer {
     private val up = Vec3(0f, 1f, 0f)
@@ -24,20 +26,22 @@ class HandSkeletonRenderer {
             if (!h.isUsable) continue
             val alpha = if (h.state == TrackingState.LOST_PREDICTING) 0.45f else 1f
             val pinched = h.gesture == Gesture.PINCH
+            val c = if (h.handedness == Handedness.RIGHT) RIGHT else LEFT
             for (b in HandJoint.BONES) {
-                val a = h.joints[b[0]]; val c = h.joints[b[1]]
-                dir.set(c).sub(a)
+                val a = h.joints[b[0]]; val e = h.joints[b[1]]
+                dir.set(e).sub(a)
                 val len = dir.length()
                 if (len < 1e-4f) continue
                 dir.scale(1f / len)
-                mid.set(a).add(c).scale(0.5f)
+                mid.set(a).add(e).scale(0.5f)
                 Quat.fromTo(up, dir, q)
                 val d = scene.addDraw()
                 d.mesh = renderer.cylinder
                 d.late = true
-                d.color[0] = 0.86f; d.color[1] = 0.87f; d.color[2] = 0.95f; d.color[3] = alpha
-                d.gloss = 0.35f
-                d.castShadow = alpha == 1f
+                // bones a lighter tint of the hand's colour so the balls stand out
+                d.color[0] = c[0] * 0.5f + 0.5f; d.color[1] = c[1] * 0.5f + 0.5f; d.color[2] = c[2] * 0.5f + 0.5f; d.color[3] = alpha * 0.9f
+                d.gloss = 0.2f
+                d.castShadow = false
                 val r = BONE_RADIUS * 2f // unit cylinder has radius 0.5
                 Mat4.compose(mid, q, r, len, r, d.matrix)
             }
@@ -45,20 +49,22 @@ class HandSkeletonRenderer {
                 val d = scene.addDraw()
                 d.mesh = renderer.sphere
                 d.late = true
-                val tip = j == HandJoint.THUMB_TIP || j == HandJoint.INDEX_TIP || j == HandJoint.MIDDLE_TIP || j == HandJoint.RING_TIP || j == HandJoint.PINKY_TIP
-                when {
-                    pinched && (j == HandJoint.THUMB_TIP || j == HandJoint.INDEX_TIP) -> { d.color[0] = 0.94f; d.color[1] = 0.36f; d.color[2] = 0.75f }
-                    tip -> { d.color[0] = 0.97f; d.color[1] = 0.97f; d.color[2] = 1f }
-                    else -> { d.color[0] = 0.49f; d.color[1] = 0.42f; d.color[2] = 1f }
-                }
+                if (pinched && (j == HandJoint.THUMB_TIP || j == HandJoint.INDEX_TIP)) {
+                    d.color[0] = 1f; d.color[1] = 1f; d.color[2] = 1f  // pinch: the touching tips light up
+                } else { d.color[0] = c[0]; d.color[1] = c[1]; d.color[2] = c[2] }
                 d.color[3] = alpha
-                d.gloss = 0.5f
-                d.castShadow = alpha == 1f
-                val r = HandJoint.radiusFor(j) * 0.62f * 2f
+                d.gloss = 0.4f
+                d.castShadow = false
+                val r = BALL_RADIUS * 2f
                 Mat4.compose(h.joints[j], ident, r, r, r, d.matrix)
             }
         }
     }
 
-    companion object { const val BONE_RADIUS = 0.0042f }
+    companion object {
+        const val BONE_RADIUS = 0.001f
+        const val BALL_RADIUS = 0.0025f
+        val RIGHT = floatArrayOf(0.20f, 0.92f, 0.38f)  // green
+        val LEFT = floatArrayOf(0.22f, 0.52f, 1.00f)   // blue
+    }
 }

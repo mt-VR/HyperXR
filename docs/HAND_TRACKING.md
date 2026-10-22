@@ -144,3 +144,24 @@ No motor MediaPipe, os limiares subiram para 0,55 (detecção) e 0,5 (presença 
 
 A última rejeição aparece no status do teste de mãos, por exemplo "grande demais para uma mão
 (pé?)". Testes: `HandVerifierTest`, com landmarks reais de uma mão e do pé como fixtures.
+
+## Latência, lado da mão e visual
+
+- **Entrada rápida:**
+  - Com presença de 0,9 ou mais, a mão aparece já no primeiro quadro. Entre 0,8 e 0,9, espera
+    um segundo quadro.
+  - No motor NPU, a segunda mão é procurada a cada 3 quadros (antes eram 6).
+  - O ARCore usa a câmera a 60 fps quando o celular oferece. Com o Camera2 isso já acontecia.
+- **Entre quadros da câmera:** cada junta continua andando na velocidade medida entre os dois
+  últimos resultados, por até 50 ms. O esqueleto se move a cada quadro da tela (8 a 16 ms), não
+  só a cada quadro da câmera (16 a 33 ms).
+- **Esquerda ou direita (`HandednessResolver`):** o HyperXR decide sozinho, igual nos dois
+  motores.
+  - O sinal principal é a quiralidade 3D: de que lado do plano dos nós do indicador e do mínimo
+    fica o polegar. Girar a mão não muda esse lado; só um espelho muda. Em fotos e nas versões
+    espelhadas, ele concordou com a mão verdadeira em 17 de 18 casos.
+  - Junto entram o rótulo do modelo (motor NPU), um leve peso do lado da imagem e a continuidade
+    entre quadros.
+  - Duas mãos no mesmo quadro sempre recebem lados diferentes.
+- **Visual:** esqueleto fino (ossos de 2 mm, bolinhas de 5 mm), verde na mão direita e azul na
+  esquerda. Na pinça, as pontas do polegar e do indicador ficam brancas.

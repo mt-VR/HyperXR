@@ -48,3 +48,23 @@ Cada estágio guarda 512 amostras e reporta média, p50, p95, p99, mínimo, máx
 
 Pendentes: resolução dinâmica guiada pelo tempo de GPU, timer queries de GPU, compressão ETC2/ASTC,
 LOD, carregamento assíncrono de glTF fora do thread GL, reação ao `PowerManager` thermal status.
+
+## Latência da cabeça (giroscópio e 6DoF)
+
+- **Giroscópio na taxa máxima:** o mais rápido que o sensor permitir, sem agrupar amostras, numa
+  thread de prioridade alta. Ele é integrado num histórico de meio segundo (`GyroHistory`, com
+  testes).
+- **6DoF:**
+  - A pose do ARCore tem a idade do quadro da câmera. A rotação medida pelo giroscópio desde o
+    instante daquele quadro é somada a ela.
+  - Para os eixos do giroscópio baterem com os da câmera em qualquer celular, os 4 alinhamentos
+    possíveis são comparados com a rotação do próprio ARCore nos primeiros segundos, e fica o que
+    acerta.
+  - A posição é levada adiante pela velocidade recente da cabeça, suavizada e limitada.
+- **3DoF:** rotation vector mais a rotação medida pelo giroscópio desde aquela amostra.
+- **Previsão:** até o momento em que a luz sai da tela, cerca de dois períodos da tela. O ajuste
+  "previsão" do Head tracking corrige a partir disso (16 ms = sem mudança).
+- **Releitura antes de desenhar:** a cabeça é lida de novo logo antes de desenhar os olhos, então
+  o trabalho do conteúdo (interface, física, mãos) não entra na latência.
+- **Sincronia com a GPU:** um fence faz a CPU esperar a GPU terminar o quadro anterior, e nenhum
+  quadro fica na fila atrás de outro.

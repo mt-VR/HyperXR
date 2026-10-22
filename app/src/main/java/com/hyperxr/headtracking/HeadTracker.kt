@@ -34,8 +34,8 @@ interface HeadTracker {
  * translation the eyes undergo when the head rotates; it is labelled 3DoF because it is not tracked
  * translation.
  */
-class RotationVectorTracker(context: Context, private val displayRotation: Int) : HeadTracker, SensorEventListener {
-    override val description = "3DoF (rotation vector + gyro prediction, neck model)"
+class RotationVectorTracker(context: Context, private val displayRotation: Int, private val gyroHistory: GyroHistory? = null) : HeadTracker, SensorEventListener {
+    override val description = if (gyroHistory != null) "3DoF (rotation vector + gyro a toda a taxa, previsão até o fóton)" else "3DoF (rotation vector + gyro prediction, neck model)"
     override val sixDof = false
 
     private val sm = context.getSystemService(SensorManager::class.java)
@@ -62,9 +62,10 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int) 
     private var pendingRecenter = true
 
     override fun start() {
-        sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 5000, handler) }
-            ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 5000, handler) }
-        sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, 2500, handler) }
+        // fastest rates, no batching: every sample as soon as the sensor hub has it
+        sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 0, 0, handler) }
+            ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 0, 0, handler) }
+        if (gyroHistory == null) sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, 0, 0, handler) }
     }
 
     override fun stop() { sm.unregisterListener(this) }
@@ -92,10 +93,15 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int) 
         val w = Vec3()
         val ts: Long
         synchronized(lock) { q.set(deviceRot); w.set(gyro); ts = sampleTimeNs }
-        // predict: integrate device-frame angular velocity from the sample time to display time
-        val ageNs = if (ts > 0) SystemClock.elapsedRealtimeNanos() - ts else 0L
-        val dt = ((ageNs + predictionNs).coerceIn(0L, 60_000_000L)) / 1e9f
-        Quat.integrate(q, w.x, w.y, w.z, dt, tmp)
+        // the measured gyro rotation since the fused sample, then prediction to photon time
+        val target = SystemClock.elapsedRealtimeNanos() + predictionNs
+        val d = Quat()
+        if (gyroHistory != null && ts > 0 && gyroHistory.delta(ts, target, d)) q.mul(d, tmp)
+        else {
+            val ageNs = if (ts > 0) SystemClock.elapsedRealtimeNanos() - ts else 0L
+            val dt = ((ageNs + predictionNs).coerceIn(0L, 60_000_000L)) / 1e9f
+            Quat.integrate(q, w.x, w.y, w.z, dt, tmp)
+        }
         // world_hx = worldFix * q_world_device * deviceFix
         worldFix.mul(tmp, tmp2)
         tmp2.mul(deviceFix, tmp)

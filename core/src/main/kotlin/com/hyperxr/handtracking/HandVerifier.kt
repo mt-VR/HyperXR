@@ -21,6 +21,8 @@ class HandVerifier {
     var acquirePresence = 0.8f
     var keepPresence = 0.5f
     var confirmFrames = 2
+    /** A score this high confirms a new hand at once (no waiting for a second frame). */
+    var instantPresence = 0.9f
     var maxReachMeters = 1.0f
     var minReachMeters = 0.08f
 
@@ -86,6 +88,7 @@ class HandVerifier {
             reject("presença de mão baixa (%.2f)".format(p))
             return false
         }
+        if (p >= instantPresence) { confirmed[side] = true; streak[side] = confirmFrames; return true }
         if (p >= acquirePresence) {
             streak[side]++
             if (streak[side] >= confirmFrames) { confirmed[side] = true; return true }

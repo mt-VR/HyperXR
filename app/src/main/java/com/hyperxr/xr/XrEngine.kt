@@ -159,6 +159,12 @@ class XrEngine(
     private val xrTargets = HashMap<Int, RenderTarget>()
 
     private val eyes = arrayOf(EyeView(), EyeView())
+    /** Full-rate gyroscope shared by the head trackers (rotation latency like a standalone headset). */
+    private val gyro = com.hyperxr.headtracking.GyroSource(activity)
+    private fun gyroHistory() = if (gyro.available) gyro.history else null
+    /** Fence of the previous frame: the CPU waits for it so it never runs a frame ahead of the GPU. */
+    private var frameFence = 0L
+    private var refreshPeriodNs = 16_666_667L
     val share = com.hyperxr.share.ScreenShare(activity)
     private val spectatorEye = EyeView()
     private var lastFrameNs = 0L
@@ -172,6 +178,7 @@ class XrEngine(
         joyCons.settings = settings.controllers
         joyCons.onAction = { side, ev -> pendingActions += Triple(ev.action, ev.pressed, side) }
         joyCons.start()
+        gyro.start()
         share.displays.start()
         share.externalRecordingDetector.start()
         hands.configure(settings.handTracking, settings.performance.handInferenceHz)
@@ -203,7 +210,7 @@ class XrEngine(
         val forced3Dof = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.ROTATION_VECTOR_3DOF
         when (decision.mode) {
             XrMode.MIXED_REALITY_ARCORE -> if (forced3Dof) startCameraPassthrough() else {
-                val ar = ArCoreSession(activity)
+                val ar = ArCoreSession(activity).also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }
                 val depth = ar.create(settings.handTracking.useArCoreDepth)
                 app.capabilities.updateDepthSupport(depth)
                 if (ar.session != null) {
@@ -227,7 +234,7 @@ class XrEngine(
                     openXrSession = OpenXrNative.nativeCreateSession(activity, err)
                     if (openXrSession == 0L) Diagnostics.log("OpenXR session failed: ${err[0]}; using VR SBS")
                 }
-                if (openXrSession == 0L) tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+                if (openXrSession == 0L) tracker = RotationVectorTracker(activity, displayRotation(), gyroHistory()).also { it.start() }
             }
             XrMode.VR_SBS -> {
                 // VR shows no camera image, but the camera still feeds hand tracking when allowed.
@@ -235,7 +242,7 @@ class XrEngine(
                 val cameraOk = caps.cameraPermission && caps.hasBackCamera
                 // The boundary warning needs depth: ARCore then also provides 6DoF and hand frames.
                 if (cameraOk && settings.graphics.vrBoundary && caps.arCore.ok && !forced3Dof) {
-                    val ar = ArCoreSession(activity)
+                    val ar = ArCoreSession(activity).also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }.also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }
                     ar.create(useDepth = true)
                     if (ar.session != null && ar.depthEnabled) {
                         arCore = ar; tracker = ar; ar.start()
@@ -246,7 +253,7 @@ class XrEngine(
                 }
                 if (arCore == null) {
                     if (settings.handTracking.enabled && cameraOk) startCameraPassthrough()
-                    else tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+                    else tracker = RotationVectorTracker(activity, displayRotation(), gyroHistory()).also { it.start() }
                 }
             }
         }
@@ -269,7 +276,7 @@ class XrEngine(
         }
         cam.start()
         passthrough = cam
-        tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+        tracker = RotationVectorTracker(activity, displayRotation(), gyroHistory()).also { it.start() }
     }
 
     @Suppress("DEPRECATION")
@@ -277,6 +284,9 @@ class XrEngine(
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
         width = w; height = h
+        @Suppress("DEPRECATION")
+        val hz = activity.windowManager.defaultDisplay.refreshRate
+        if (hz > 20f) refreshPeriodNs = (1e9f / hz).toLong()
         compositor.resize(w, h, activity.resources.displayMetrics.xdpi, settings.graphics)
         arCore?.setDisplayGeometry(displayRotation(), w, h)
     }
@@ -295,7 +305,13 @@ class XrEngine(
             submitArCoreHands(ar)
         }
         passthrough?.update()
-        val predictionNs = (settings.headTracking.predictionMs * 1e6).toLong()
+        // Frame pacing: wait for the GPU to finish the previous frame before sampling anything,
+        // so this frame's poses are as fresh as possible (no frame queued behind another).
+        if (frameFence != 0L) {
+            GLES30.glClientWaitSync(frameFence, GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, 20_000_000L)
+            GLES30.glDeleteSync(frameFence); frameFence = 0L
+        }
+        val predictionNs = predictionNs()
         synchronized(input) { tracker?.pose(predictionNs, input.head) }
 
         var xrFrame = 0
@@ -336,6 +352,9 @@ class XrEngine(
 
         // 4. render
         val r0 = System.nanoTime()
+        // late latching: the head is sampled again right before drawing, so the content's own
+        // work (UI, physics, hands) does not add to what the eyes see as rotation latency
+        if (openXrSession == 0L) synchronized(input) { tracker?.pose(predictionNs(), input.head) }
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
         // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only
@@ -385,6 +404,7 @@ class XrEngine(
         }
         Diagnostics.record(Stage.RENDER_CPU, System.nanoTime() - r0)
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
+        frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
     }
 
     /** Reads the left half of the composited screen (what the left eye sees) into a bitmap. */
@@ -449,6 +469,16 @@ class XrEngine(
         compositor.eyeTanH = th; compositor.eyeTanV = tv
         Mat4.frustumTan(-th, th, -tv, tv, 0.05f, 200f, eye.proj)
         eye.update()
+    }
+
+    /**
+     * How far ahead the head pose is predicted: to when this frame's light leaves the screen.
+     * With the CPU paced one frame behind the GPU that is about two refresh periods (render +
+     * scan-out); the Head tracking "prediction" setting trims it (16 ms = no change).
+     */
+    private fun predictionNs(): Long {
+        val trim = ((settings.headTracking.predictionMs - 16f) * 1e6f).toLong()
+        return (2 * refreshPeriodNs + trim).coerceIn(0L, 80_000_000L)
     }
 
     /** Mono 16:9 frustum from the (steadied) spectator pose; over the camera it matches the image. */
@@ -586,10 +616,11 @@ class XrEngine(
 
     fun onGeneric(e: MotionEvent): Boolean = joyCons.onMotionEvent(e)
 
-    fun onResume() { tracker?.start(); content.onResume() }
+    fun onResume() { tracker?.start(); gyro.start(); content.onResume() }
 
     fun onPause() {
         tracker?.stop()
+        gyro.stop()
         content.onPause()
     }
 
@@ -615,6 +646,7 @@ class XrEngine(
         passthrough?.shutdown()
         arCore?.close()
         (tracker as? RotationVectorTracker)?.shutdown()
+        gyro.shutdown()
         audio.release()
     }
 }
