@@ -116,7 +116,7 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
     /** No Shizuku: the system installer asks the user (on the phone screen), OBBs copied directly when Android allows. */
     private fun installWithSystem(r: ApkReport) {
         val act = host.activity
-        if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
+        if (!act.packageManager.canRequestPackageInstalls()) {
             act.runOnUiThread { act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${act.packageName}"))) }
             busy = false; status = "Permita \"instalar apps desconhecidos\" para o HyperXR na tela do celular e toque em Instalar de novo"; dirty = true
             return

@@ -40,13 +40,15 @@ class GalleryPanel(private val host: MediaHost) : XrPanel(1.6f, 1.1f, title = "G
 
     private fun hasPermission(): Boolean {
         if (StorageAccess.granted(app)) return true
+        if (Build.VERSION.SDK_INT >= 34 && app.checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED) return true
         return if (Build.VERSION.SDK_INT >= 33)
             app.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
         else app.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun requestPermission() = host.activity.runOnUiThread {
-        val perms = if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        val perms = if (Build.VERSION.SDK_INT >= 34) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        else if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         host.activity.requestPermissions(perms, 42)
     }

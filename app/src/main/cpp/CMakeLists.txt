@@ -36,3 +36,9 @@ target_compile_options(hyperxr_openxr PRIVATE -Wall -Wextra -Wno-unused-paramete
     -fno-exceptions -fno-rtti -fvisibility=hidden -fvisibility-inlines-hidden)
 target_link_options(hyperxr_openxr PRIVATE -nostdlib++ -Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
 target_link_libraries(hyperxr_openxr EGL GLESv3 android log dl m)
+
+# Camera frame conversion for hand tracking (hot path: optimised even in debug builds).
+add_library(hyperxr_image SHARED yuv_convert.cpp)
+target_compile_options(hyperxr_image PRIVATE -O3 -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(hyperxr_image PRIVATE -Wl,-z,max-page-size=16384)
+target_link_libraries(hyperxr_image jnigraphics)

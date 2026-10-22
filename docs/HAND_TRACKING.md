@@ -3,7 +3,9 @@
 ```
 câmera (ARCore CPU image ou Camera2 YUV 640x480; também em VR, só para as mãos)
  → 3 slots em pipeline: enquanto a GPU infere o quadro N, a CPU converte o N+1 (YUV→RGB em
-   2 threads, buffers reutilizados) e a próxima inferência começa assim que a anterior termina
+   código nativo -O3 direto nos pixels do Bitmap, `libhyperxr_image.so`; em Kotlin com 2 threads
+   se a biblioteca faltar; buffers e observações reutilizados) e a próxima inferência começa
+   assim que a anterior termina
  → MediaPipe Hand Landmarker, LIVE_STREAM, delegate GPU (CPU como fallback, informado)
    · detector de palma só quando a mão some; depois rastreamento por ROI interno do MediaPipe
    · só o quadro mais novo é processado; quadros que chegam durante a inferência são descartados

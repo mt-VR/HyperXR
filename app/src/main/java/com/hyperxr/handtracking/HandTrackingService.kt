@@ -42,6 +42,12 @@ class HandTrackingService(private val context: Context) {
     private val fusedLabel = arrayOfNulls<Handedness>(2)
     private val fusedScore = FloatArray(2)
     private val fusedPinch = FloatArray(2)
+    /** Reused per result (two per side: MediaPipe may label both hands the same way). */
+    private val observations = mapOf(
+        Handedness.LEFT to arrayOf(LandmarkObservation(Handedness.LEFT), LandmarkObservation(Handedness.LEFT)),
+        Handedness.RIGHT to arrayOf(LandmarkObservation(Handedness.RIGHT), LandmarkObservation(Handedness.RIGHT)),
+    )
+    private val seen = java.util.EnumSet.noneOf(Handedness::class.java)
 
     /** Live statistics (shown in the hand test screen and in Diagnostics). */
     @Volatile var stats: String = "-"; private set
@@ -261,7 +267,8 @@ class HandTrackingService(private val context: Context) {
             val cat = result.handedness().getOrNull(i)?.firstOrNull()
             // MediaPipe labels assume a mirrored (selfie) image; the back camera is not mirrored.
             val label = if (cat?.categoryName() == "Left") Handedness.RIGHT else Handedness.LEFT
-            val obs = LandmarkObservation(label)
+            val obs = observations.getValue(label)[n]
+            obs.hasWorld = false
             obs.score = cat?.score() ?: 0.8f
             for (j in 0 until HandJoint.COUNT) {
                 val p = lms[j]
@@ -277,7 +284,7 @@ class HandTrackingService(private val context: Context) {
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
-        val seen = HashSet<Handedness>()
+        seen.clear()
         for (k in 0 until n) {
             val side = assign[k]
             val r = fused[k]
@@ -397,9 +404,18 @@ class DepthSnapshot : DepthSampler {
     }
 }
 
+/** Native YUV -> RGBA conversion (app/src/main/cpp/yuv_convert.cpp). */
+object YuvNative {
+    val available: Boolean = try { System.loadLibrary("hyperxr_image"); true } catch (t: Throwable) { false }
+
+    @JvmStatic external fun convert(y: java.nio.ByteBuffer, u: java.nio.ByteBuffer, v: java.nio.ByteBuffer, yRow: Int, yPix: Int,
+                                    uvRow: Int, uvPix: Int, step: Int, rotate180: Boolean, bitmap: Bitmap): Boolean
+}
+
 /**
  * YUV_420_888 -> ARGB bitmap at <= [HandTrackingService.MAX_WIDTH] px wide, written into buffers
- * that are reused frame after frame (no per-frame allocation). Integer BT.601 conversion.
+ * that are reused frame after frame (no per-frame allocation). Integer BT.601 conversion, in
+ * native code straight into the bitmap when available, otherwise in Kotlin on two threads.
  */
 class YuvToBitmap {
     private var pixels = IntArray(0)
@@ -417,6 +433,8 @@ class YuvToBitmap {
         val yb = p[0].buffer; val ub = p[1].buffer; val vb = p[2].buffer
         val yRow = p[0].rowStride; val yPix = p[0].pixelStride
         val uvRow = p[1].rowStride; val uvPix = p[1].pixelStride
+        if (YuvNative.available && yb.isDirect && ub.isDirect && vb.isDirect &&
+            YuvNative.convert(yb, ub, vb, yRow, yPix, uvRow, uvPix, step, rotate180, b)) return b
         val half = oh / 2
         if (helper != null) {
             // ByteBuffer absolute gets are thread-safe for reading with duplicated buffers
