@@ -35,7 +35,10 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Instalar APK + OBB (Shizuku `pm install`, sem perguntas; sem Shizuku pelo instalador do sistema) | 🟡 |
 | Patcher no celular ("Corrigir e instalar"): targetSdk 29, features de headset opcionais, loader da Meta → Khronos, reassinatura com chave do Android Keystore | ✅ testes (APK verificado pelo apksig) · 🟡 aparelho |
 | Jogos abertos pelo HyperXR recebem concessões de URI que tornam o runtime e o broker visíveis | 🟡 |
-| Adaptador VrApi → OpenXR (gearvr-shim) e driver `com.oculus.systemdriver` | ⏳ fontes em third_party; binários não embutidos |
+| Jogos VrApi (Gear VR / Quest antigo) | 🚫 fora do escopo: o HyperXR roda só OpenXR |
+| Camada Daydream: detecção (categoria, libgvr, controle Daydream), patch só-Daydream → Cardboard (tabela de strings do manifesto reescrita) | ✅ testes · 🟡 aparelho |
+| Calibração do VR Box para apps Cardboard/Daydream (`/sdcard/Cardboard/current_device_params`, gravado antes de abrir) | ✅ formato (testes) · 🟡 aparelho |
+| Controle Daydream emulado | 🚫 o serviço do controle é do Google VR Services (fechado) |
 | Jogos Quest com VrApi, loader da Meta, só Vulkan ou extensões Meta obrigatórias | 🚫 não rodam (o importador avisa) |
 | Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
 | Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |

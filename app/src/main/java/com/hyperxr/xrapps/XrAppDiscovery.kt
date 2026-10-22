@@ -31,8 +31,8 @@ class XrAppDiscovery(private val context: Context) {
     private val categories = listOf(
         Category("com.google.intent.category.CARDBOARD", AppCategory.CARDBOARD, "Google Cardboard SDK",
             "Runs its own stereo renderer; HyperXR hands over the display and sensors."),
-        Category("com.google.intent.category.DAYDREAM", AppCategory.CARDBOARD, "Google VR (Daydream, discontinued)",
-            "Requires the deprecated Google VR Services; may fail on recent Android versions."),
+        Category("com.google.intent.category.DAYDREAM", AppCategory.CARDBOARD, "Google VR (Daydream)",
+            "Daydream-only apps need Google VR Services; patch them in Files (Corrigir e instalar) to run them as Cardboard apps."),
         Category("org.khronos.openxr.intent.category.IMMERSIVE_HMD", AppCategory.OPENXR, "OpenXR runtime (via broker)",
             "Needs an installed OpenXR runtime (e.g. Monado) set as active in the runtime broker."),
         Category("com.oculus.intent.category.VR", AppCategory.OPENXR, "Quest app (OpenXR via HyperXR runtime)",
@@ -77,6 +77,8 @@ class XrAppDiscovery(private val context: Context) {
             com.hyperxr.compat.CompatLayer.launchGame(context, app.packageName, app.activity)
             return@runCatching
         }
+        // Cardboard / Daydream apps read the viewer from a shared file: give them the VR Box calibration
+        if (app.entry.category == AppCategory.CARDBOARD) com.hyperxr.compat.CompatLayer.writeCardboardParams(context)
         val intent = Intent(Intent.ACTION_MAIN)
             .setClassName(app.packageName, app.activity)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

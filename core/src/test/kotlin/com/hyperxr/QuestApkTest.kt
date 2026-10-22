@@ -68,6 +68,21 @@ class QuestApkTest {
         assertEquals(Verdict.WONT_RUN, armOnly.verdict)
     }
 
+    @Test fun daydreamOnlyDetected() {
+        val dd = QuestApkTest::class.java.getResourceAsStream("/daydream_manifest.axml")!!.readBytes()
+        val f = Files.createTempFile("dd", ".apk").toFile()
+        ZipOutputStream(f.outputStream()).use { z ->
+            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(dd); z.closeEntry()
+            z.putNextEntry(ZipEntry("lib/arm64-v8a/libgvr.so")); z.write(ByteArray(8)); z.closeEntry()
+            z.putNextEntry(ZipEntry("classes.dex")); z.write(bin("x", "Lcom/google/vr/sdk/controller/ControllerManager;")); z.closeEntry()
+        }
+        val r = QuestApk.inspect(f)
+        assertEquals(XrApi.DAYDREAM, r.xrApi)
+        assertEquals(Verdict.WONT_RUN, r.verdict)
+        assertTrue(r.daydreamController)
+        assertEquals("com.example.daydreamgame.VrActivity", r.launchActivity)
+    }
+
     @Test fun scanFindsStringsAcrossChunkBoundaries() {
         val s = StringScan()
         val big = ByteArray(70_000) + "XR_META_body_tracking_fidelity".toByteArray() + ByteArray(3)

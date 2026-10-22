@@ -69,7 +69,7 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
         x += c.chip(vText, x, c.y, vColor) + 10f
         if (r.questApp) x += c.chip("App de Quest", x, c.y, XrTheme.button) + 10f
         x += c.chip(r.engine, x, c.y, XrTheme.button) + 10f
-        x += c.chip(when (r.xrApi) { XrApi.OPENXR -> "OpenXR"; XrApi.VRAPI -> "VrApi (Meta)"; XrApi.CARDBOARD -> "Cardboard"; XrApi.NONE -> "Sem XR" }, x, c.y, XrTheme.button) + 10f
+        x += c.chip(when (r.xrApi) { XrApi.OPENXR -> "OpenXR"; XrApi.VRAPI -> "VrApi (Meta)"; XrApi.CARDBOARD -> "Cardboard"; XrApi.DAYDREAM -> "Daydream"; XrApi.NONE -> "Sem XR" }, x, c.y, XrTheme.button) + 10f
         if (r.graphics.isNotEmpty()) c.chip(r.graphics.joinToString(" + "), x, c.y, XrTheme.button)
         c.y += 58f
         if (r.loader != LoaderKind.NONE) c.paragraph("Loader OpenXR: " + when (r.loader) {
@@ -106,6 +106,7 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
 
     private fun launch(r: ApkReport) = host.activity.runOnUiThread {
         try {
+            if (r.xrApi == XrApi.CARDBOARD || r.xrApi == XrApi.DAYDREAM) com.hyperxr.compat.CompatLayer.writeCardboardParams(host.activity)
             com.hyperxr.compat.CompatLayer.launchGame(host.activity, r.packageName, r.launchActivity!!)
         } catch (t: Throwable) { status = "Não abriu: ${t.message}"; dirty = true }
     }

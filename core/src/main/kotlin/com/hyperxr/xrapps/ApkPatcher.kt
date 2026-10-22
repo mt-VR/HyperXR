@@ -9,14 +9,10 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /**
- * Libraries the patcher puts into games, per ABI folder: the Khronos OpenXR loader (asks the
- * runtime broker, so it finds HyperXR's runtime) and the VrApi -> OpenXR adapter for Gear VR /
- * early Quest games (Compatibility-Layer gearvr-shim).
+ * Library the patcher puts into games, per ABI folder: the Khronos OpenXR loader (asks the
+ * runtime broker, so it finds HyperXR's runtime).
  */
-class CompatLibraries(
-    val loaders: Map<String, File>,
-    val vrapiShims: Map<String, File>,
-)
+class CompatLibraries(val loaders: Map<String, File>)
 
 data class PatchReport(
     val changes: List<String>,
@@ -24,24 +20,29 @@ data class PatchReport(
     /** Problems that make the patched game useless; nothing is written when not empty. */
     val blockers: List<String>,
     val packageName: String,
-    val isVrApiGame: Boolean,
     val questGame: Boolean,
+    /** Daydream app made launchable as a Cardboard app. */
+    val daydream: Boolean,
 )
 
 /**
- * Prepares an OpenXR / Quest / Gear VR APK for the HyperXR runtime, on the phone (port of
- * Compatibility-Layer's compatibility_layer_port.py, extended):
+ * Prepares an OpenXR / Quest or Daydream APK for HyperXR, on the phone (after
+ * Compatibility-Layer's compatibility_layer_port.py, OpenXR only, plus a Daydream layer):
  *  - manifest: targetSdk capped at 29 (the game sees the runtime broker and runtime without
  *    `<queries>`), headset-only `uses-feature` made optional, Play split requirements removed;
  *  - Meta's OpenXR loader (or an unknown one) replaced by the Khronos loader;
- *  - VrApi games: libvrapi.so replaced by the VrApi -> OpenXR adapter, loader added next to it;
+ *  - Daydream-only apps: the DAYDREAM launcher category becomes CARDBOARD, so the GVR SDK and
+ *    launchers treat them as Cardboard apps (no Google VR Services or Daydream phone needed);
+ *  - VrApi (Gear VR / old Quest) games are refused: HyperXR supports OpenXR only;
  *  - old signatures removed (the caller signs the result).
  */
 object ApkPatcher {
     const val MAX_TARGET_SDK = 29
     private val ABI_DIRS = listOf("arm64-v8a", "armeabi-v7a", "armeabi")
     private val ENTITLEMENT = setOf("libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so")
-    private val HEADSET_FEATURES = listOf("oculus.", "com.oculus.", "android.hardware.vr", "wave.feature", "picovr", "com.samsung.android.vr")
+    private val HEADSET_FEATURES = listOf("oculus.", "com.oculus.", "android.hardware.vr", "android.software.vr", "wave.feature", "picovr", "com.samsung.android.vr")
+    const val DAYDREAM = "com.google.intent.category.DAYDREAM"
+    const val CARDBOARD = "com.google.intent.category.CARDBOARD"
 
     /** ABI folder in lib/ -> key of [CompatLibraries] maps ("armeabi" games load 32-bit ARM libraries too). */
     fun libKey(abiDir: String) = if (abiDir == "armeabi") "armeabi-v7a" else abiDir
@@ -84,23 +85,29 @@ object ApkPatcher {
             val manifestBytes = zip.getInputStream(manifestEntry).use { it.readBytes() }
             val manifest = BinaryXml.parse(manifestBytes)
             val pkg = manifest.attr("package") ?: ""
-            val (newManifest, manifestChanges) = patchManifest(manifestBytes)
+            var (newManifest, manifestChanges) = patchManifest(manifestBytes)
             val changes = ArrayList(manifestChanges)
+            val categories = manifest.descendants("category").mapNotNull { it.attr("name") }.toSet()
+            val daydream = DAYDREAM in categories && CARDBOARD !in categories
+            if (daydream) {
+                newManifest = BinaryXml.replaceStrings(newManifest, mapOf(DAYDREAM to CARDBOARD))
+                changes += "App só Daydream marcado como compatível com Cardboard"
+            }
             val warnings = ArrayList<String>()
             val blockers = ArrayList<String>()
 
             val abiDirs = ABI_DIRS.filter { abi -> names.any { it.startsWith("lib/$abi/") } }
-            if (abiDirs.isEmpty()) blockers += "O APK não tem bibliotecas ARM (arm64-v8a/armeabi-v7a): não roda num celular"
-            if (abiDirs.isNotEmpty() && "arm64-v8a" !in abiDirs) warnings += "Jogo 32 bits: o runtime HyperXR é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
+            if (abiDirs.isEmpty() && names.any { it.startsWith("lib/") }) blockers += "O APK não tem bibliotecas ARM (arm64-v8a/armeabi-v7a): não roda num celular"
+            if (abiDirs.isNotEmpty() && "arm64-v8a" !in abiDirs && !daydreamOrCardboard(manifestBytes)) warnings += "Jogo 32 bits: o runtime HyperXR é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
             val libNames = names.filter { it.startsWith("lib/") }.map { it.substringAfterLast('/') }.toSet()
             ENTITLEMENT.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
                 warnings += "Verificação de compra da Meta (${it.joinToString()}): se o jogo exigir, ele fecha ao iniciar"
             }
-            val isVrApi = abiDirs.any { "lib/$it/libvrapi.so" in names }
+            if (abiDirs.any { "lib/$it/libvrapi.so" in names })
+                blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperXR roda só OpenXR"
 
             // what replaces what
             val replace = HashMap<String, File>()
-            val add = LinkedHashMap<String, File>()
             for (abi in abiDirs) {
                 val key = libKey(abi)
                 val loaderPath = "lib/$abi/libopenxr_loader.so"
@@ -113,20 +120,10 @@ object ApkPatcher {
                         changes += "Loader OpenXR da Meta ($abi) trocado pelo loader da Khronos"
                     }
                 }
-                val vrapiPath = "lib/$abi/libvrapi.so"
-                if (vrapiPath in names) {
-                    val shim = libs.vrapiShims[key]
-                    if (shim == null || loader == null) blockers += "Jogo VrApi ($abi) sem adaptador disponível para essa arquitetura"
-                    else {
-                        replace[vrapiPath] = shim
-                        changes += "libvrapi.so ($abi) trocada pelo adaptador VrApi → OpenXR"
-                        if (loaderPath !in names) { add[loaderPath] = loader; changes += "Loader OpenXR da Khronos adicionado ($abi)" }
-                    }
-                }
             }
             val questGame = QUEST_HINTS.any { hint -> manifest.descendants("category").any { it.attr("name") == hint } } ||
                 manifest.all("application").firstOrNull()?.all("meta-data")?.any { it.attr("name") == "com.oculus.supportedDevices" } == true
-            val report = PatchReport(changes, warnings, blockers, pkg, isVrApi, questGame)
+            val report = PatchReport(changes, warnings, blockers, pkg, questGame, daydream)
             if (dryRun || blockers.isNotEmpty()) return report
 
             ZipOutputStream(output.outputStream().buffered(1 shl 20)).use { out ->
@@ -143,13 +140,15 @@ object ApkPatcher {
                         else -> putEntry(out, zip, e, stored = e.method == ZipEntry.STORED || name.endsWith(".so") || name == "resources.arsc")
                     }
                 }
-                for ((name, file) in add) putFile(out, name, file, stored = true)
             }
             return report
         }
     }
 
     private val QUEST_HINTS = listOf("com.oculus.intent.category.VR")
+
+    private fun daydreamOrCardboard(manifest: ByteArray) =
+        BinaryXml.parse(manifest).descendants("category").any { it.attr("name") == DAYDREAM || it.attr("name") == CARDBOARD }
 
     private fun putBytes(out: ZipOutputStream, name: String, data: ByteArray, stored: Boolean) {
         val e = ZipEntry(name)

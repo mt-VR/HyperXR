@@ -44,22 +44,20 @@ class ApkPatcherTest {
         assertEquals(2, changes.size)
     }
 
-    @Test fun swapsMetaLoaderInjectsVrApiShimAndSigns() {
-        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("KHRONOS-LOADER")), mapOf("arm64-v8a" to lib("VRAPI-SHIM")))
+    @Test fun swapsMetaLoaderAndSigns() {
+        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("KHRONOS-LOADER")))
         val input = apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to "libopenxr_forwardloader meta".toByteArray(),
-            "lib/arm64-v8a/libvrapi.so" to "original vrapi loader".toByteArray(),
             "lib/arm64-v8a/libunity.so" to ByteArray(5000) { (it % 7).toByte() },
             "assets/data.bin" to ByteArray(20000),
         ))
         val unsigned = tmp("unsigned.apk")
         val report = ApkPatcher.patch(input, unsigned, libs)
         assertTrue(report.blockers.toString(), report.blockers.isEmpty())
-        assertTrue(report.isVrApiGame && report.questGame)
+        assertTrue(report.questGame && !report.daydream)
         assertEquals("com.example.questgame", report.packageName)
         ZipFile(unsigned).use { z ->
             assertEquals("KHRONOS-LOADER", z.getInputStream(z.getEntry("lib/arm64-v8a/libopenxr_loader.so")).readBytes().decodeToString())
-            assertEquals("VRAPI-SHIM", z.getInputStream(z.getEntry("lib/arm64-v8a/libvrapi.so")).readBytes().decodeToString())
             assertEquals(ZipEntry.STORED, z.getEntry("lib/arm64-v8a/libunity.so").method)
             assertTrue(z.getEntry("META-INF/CERT.RSA") == null)
             assertEquals(20000, z.getInputStream(z.getEntry("assets/data.bin")).readBytes().size)
@@ -76,10 +74,33 @@ class ApkPatcherTest {
     }
 
     @Test fun nothingToDoForKhronosLoaderAndBlocksNonArm() {
-        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("NEW")), emptyMap())
+        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("NEW")))
         val ok = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libopenxr_loader.so" to "org.khronos.openxr.runtime_broker".toByteArray())), tmp("o.apk"), libs, dryRun = true)
         assertFalse(ok.changes.any { it.contains("Loader") })
         val x86 = ApkPatcher.patch(apk(mapOf("lib/x86_64/libmain.so" to ByteArray(3))), tmp("x.apk"), libs)
         assertTrue(x86.blockers.isNotEmpty())
+        // OpenXR only: VrApi games are refused
+        val vrapi = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3))), tmp("v.apk"), libs)
+        assertTrue(vrapi.blockers.any { it.contains("VrApi") })
+    }
+
+    @Test fun daydreamOnlyBecomesCardboard() {
+        val dd = ApkPatcherTest::class.java.getResourceAsStream("/daydream_manifest.axml")!!.readBytes()
+        val input = tmp("dd.apk")
+        ZipOutputStream(input.outputStream()).use { z ->
+            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(dd); z.closeEntry()
+            z.putNextEntry(ZipEntry("lib/armeabi-v7a/libgvr.so")); z.write(ByteArray(10)); z.closeEntry()
+        }
+        val out = tmp("dd-out.apk")
+        val r = ApkPatcher.patch(input, out, CompatLibraries(emptyMap()))
+        assertTrue(r.blockers.toString(), r.blockers.isEmpty())
+        assertTrue(r.daydream)
+        val m = ZipFile(out).use { z -> BinaryXml.parse(z.getInputStream(z.getEntry("AndroidManifest.xml")).readBytes()) }
+        val cats = m.descendants("category").map { it.attr("name") }
+        assertTrue(cats.toString(), "com.google.intent.category.CARDBOARD" in cats && "com.google.intent.category.DAYDREAM" !in cats)
+        assertTrue("android.intent.category.LAUNCHER" in cats)
+        assertTrue(m.all("uses-feature").all { it.attr("required") == "false" })
+        assertEquals("com.example.daydreamgame", m.attr("package"))
+        assertEquals(".VrActivity", m.descendants("activity")[0].attr("name"))
     }
 }

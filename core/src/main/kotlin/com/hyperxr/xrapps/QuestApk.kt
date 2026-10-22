@@ -4,7 +4,7 @@ import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipFile
 
-enum class XrApi { OPENXR, VRAPI, CARDBOARD, NONE }
+enum class XrApi { OPENXR, VRAPI, CARDBOARD, DAYDREAM, NONE }
 
 /** Which OpenXR loader the game ships (it decides whether HyperXR's runtime can be found). */
 enum class LoaderKind {
@@ -35,6 +35,8 @@ data class ApkReport(
     val graphics: Set<String>,
     val extensions: Set<String>,
     val launchActivity: String?,
+    /** Uses the Daydream controller API (Google VR Services only). */
+    val daydreamController: Boolean = false,
     val verdict: Verdict,
     val reasons: List<String>,
 )
@@ -64,6 +66,12 @@ object QuestApk {
         val abi = deviceAbis.firstOrNull { it in abis }
         val scan = StringScan()
         if (abi != null) for (name in libs.filter { it.startsWith("lib/$abi/") }) zip.getInputStream(zip.getEntry(name)).use { scan.feed(it) }
+        // Google VR / Cardboard apps: which Java APIs they use (controller, Daydream checks)
+        val gvr = libs.any { it.endsWith("/libgvr.so") || it.endsWith("/libcardboard_api.so") || it.endsWith("/libGfxPluginCardboard.so") }
+        if (gvr || BinaryXml.parse(zip.getInputStream(manifestEntry).use { it.readBytes() }).descendants("category")
+                .any { it.attr("name") == ApkPatcher.DAYDREAM || it.attr("name") == ApkPatcher.CARDBOARD }) {
+            zip.entries().asSequence().filter { it.name.matches(Regex("classes\\d*\\.dex")) }.forEach { e -> zip.getInputStream(e).use { scan.feed(it) } }
+        }
         analyze(manifest, libs, abis, abi, scan)
     }
 
@@ -81,7 +89,8 @@ object QuestApk {
             val cats = f.all("category").mapNotNull { it.attr("name") }
             categories += cats
             if (launch == null && f.all("action").any { it.attr("name") == "android.intent.action.MAIN" } &&
-                cats.any { it == "android.intent.category.LAUNCHER" || it == QUEST_CATEGORY || it == OPENXR_CATEGORY || it == "android.intent.category.INFO" }) {
+                cats.any { it == "android.intent.category.LAUNCHER" || it == QUEST_CATEGORY || it == OPENXR_CATEGORY || it == "android.intent.category.INFO" ||
+                    it == ApkPatcher.DAYDREAM || it == ApkPatcher.CARDBOARD }) {
                 launch = a.attr("name")?.let { n -> if (n.startsWith(".")) pkg + n else if ('.' !in n) "$pkg.$n" else n }
             }
         }
@@ -97,7 +106,8 @@ object QuestApk {
         val xrApi = when {
             hasLoader || OPENXR_CATEGORY in categories -> XrApi.OPENXR
             "libvrapi.so" in libNames || scan.has("vrapi_Initialize") -> XrApi.VRAPI
-            "com.google.intent.category.CARDBOARD" in categories -> XrApi.CARDBOARD
+            ApkPatcher.DAYDREAM in categories && ApkPatcher.CARDBOARD !in categories -> XrApi.DAYDREAM
+            ApkPatcher.CARDBOARD in categories || "libgvr.so" in libNames || "libcardboard_api.so" in libNames -> XrApi.CARDBOARD
             else -> XrApi.NONE
         }
         val loader = when {
@@ -120,9 +130,11 @@ object QuestApk {
         fun wont(r: String) { verdict = Verdict.WONT_RUN; reasons += r }
         if (abi == null && abis.isNotEmpty()) wont("Bibliotecas só para ${abis.joinToString()}; este celular não as carrega")
         when (xrApi) {
-            XrApi.VRAPI -> wont("Usa a VrApi da Meta (SDK Mobile antigo), que só existe no sistema do Quest; precisa do adaptador VrApi → OpenXR, que não vem no HyperXR")
+            XrApi.VRAPI -> wont("Usa a VrApi da Meta (Gear VR / Quest antigo): o HyperXR roda só OpenXR")
+            XrApi.DAYDREAM -> wont("App só Daydream: sem o Google VR Services e um celular Daydream-ready ele recusa abrir. \"Corrigir e instalar\" o marca como compatível com Cardboard")
             XrApi.NONE -> reasons += "Não usa OpenXR: abre como app Android comum (tela plana)"
-            XrApi.CARDBOARD -> reasons += "App Cardboard: roda com o próprio renderizador estéreo"
+            XrApi.CARDBOARD -> reasons += (if (ApkPatcher.DAYDREAM in categories) "Daydream e Cardboard: " else "App Cardboard: ") +
+                "roda com o próprio renderizador estéreo, usando a calibração do VR Box que o HyperXR grava antes de abrir"
             XrApi.OPENXR -> Unit
         }
         if (xrApi == XrApi.OPENXR) when (loader) {
@@ -136,6 +148,8 @@ object QuestApk {
         if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
         val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) }.sorted()
         if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperXR não as implementa, o jogo funciona só se forem opcionais"
+        val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
+        if (ddController) reasons += "Usa o controle Daydream: telas que exigem o controle não avançam (só o Google VR Services o fornece)"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
         if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
 
@@ -144,7 +158,7 @@ object QuestApk {
             minSdk = sdk?.attr("minSdkVersion")?.toIntOrNull() ?: 1, targetSdk = sdk?.attr("targetSdkVersion")?.toIntOrNull() ?: 0,
             abis = abis, nativeLibs = libNames.sorted(), engine = engine, xrApi = xrApi, loader = loader, questApp = questApp,
             supportedDevices = meta["com.oculus.supportedDevices"], platformSdk = platformSdk, graphics = graphics, extensions = exts,
-            launchActivity = launch, verdict = verdict, reasons = reasons,
+            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons,
         )
     }
 
@@ -162,6 +176,7 @@ object QuestApk {
 /** Collects marker strings and `XR_*` names from binaries, streaming (libraries can be 200 MB). */
 class StringScan {
     private val markers = listOf("org.khronos.openxr.runtime_broker", "libopenxr_forwardloader", "vrapi_Initialize",
+        "Lcom/google/vr/sdk/controller/ControllerManager;",
         "XR_KHR_vulkan_enable", "XR_KHR_vulkan_enable2", "XR_KHR_opengl_es_enable")
     private val found = HashSet<String>()
     private val ext = HashSet<String>()

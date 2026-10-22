@@ -21,8 +21,8 @@ import java.util.Calendar
 import javax.security.auth.x500.X500Principal
 
 /**
- * HyperXR's compatibility layer for OpenXR / Quest games (after Compatibility-Layer's port tool,
- * third_party/compatibility-layer): patches APKs on the phone, signs them with a key that never
+ * HyperXR's compatibility layer for OpenXR / Quest and Daydream / Cardboard apps (the patcher
+ * follows Compatibility-Layer's port tool, third_party/compatibility-layer): patches APKs on the phone, signs them with a key that never
  * leaves this phone's keystore, and starts games so they can see the runtime, the broker and the
  * VrApi driver.
  */
@@ -44,11 +44,7 @@ object CompatLayer {
             }
             stamp.writeText(version)
         }
-        return CompatLibraries(
-            abis.associateWith { File(dir, "$it/libopenxr_loader.so") },
-            // VrApi adapter: not bundled (VrApi games are reported as needing it)
-            emptyMap(),
-        )
+        return CompatLibraries(abis.associateWith { File(dir, "$it/libopenxr_loader.so") })
     }
 
     fun plan(ctx: Context, apk: File): PatchReport = ApkPatcher.patch(apk, File(ctx.cacheDir, "unused.apk"), libraries(ctx), dryRun = true)
@@ -91,6 +87,22 @@ object CompatLayer {
         }
         val entry = ks.getEntry(KEY_ALIAS, null) as KeyStore.PrivateKeyEntry
         return entry.privateKey to (entry.certificate as X509Certificate)
+    }
+
+    /**
+     * Writes the HyperXR viewer calibration where Cardboard / Daydream (GVR SDK) apps read their
+     * viewer: /sdcard/Cardboard/current_device_params. Needs storage access; false when denied.
+     */
+    fun writeCardboardParams(ctx: Context): Boolean = try {
+        val g = com.hyperxr.HyperXRApp.instance.settings.current.graphics
+        val v = com.hyperxr.xrapps.CardboardParams.fromSettings(g.lensSeparationMm, g.fovDegrees, g.distortionK1, g.distortionK2)
+        val f = File(android.os.Environment.getExternalStorageDirectory(), com.hyperxr.xrapps.CardboardParams.FILE_PATH)
+        f.parentFile?.mkdirs()
+        f.writeBytes(com.hyperxr.xrapps.CardboardParams.fileBytes(v))
+        true
+    } catch (t: Throwable) {
+        Diagnostics.log("Cardboard viewer params not written: ${t.message}")
+        false
     }
 
     fun installed(ctx: Context, pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (_: Throwable) { false }

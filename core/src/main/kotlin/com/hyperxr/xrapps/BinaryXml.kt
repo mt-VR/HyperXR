@@ -74,6 +74,64 @@ object BinaryXml {
         return out
     }
 
+    /**
+     * Returns the file with strings of the string pool replaced ([replacements]: old -> new). The
+     * pool is rebuilt in its own encoding (UTF-8 or UTF-16) and every later chunk just moves, so
+     * references by index stay valid. Style data is kept as it is.
+     */
+    fun replaceStrings(bytes: ByteArray, replacements: Map<String, String>): ByteArray {
+        val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        require((b.getShort(0).toInt() and 0xffff) == RES_XML) { "Não é um XML binário do Android" }
+        var pos = b.getShort(2).toInt() and 0xffff
+        while (pos + 8 <= bytes.size && (b.getShort(pos).toInt() and 0xffff) != RES_STRING_POOL) pos += b.getInt(pos + 4)
+        require(pos + 8 <= bytes.size) { "Sem tabela de strings" }
+        val headerSize = b.getShort(pos + 2).toInt() and 0xffff
+        val oldSize = b.getInt(pos + 4)
+        val count = b.getInt(pos + 8)
+        val styleCount = b.getInt(pos + 12)
+        val flags = b.getInt(pos + 16)
+        val stylesStart = b.getInt(pos + 24)
+        val utf8 = flags and 0x100 != 0
+        val strings = readStringPool(b, pos).map { replacements[it] ?: it }
+        if (strings == readStringPool(b, pos)) return bytes
+        // string data
+        val data = java.io.ByteArrayOutputStream()
+        val offsets = IntArray(count)
+        for ((i, s) in strings.withIndex()) {
+            offsets[i] = data.size()
+            if (utf8) {
+                val u8 = s.toByteArray(Charsets.UTF_8)
+                fun len(n: Int) { if (n > 0x7f) { data.write(0x80 or (n shr 8)); data.write(n and 0xff) } else data.write(n) }
+                len(s.length); len(u8.size); data.write(u8); data.write(0)
+            } else {
+                val n = s.length
+                if (n > 0x7fff) { data.write(((n shr 16) or 0x8000) and 0xff); data.write(((n shr 16) or 0x8000) shr 8); data.write(n and 0xff); data.write((n shr 8) and 0xff) }
+                else { data.write(n and 0xff); data.write(n shr 8) }
+                for (ch in s) { data.write(ch.code and 0xff); data.write(ch.code shr 8) }
+                data.write(0); data.write(0)
+            }
+        }
+        while (data.size() % 4 != 0) data.write(0)
+        val styleOffsetsStart = pos + headerSize + count * 4
+        val styleData = if (styleCount > 0 && stylesStart > 0) bytes.copyOfRange(pos + stylesStart, pos + oldSize) else ByteArray(0)
+        val newStringsStart = headerSize + count * 4 + styleCount * 4
+        val newSize = newStringsStart + data.size() + styleData.size
+        val chunk = ByteBuffer.allocate(newSize).order(ByteOrder.LITTLE_ENDIAN)
+        chunk.put(bytes, pos, headerSize)
+        chunk.putInt(4, newSize)
+        chunk.putInt(20, newStringsStart)
+        chunk.putInt(24, if (styleData.isEmpty()) 0 else newStringsStart + data.size())
+        chunk.position(headerSize)
+        offsets.forEach { chunk.putInt(it) }
+        chunk.put(bytes, styleOffsetsStart, styleCount * 4)
+        chunk.put(data.toByteArray())
+        chunk.put(styleData)
+        val out = ByteBuffer.allocate(bytes.size - oldSize + newSize).order(ByteOrder.LITTLE_ENDIAN)
+        out.put(bytes, 0, pos).put(chunk.array()).put(bytes, pos + oldSize, bytes.size - pos - oldSize)
+        out.putInt(4, out.capacity())
+        return out.array()
+    }
+
     const val TYPE_STRING = 0x03
     const val TYPE_INT_DEC = 0x10
     const val TYPE_INT_HEX = 0x11
