@@ -554,6 +554,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
+            "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
         placeAboveDock(w, yawOffsetDeg = (windows.size % 3 - 1) * 8f)

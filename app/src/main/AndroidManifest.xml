@@ -142,6 +142,15 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Gato vs. Vovó (cat game, VR, Joy-Cons). -->
+        <activity
+            android:name=".catgame.CatGameActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
+            android:resizeableActivity="false"
+            android:theme="@style/Theme.HyperXR.Immersive" />
+
         <!-- Hand tracking test (camera + skeleton + live numbers), opened from the 2D settings. -->
         <activity
             android:name=".handtracking.HandTestActivity"

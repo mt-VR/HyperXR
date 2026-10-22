@@ -53,6 +53,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Captura da visão para a Galeria | 🟡 |
 | Home estilo Quest: Biblioteca (abas de fundo, pesquisa, categorias, grade) no modo New; janelas lado a lado + barra de tarefas no modo Dock | 🟡 |
 | MR escurecido atrás da UI | 🟡 |
+| Jogo "Gato vs. Vovó" (VR, Joy-Cons, física, IA da vovó) — docs/CAT_GAME.md | 🟡 |
+| Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |
 | Visualizadores: texto (1 MB, rolagem, fonte), foto (zoom, arrastar, girar), PDF (PdfRenderer), vídeo/áudio (MediaPlayer → textura externa) | 🟡 |
