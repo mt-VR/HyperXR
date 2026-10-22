@@ -184,7 +184,11 @@ fun HandsSection(a: MainActivity) {
         Note("Se a GPU não puder rodar o modelo, o HyperXR usa a CPU e informa qual backend está em uso.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
-        ToggleRow("Mostrar aura preta das mãos", h.showAura, "Oculta automaticamente quando Joy-Cons estão conectados") { v -> a.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) } }
+        ChoiceRow("Visual das mãos", com.hyperxr.settings.HandVisual.values().toList(), h.handVisual, {
+            when (it) { com.hyperxr.settings.HandVisual.SKELETON -> "Esqueleto"; com.hyperxr.settings.HandVisual.AURA -> "Aura"; com.hyperxr.settings.HandVisual.BOTH -> "Ambos"; else -> "Ocultas" }
+        }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }
+        SliderRow("Filtro de Kalman: resposta", h.kalmanProcessNoise, 0.3f..30f, { "%.1f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(kalmanProcessNoise = v)) } }
+        Note("Kalman menor = mais suave; maior = segue movimentos rápidos. O One Euro abaixo remove o tremor restante.")
         SliderRow("Opacidade da aura", h.auraOpacity, 0.1f..0.9f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
         SliderRow("Comprimento da sua mão (punho até a ponta do dedo médio)", h.handLengthCm, 14f..23f, { "%.1f cm".format(it) }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(handLengthCm = v)) }

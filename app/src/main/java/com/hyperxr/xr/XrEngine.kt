@@ -113,6 +113,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
     private val renderer = SceneRenderer()
     private val aura = HandAuraRenderer()
+    private val skeleton = com.hyperxr.rendering.HandSkeletonRenderer()
     private val compositor = StereoCompositor()
     private val images = ImageStore()
     private val icons = IconFactory(activity)
@@ -286,8 +287,14 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
         updateBoundary(dt)
 
+        val visual = settings.handTracking.handVisual
+        if ((visual == com.hyperxr.settings.HandVisual.SKELETON || visual == com.hyperxr.settings.HandVisual.BOTH) && joyCons.controllers.isEmpty()) {
+            skeleton.submit(scene, renderer, input.hands)
+        }
+
         // 4. render
         val r0 = System.nanoTime()
+        renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
         if (openXrSession != 0L) {
             if (xrFrame == 1) {
@@ -340,7 +347,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)
         }
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
-        if (settings.handTracking.showAura && joyCons.controllers.isEmpty()) {
+        val visual = settings.handTracking.handVisual
+        if ((visual == com.hyperxr.settings.HandVisual.AURA || visual == com.hyperxr.settings.HandVisual.BOTH) && joyCons.controllers.isEmpty()) {
             aura.render(handList, eye, target.fbo, target.width, target.height)
         }
         renderer.renderPanels(scene, eye, overlayPass = true)

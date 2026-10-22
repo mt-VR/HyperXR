@@ -24,6 +24,12 @@ class DrawItem {
     var unlit = false
     var transparent = false
     var doubleSided = false
+    /** 0 = matte, 1 = polished (specular highlight size/strength). */
+    var gloss = 0f
+    /** 0 = dielectric, 1 = metal (highlight takes the base colour). */
+    var metal = 0f
+    /** Drawn into the shadow map when the scene has a shadow region. */
+    var castShadow = false
     val matrix = FloatArray(16)
 }
 
@@ -57,11 +63,14 @@ class FrameScene {
     val ambient = floatArrayOf(0.32f, 0.33f, 0.4f)
     val clear = floatArrayOf(0.05f, 0.05f, 0.08f, 1f)
     var background = Background.ENVIRONMENT
+    /** Region covered by the shadow map (content sets it every frame; radius 0 = no shadows). */
+    val shadowCenter = Vec3()
+    var shadowRadius = 0f
 
-    fun reset() { drawCount = 0; panelCount = 0 }
+    fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f }
     fun addDraw(): DrawItem {
         if (drawCount == drawPool.size) drawPool += DrawItem()
-        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false }
+        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false }
     }
     fun addPanel(): PanelItem {
         if (panelCount == panelPool.size) panelPool += PanelItem()
@@ -176,6 +185,7 @@ class SceneRenderer {
         skySphere = GpuMesh.sphere(16, 24, inward = true, radius = 50f)
         floorMesh = GpuMesh.plane(40f)
         gridTexture = Gl.uploadBitmap(gridBitmap(), mipmap = true).also { Gl.repeatTexture(it) }
+        ensureShadow()
         whiteTexture = Gl.uploadBitmap(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) })
     }
 
@@ -361,7 +371,7 @@ class SceneRenderer {
                     val mesh = d.mesh ?: continue
                     if (!visible(mesh, d.matrix, eye)) continue
                     if (d.doubleSided) GLES30.glDisable(GLES30.GL_CULL_FACE)
-                    drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit)
+                    drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal)
                     if (d.doubleSided) GLES30.glEnable(GLES30.GL_CULL_FACE)
                 }
                 visibleDraws++
@@ -382,8 +392,16 @@ class SceneRenderer {
         return eye.sphereVisible(centerOut.x, centerOut.y, centerOut.z, mesh.boundRadius * maxOf(sx, sy, sz))
     }
 
-    fun drawMesh(mesh: GpuMesh, model: FloatArray, eye: EyeView, color: FloatArray, texture: Int, scene: FrameScene, unlit: Boolean, alphaCutoff: Float = 0f) {
+    fun drawMesh(mesh: GpuMesh, model: FloatArray, eye: EyeView, color: FloatArray, texture: Int, scene: FrameScene, unlit: Boolean, alphaCutoff: Float = 0f,
+                 gloss: Float = 0f, metal: Float = 0f) {
         GLES30.glUseProgram(lit.id)
+        GLES30.glUniform1f(lit.u("uGloss"), gloss)
+        GLES30.glUniform1f(lit.u("uMetal"), metal)
+        GLES30.glUniform1i(lit.u("uShadowOn"), if (shadowActive) 1 else 0)
+        GLES30.glUniformMatrix4fv(lit.u("uLightVP"), 1, false, lightVP, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowTex) // always a depth texture: drivers dislike an empty shadow sampler
+        GLES30.glUniform1i(lit.u("uShadowMap"), 1)
         Matrix.multiplyMM(mvp, 0, eye.viewProj, 0, model, 0)
         GLES30.glUniformMatrix4fv(lit.u("uMvp"), 1, false, mvp, 0)
         GLES30.glUniformMatrix4fv(lit.u("uModel"), 1, false, model, 0)
@@ -399,6 +417,78 @@ class SceneRenderer {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (texture != 0) texture else whiteTexture)
         GLES30.glUniform1i(lit.u("uTex"), 0)
         mesh.draw()
+    }
+
+    // ---------------------------------------------------------------- shadow map
+    private var shadowFbo = 0
+    private var shadowTex = 0
+    private var shadowActive = false
+    private val lightVP = FloatArray(16)
+    private val lightView = FloatArray(16)
+    private val lightProj = FloatArray(16)
+    private lateinit var depthProg: Program
+    private val SHADOW_SIZE = 2048
+
+    private fun ensureShadow() {
+        if (shadowFbo != 0) return
+        depthProg = Program(Gl.compile(Shaders.DEPTH_VS, Shaders.DEPTH_FS, "depth"))
+        shadowTex = Gl.genTexture()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowTex)
+        GLES30.glTexStorage2D(GLES30.GL_TEXTURE_2D, 1, GLES30.GL_DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_COMPARE_MODE, GLES30.GL_COMPARE_REF_TO_TEXTURE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_COMPARE_FUNC, GLES30.GL_LEQUAL)
+        shadowFbo = IntArray(1).also { GLES30.glGenFramebuffers(1, it, 0) }[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, shadowFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_TEXTURE_2D, shadowTex, 0)
+        GLES30.glDrawBuffers(1, intArrayOf(GLES30.GL_NONE), 0)
+        GLES30.glReadBuffer(GLES30.GL_NONE)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+    }
+
+    /**
+     * Renders the depth of shadow casters around [FrameScene.shadowCenter] from the scene light
+     * (once per frame, before the eyes). The caller binds its eye target afterwards.
+     */
+    fun renderShadows(scene: FrameScene) {
+        shadowActive = false
+        val r = scene.shadowRadius
+        if (r <= 0f) return
+        ensureShadow()
+        val c = scene.shadowCenter
+        val l = scene.lightDir
+        val len = kotlin.math.sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2])
+        val dx = l[0] / len; val dy = l[1] / len; val dz = l[2] / len
+        val dist = 3f * r
+        val upX = if (kotlin.math.abs(dy) > 0.95f) 1f else 0f
+        val upY = if (kotlin.math.abs(dy) > 0.95f) 0f else 1f
+        Matrix.setLookAtM(lightView, 0, c.x - dx * dist, c.y - dy * dist, c.z - dz * dist, c.x, c.y, c.z, upX, upY, 0f)
+        Matrix.orthoM(lightProj, 0, -r, r, -r, r, 0.01f, dist * 2f)
+        Matrix.multiplyMM(lightVP, 0, lightProj, 0, lightView, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, shadowFbo)
+        GLES30.glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(true)
+        GLES30.glClear(GLES30.GL_DEPTH_BUFFER_BIT)
+        GLES30.glEnable(GLES30.GL_POLYGON_OFFSET_FILL)
+        GLES30.glPolygonOffset(1.5f, 3f)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+        GLES30.glUseProgram(depthProg.id)
+        for (i in 0 until scene.drawCount) {
+            val d = scene.draw(i)
+            if (!d.castShadow) continue
+            val mesh = d.mesh ?: continue
+            Matrix.multiplyMM(mvp, 0, lightVP, 0, d.matrix, 0)
+            GLES30.glUniformMatrix4fv(depthProg.u("uMvp"), 1, false, mvp, 0)
+            mesh.draw()
+        }
+        GLES30.glDisable(GLES30.GL_POLYGON_OFFSET_FILL)
+        GLES30.glEnable(GLES30.GL_CULL_FACE)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        shadowActive = true
     }
 
     private val partMatrix = FloatArray(16)

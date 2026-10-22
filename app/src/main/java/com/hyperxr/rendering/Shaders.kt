@@ -8,12 +8,15 @@ layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 uniform mat4 uMvp;
 uniform mat4 uModel;
+uniform mat4 uLightVP;
 out vec3 vNormal;
 out vec2 vUv;
 out vec3 vWorld;
+out vec4 vShadow;
 void main() {
     vec4 w = uModel * vec4(aPos, 1.0);
     vWorld = w.xyz;
+    vShadow = uLightVP * w;
     vNormal = mat3(uModel) * aNormal;
     vUv = aUv;
     gl_Position = uMvp * vec4(aPos, 1.0);
@@ -21,9 +24,15 @@ void main() {
 
     const val LIT_FS = """#version 300 es
 precision mediump float;
+precision mediump sampler2DShadow;
 in vec3 vNormal;
 in vec2 vUv;
 in vec3 vWorld;
+in vec4 vShadow;
+uniform sampler2DShadow uShadowMap;
+uniform int uShadowOn;
+uniform float uGloss;   // 0 matte .. 1 polished
+uniform float uMetal;   // 0 dielectric .. 1 metal (tinted highlights)
 uniform vec4 uColor;
 uniform sampler2D uTex;
 uniform int uHasTex;
@@ -43,13 +52,45 @@ void main() {
     if (!gl_FrontFacing) n = -n;
     vec3 l = normalize(-uLightDir);
     float diff = max(dot(n, l), 0.0);
+    // shadow map with 4-tap PCF (soft contact shadows on the bench)
+    float lit = 1.0;
+    if (uShadowOn == 1 && diff > 0.0) {
+        vec3 s = vShadow.xyz / vShadow.w * 0.5 + 0.5;
+        if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && s.z < 1.0) {
+            float bias = 0.0015 + 0.003 * (1.0 - diff);
+            vec2 t = vec2(1.0 / 2048.0);
+            lit = 0.25 * (texture(uShadowMap, vec3(s.xy + vec2(-t.x, -t.y), s.z - bias)) +
+                          texture(uShadowMap, vec3(s.xy + vec2( t.x, -t.y), s.z - bias)) +
+                          texture(uShadowMap, vec3(s.xy + vec2(-t.x,  t.y), s.z - bias)) +
+                          texture(uShadowMap, vec3(s.xy + vec2( t.x,  t.y), s.z - bias)));
+        }
+    }
     // hemispheric ambient: sky from above, darker bounce from below
     vec3 amb = mix(uAmbient * 0.55, uAmbient, n.y * 0.5 + 0.5);
     vec3 v = normalize(uEye - vWorld);
-    float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.18;
-    vec3 c = base.rgb * (amb + uLightColor * diff) + rim;
+    float ndv = max(dot(n, v), 0.0);
+    float rim = pow(1.0 - ndv, 3.0) * 0.18;
+    // Blinn-Phong highlight with Schlick fresnel; metals tint the highlight with their colour
+    vec3 hv = normalize(l + v);
+    float shininess = mix(8.0, 160.0, uGloss);
+    float spec = pow(max(dot(n, hv), 0.0), shininess) * (shininess + 8.0) / 25.0;
+    float fres = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+    vec3 specColor = mix(vec3(mix(0.04, 1.0, fres)), base.rgb, uMetal) * uGloss;
+    vec3 albedo = base.rgb * (1.0 - 0.85 * uMetal);
+    vec3 c = albedo * (amb + uLightColor * diff * lit) + specColor * spec * uLightColor * lit * diff + rim * (1.0 - uMetal) + base.rgb * amb * uMetal * 0.6;
     fragColor = vec4(c, base.a);
 }"""
+
+    /** Depth-only pass for the shadow map. */
+    const val DEPTH_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+uniform mat4 uMvp;
+void main() { gl_Position = uMvp * vec4(aPos, 1.0); }"""
+
+    const val DEPTH_FS = """#version 300 es
+precision mediump float;
+out vec4 fragColor;
+void main() { fragColor = vec4(1.0); }"""
 
     /** Textured world quad (panels, icons, labels) with rounded corners and hover glow. */
     const val QUAD_VS = """#version 300 es

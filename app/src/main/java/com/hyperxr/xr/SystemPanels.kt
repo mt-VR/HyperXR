@@ -155,7 +155,11 @@ class QuickSettingsPanel(private val a: LauncherActions, private val open: (Stri
         val s = HyperXRApp.instance.settings
         c.paragraph("${a.modeDescription} • ${a.trackingDescription}", 26f)
         c.toggle("mode", "Launcher no modo New", a.mode() == LauncherMode.NEW) { a.setMode(if (it) LauncherMode.NEW else LauncherMode.DOCK); dirty = true }
-        c.toggle("aura", "Aura das mãos", s.current.handTracking.showAura) { v -> s.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) }; dirty = true }
+        val hv = s.current.handTracking.handVisual
+        c.row("handvis", "Mãos: " + when (hv) { com.hyperxr.settings.HandVisual.SKELETON -> "esqueleto"; com.hyperxr.settings.HandVisual.AURA -> "aura"; com.hyperxr.settings.HandVisual.BOTH -> "esqueleto + aura"; else -> "ocultas" }) {
+            val next = com.hyperxr.settings.HandVisual.values()[(hv.ordinal + 1) % com.hyperxr.settings.HandVisual.values().size]
+            s.update { it.copy(handTracking = it.handTracking.copy(handVisual = next)) }; dirty = true
+        }
         c.toggle("dt", "Direct Touch", s.current.handTracking.directTouch) { v -> s.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) }; dirty = true }
         c.row("env", "Ambientes…") { open("environments") }
         c.row("reset", "Reorganizar ícones (modo New)") { a.resetLayout() }

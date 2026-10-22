@@ -161,4 +161,13 @@ class PhysicsTest {
         val worst = all.indices.maxOf { all[it].position.distanceTo(start[it]) }
         assertTrue("tower moved by ${worst * 1000} mm", worst < 0.006f)
     }
+
+    @Test fun aHandWakesARestingObject() {
+        val w = world()
+        val b = w.add(Body(Shape.box(0.03f, 0.03f, 0.03f), Material.WOOD)).also { it.teleport(Vec3(0f, 0.03f, 0f), Quat()) }
+        b.sleeping = true
+        val finger = w.add(Body(Shape.sphere(0.01f), Material.HAND, Body.Type.KINEMATIC)).also { it.teleport(Vec3(-0.08f, 0.03f, 0f), Quat()) }
+        for (i in 0 until 40) { w.moveKinematic(finger, Vec3(-0.08f + i * 0.004f, 0.03f, 0f), Quat(), 1 / 60f); w.step(1 / 60f) }
+        assertTrue("sleeping box was not pushed: ${b.position.x}", b.position.x > 0.02f)
+    }
 }

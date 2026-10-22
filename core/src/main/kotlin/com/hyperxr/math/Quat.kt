@@ -84,6 +84,28 @@ class Quat(
             return q.mul(dq, out).normalize()
         }
 
+        /** Rotation whose local X, Y, Z axes are the given orthonormal world vectors. */
+        fun fromBasis(x: Vec3, y: Vec3, z: Vec3, out: Quat = Quat()): Quat {
+            val m00 = x.x; val m10 = x.y; val m20 = x.z
+            val m01 = y.x; val m11 = y.y; val m21 = y.z
+            val m02 = z.x; val m12 = z.y; val m22 = z.z
+            val tr = m00 + m11 + m22
+            if (tr > 0f) {
+                val s = sqrt(tr + 1f) * 2f
+                out.set((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s)
+            } else if (m00 > m11 && m00 > m22) {
+                val s = sqrt(1f + m00 - m11 - m22) * 2f
+                out.set(0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s)
+            } else if (m11 > m22) {
+                val s = sqrt(1f + m11 - m00 - m22) * 2f
+                out.set((m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s)
+            } else {
+                val s = sqrt(1f + m22 - m00 - m11) * 2f
+                out.set((m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s)
+            }
+            return out.normalize()
+        }
+
         /** Rotation that maps unit vector a onto unit vector b. */
         fun fromTo(a: Vec3, b: Vec3, out: Quat = Quat()): Quat {
             val d = a.dot(b)

@@ -362,7 +362,11 @@ class RigidWorld {
                 val b = bodies[j]
                 if (!b.enabled) continue
                 if (!a.isDynamic && !b.isDynamic) continue
-                if ((!a.isDynamic || a.sleeping) && (!b.isDynamic || b.sleeping)) continue
+                // nothing to do unless something moves: an awake dynamic body, or a kinematic one
+                // (a hand) touching a sleeping body, which then wakes through its island
+                val aMoving = a.active || a.type == Body.Type.KINEMATIC
+                val bMoving = b.active || b.type == Body.Type.KINEMATIC
+                if (!aMoving && !bMoving) continue
                 if (a.group != 0 && a.group == b.group) continue
                 if ((a.ignoreGroup != 0 && a.ignoreGroup == b.group) || (b.ignoreGroup != 0 && b.ignoreGroup == a.group)) continue
                 val r = a.shape.boundingRadius() + b.shape.boundingRadius()

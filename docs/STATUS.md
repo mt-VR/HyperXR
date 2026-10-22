@@ -42,6 +42,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Janelas espaciais móveis (biblioteca, ajustes, arquivos, galeria, mensagens, ajuda, TV, apps XR, ambientes) | 🟡 |
 | Captura da visão para a Galeria | 🟡 |
 | Navegador GeckoView (motor do Firefox, o mesmo do Wolvic) renderizando direto na textura da janela | 🟡 (arm64; WebView como fallback) |
+| Orientação das janelas pela matriz real do SurfaceTexture (navegador não fica mais invertido) | 🟡 |
 | Navegador: abas, barra de endereço com pesquisa, progresso, favoritos, histórico, modo desktop/celular | 🟡 |
 | Navegador: `<select>`, alert/confirm/prompt como painéis XR; teclado abre sozinho ao focar um campo | 🟡 |
 | Navegador: vídeo em tela cheia vira tela de cinema curva (3,2 m a 2,4 m); downloads para Downloads | 🟡 |
@@ -61,6 +62,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Filtros, perda/recuperação, gestos, fusão de profundidade | ✅ |
 | Direct Touch (proximidade, contato, histerese, anti-duplo-clique, arrastar) | ✅ lógica · 🟡 integração |
 | Inferência de mãos (MediaPipe Hand Landmarker na GPU, fallback CPU, modelo embutido, benchmark) | 🟡 |
+| Pipeline de mãos: 3 slots, conversão YUV em 2 threads em paralelo com a inferência na GPU | 🟡 |
+| Esqueleto com comprimentos de osso do usuário + Kalman por junta + One Euro + predição | ✅ lógica · 🟡 aparelho |
+| Mãos desenhadas como esqueleto (juntas + ossos, com sombra) | 🟡 |
 | Hand tracking também no modo VR (câmera só para as mãos) | 🟡 |
 | Clique por olhar (dwell com anel de progresso), toque travado (não perde toques curtos), raio de mão + pinça | ✅ lógica (core e Lua) · 🟡 aparelho |
 | Aura preta (campo SDF unido + composição) | 🟡 |
@@ -86,6 +90,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Ponte JNI LuaJIT | ✅ no host · 🟡 no Android |
 | Scene/Window, UI, física, áudio, rede, arquivos | ✅ em Lua · 🟡 host Android |
 | Jogos antigos (STILLSHOT, FORGE LAB, PRIMAL RUSH) | removidos a pedido; desinstalados automaticamente |
+| **Hand Physics Lab** (bancada em MR junto da UI, física de corpos rígidos, mãos colisoras, pegar/arremessar, sombras) | ✅ física (11 testes) · 🟡 aparelho · ver HAND_PHYSICS_LAB.md |
 | `hx.camera` com pixels para scripts | ⏳ (retorna erro explicativo) |
 | Assinatura de pacotes por publicador | ⏳ |
 

@@ -94,6 +94,11 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private val browserStore by lazy { com.hyperxr.browser.BrowserStore(File(app.filesDir, "browser.json")) }
     /** Windows hidden by the dock's Home button (they keep running). */
     private var windowsMinimized = false
+    /** Hand Physics Lab bench, shown in the same space as the launcher while open. */
+    private var lab: com.hyperxr.lab.HandPhysicsLab? = null
+    private val cursorRay = Ray()
+    private var cursorRayValid = false
+    private var cursorLabDown = false
     private var restored = false
     private var lastSessionJson = ""
     private var keyboard: KeyboardPanel? = null
@@ -159,6 +164,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         appWindows.forEach { it.close(); it.screen.release() }
         windowControls.values.forEach { it.release() }
         keyboard?.release()
+        lab?.release(); lab = null
         Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex); Gl.deleteTexture(dragChipTex)
         radialTex.forEach { Gl.deleteTexture(it) }
     }
@@ -202,8 +208,10 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             if (!isTheater(w)) windowControls[w]?.let { surfaces += it }
         }
         keyboard?.let { if (it.visible) surfaces += it }
+        lab?.let { surfaces += it.panel }
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
+        lab?.update(dt, ctx.input.hands, head, if (cursorRayValid) cursorRay else null, cursorLabDown)
         handleTileEvents(visibleTiles)
 
         // submit
@@ -211,6 +219,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val dim = s.launcher.mode == LauncherMode.NEW && windowsShown
         for (t in visibleTiles) submitTile(t, dim)
         if (showHome) { home.update(dt); home.submit(ctx.scene) }
+        lab?.submit()
         dockControls.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
         for (w in windows) { w.update(dt); w.submit(ctx.scene) }
@@ -372,7 +381,12 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             stickCursor.ray(input.head, ray)
             val buttons = p.buttons or (other?.buttons ?: 0)
             val aDown = buttons and 128 != 0
-            ctrlPointers[0].update(ray, aDown, surfaces, now)
+            // A on a lab object carries it; A on the UI clicks
+            val l = lab
+            val toLab = l != null && ctrlPointers[0].captured == null && (cursorLabDown || (ctrlPointers[0].hovered == null && l.cursorTargetsObject(ray)))
+            cursorRay.origin.set(ray.origin); cursorRay.direction.set(ray.direction); cursorRayValid = true
+            cursorLabDown = toLab && aDown
+            ctrlPointers[0].update(ray, aDown && !toLab, surfaces, now)
             recordPointer(1, ray, aDown)
             if (ctrlPointers[0].hitDistance.isNaN()) hitPoints += ray.pointAt(1.5f) else trackHit(ctrlPointers[0], ray)
             dragWindows(ctrlPointers[0], ray, aDown)
@@ -389,19 +403,22 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             }
             if (!bDown && bWasDown && bDownNs != 0L) { bDownNs = 0L; backOrClose() }
             bWasDown = bDown
-        } else ctrlPointers[0].update(null, false, surfaces, now)
+        } else { ctrlPointers[0].update(null, false, surfaces, now); cursorRayValid = false; cursorLabDown = false }
         // hands: far rays clicked with a pinch, plus direct touch with the fingertip
         for (i in 0..1) {
             val h = input.hands[i]
             // pinch-and-hold away from any target opens the radial menu around this hand
             val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
-            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active
+            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active ||
+                lab?.handBusy?.get(i) == true
             if (!anyController && h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
                 radials[i].update(pinching, pinchPoint, input.head, overTarget, now)?.let { radialAction(it) }
             } else radials[i].update(false, pinchPoint, input.head, true, now)
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
-            val raw = if (!anyController && !menuOpen) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            // a hand working on the lab bench (holding or reaching an object) does not point at the UI
+            val labBusy = lab?.handBusy?.get(i) == true
+            val raw = if (!anyController && !menuOpen && !labBusy) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
             if (raw != null) {
                 // the (invisible) ray starts at the pinch ball; same line, so the hit point does not move
                 pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
@@ -674,6 +691,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             "xrapps" -> XrAppsPanel(this)
             "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
+            "handlab" -> { toggleLab(); return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
         placeAboveDock(w, yawOffsetDeg = (windows.size % 3 - 1) * 8f)
@@ -834,6 +852,16 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private fun exitTheater(w: SpatialWindow) {
         val sv = theater.remove(w) ?: return
         w.widthMeters = sv.width; w.curved = sv.curved; w.radius = sv.radius; w.pose.set(sv.pose)
+    }
+
+    // ---------------------------------------------------------------- Hand Physics Lab
+    private fun toggleLab() {
+        val l = lab
+        if (l != null) { l.release(); lab = null; return }
+        lab = com.hyperxr.lab.HandPhysicsLab(ctx) { glTasks += { lab?.release(); lab = null } }.also {
+            it.initGl()
+            it.place(ctx.input.head, anchorYaw)
+        }
     }
 
     // ---------------------------------------------------------------- dock Home / window state

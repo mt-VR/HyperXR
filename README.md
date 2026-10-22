@@ -1,10 +1,10 @@
 # HyperXR
 
 Plataforma XR para celulares Android em VR Box, headsets móveis e realidade mista: launcher espacial
-(modos **Dock** e **New**), realidade mista com câmera, VR estereoscópico SBS, integração OpenXR com
-Runtime Broker, hand tracking próprio com aura preta e Direct Touch, Joy-Cons, ambientes 3D
-licenciados, apps web e um SDK próprio de jogos em **LuaJIT 5.1** (pacotes `.hyperx`) com três jogos
-originais.
+(modos **Dock** e **New**), realidade mista com câmera, VR estereoscópico SBS, um **runtime OpenXR
+próprio**, hand tracking com esqueleto (Kalman + One Euro), Joy-Cons, navegador GeckoView, apps
+Android em janelas (Shizuku), o **Hand Physics Lab** (física de corpos rígidos numa bancada em
+realidade mista) e um SDK próprio em **LuaJIT 5.1** (pacotes `.hyperx`).
 
 > Estado honesto de cada recurso — o que foi testado, o que compila mas ainda não rodou em
 > hardware, e o que está pendente — está em **[docs/STATUS.md](docs/STATUS.md)**.
@@ -14,7 +14,7 @@ originais.
 | Caminho | Conteúdo |
 |---|---|
 | `core/` | Kotlin puro (JVM), testável sem Android: matemática, configurações, launcher, capacidades, formato `.hyperx`, permissões, glTF, pipeline temporal de mãos, Direct Touch, fusão Joy-Con, Runtime Broker (modelo), ambientes, latência |
-| `app/` | App Android: UI 2D (Compose), engine XR (GLES 3), ARCore/Camera2, hand tracking (LiteRT), Joy-Con, áudio, web apps, launcher espacial, runtime de jogos |
+| `app/` | App Android: UI 2D (Compose), engine XR (GLES 3), ARCore/Camera2, hand tracking (MediaPipe), Joy-Con, áudio, web apps, launcher espacial, runtime de jogos |
 | `app/src/main/cpp/` | JNI: ponte LuaJIT, OpenXR (loader Khronos), enumeração NNAPI |
 | `app/src/main/assets/hxsdk/` | SDK Lua confiável: `bootstrap.lua` (sandbox + API `hx`), `physics.lua`, `ui.lua`, `vmath.lua` |
 | `games/` | Fontes dos pacotes `.hyperx` embutidos: Relógio, Calculadora, Calendário |
@@ -29,7 +29,7 @@ Requisitos: JDK 17+, Android SDK (platform 36, build-tools 35), NDK 27.2.1247901
 
 ```bash
 ./gradlew :core:test                 # testes JVM do core
-./gradlew :app:assembleDebug         # APK (empacota os jogos .hyperx automaticamente)
+./gradlew :app:assembleDebug         # APK (empacota os pacotes .hyperx automaticamente)
 ./gradlew :app:lintDebug
 luajit sdk/tests/run_tests.lua       # testes do SDK Lua (LuaJIT 2.1 de desktop)
 ```
@@ -79,6 +79,7 @@ outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 - [Desempenho e metodologia de latência](docs/PERFORMANCE.md)
 - [Hand tracking](docs/HAND_TRACKING.md)
 - [HyperXR Runtime (OpenXR próprio)](docs/OPENXR_RUNTIME.md)
+- [Hand Physics Lab](docs/HAND_PHYSICS_LAB.md)
 - [Ícones](docs/ICONS.md)
 - [Testes](docs/TESTING.md)
 - [Status das funcionalidades](docs/STATUS.md)

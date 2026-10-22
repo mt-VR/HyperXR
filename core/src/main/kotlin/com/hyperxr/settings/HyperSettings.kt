@@ -68,8 +68,11 @@ data class HandTrackingSettings(
     val enabled: Boolean = true,
     val backend: InferenceBackend = InferenceBackend.GPU,
     val useArCoreDepth: Boolean = true,
-    val showAura: Boolean = true,
+    /** How tracked hands are drawn. */
+    val handVisual: HandVisual = HandVisual.SKELETON,
     val auraOpacity: Float = 0.45f,
+    /** Kalman process noise (m/s²)²: higher follows fast motion, lower smooths more. */
+    val kalmanProcessNoise: Float = 3f,
     val directTouch: Boolean = true,
     /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
     /** Pinch closes below this thumb–index distance / palm length (model landmarks). Renamed so old 0.25 values reset. */
@@ -84,6 +87,9 @@ data class HandTrackingSettings(
     val filterBeta: Float = 0.02f,
     val predictionMs: Float = 20f,
 )
+
+@Serializable
+enum class HandVisual { SKELETON, AURA, BOTH, NONE }
 
 @Serializable
 data class ControllerSettings(

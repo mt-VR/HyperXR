@@ -2,12 +2,17 @@
 
 ```
 câmera (ARCore CPU image ou Camera2 YUV 640x480; também em VR, só para as mãos)
- → YUV→RGB em buffers reutilizados, ≤ 480 px de largura (sem alocação por quadro)
+ → 3 slots em pipeline: enquanto a GPU infere o quadro N, a CPU converte o N+1 (YUV→RGB em
+   2 threads, buffers reutilizados) e a próxima inferência começa assim que a anterior termina
  → MediaPipe Hand Landmarker, LIVE_STREAM, delegate GPU (CPU como fallback, informado)
    · detector de palma só quando a mão some; depois rastreamento por ROI interno do MediaPipe
    · só o quadro mais novo é processado; quadros que chegam durante a inferência são descartados
  → DepthFusion: profundidade da palma pelo ARCore Depth ou pelo tamanho da mão
- → HandTracker: plausibilidade anatômica, One Euro, predição, perda/recuperação sem salto
+ → HandTracker: plausibilidade anatômica →
+     esqueleto (comprimentos de osso do usuário; cada osso mantém a direção observada) →
+     Kalman de velocidade constante por junta (peso pela confiança da profundidade) →
+     One Euro (tremor residual) → esqueleto de novo → predição pela velocidade do Kalman;
+     perda/recuperação sem salto
  → gestos (pinça proporcional à palma com histerese, apontar, punho, mão aberta, microgestos)
  → raio de mão estabilizado + pinça, menu radial, Direct Touch, aura, API hx.hands
 ```

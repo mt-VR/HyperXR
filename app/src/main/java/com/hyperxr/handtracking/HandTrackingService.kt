@@ -100,6 +100,8 @@ class HandTrackingService(private val context: Context) {
         trackers.values.forEach {
             it.setFilterParams(s.filterMinCutoff, s.filterBeta)
             it.pinchRatio = s.pinchClose
+            it.setProcessNoise(s.kalmanProcessNoise)
+            it.skeleton.reset() // bone lengths re-learned at the (possibly new) hand scale
             it.predictionSeconds = s.predictionMs / 1000f
         }
     }
