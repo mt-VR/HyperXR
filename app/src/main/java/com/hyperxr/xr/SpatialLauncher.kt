@@ -45,47 +45,16 @@ import java.io.FileOutputStream
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** A launchable icon placed in space. Long-press starts moving it (New mode). */
-class AppTile(val app: AppEntry, var size: Float = 0.17f) : InteractionSurface {
-    override val surfaceId = "tile:${app.id}"
-    override val pose = Pose()
-    override val widthMeters get() = size
-    override val heightMeters get() = size
-    var texture = 0
-    var labelTexture = 0
-    var labelAspect = 4f
-    var hover = 0f
-    var hovered = false
-    var pressedAt = 0L
-    var pressed = false
-    var moving = false
-    var clicked = false
-    var longPressed = false
-    var phase = Math.random().toFloat() * 6.28f
-    val target = Pose()
-
-    override fun onPointerEvent(event: PointerEvent) {
-        when (event.phase) {
-            PointerPhase.HOVER -> hovered = true
-            PointerPhase.EXIT -> { hovered = false; pressed = false }
-            PointerPhase.DOWN -> { pressed = true; pressedAt = event.timestampNs; longPressed = false }
-            PointerPhase.MOVE -> if (pressed && !longPressed && event.timestampNs - pressedAt > 550_000_000L) longPressed = true
-            PointerPhase.UP -> { if (pressed && !longPressed && !moving) clicked = true; pressed = false }
-            PointerPhase.CANCEL -> pressed = false
-        }
-    }
-}
-
 /**
- * The XR launcher. Dock mode: an arc of pinned apps under a home panel. New mode: apps float
- * around the user in 3D and can be grabbed and re-arranged (placements persist). Both modes share
- * the window manager (system panels, spatial web apps) and the pointer stack.
+ * The XR launcher, laid out like the Quest home. New mode: the app library floats in front of the
+ * user with the taskbar under it. Dock mode: windows side by side over the taskbar; the library
+ * opens from the taskbar. Both modes share the window manager (system panels, spatial web apps,
+ * Android apps) and the pointer stack.
  */
 class SpatialLauncher(override val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost, com.hyperxr.files.MediaHost {
     private val app = HyperXRApp.instance
     private val model = LauncherModel { allApps() }
     private lateinit var ctx: XrContext
-    private val tiles = LinkedHashMap<String, AppTile>()
     private val windows = ArrayList<XrPanel>()
     private val appWindows = ArrayList<SpatialWindow>()
     private val windowControls = LinkedHashMap<SpatialWindow, XrPanel>()
@@ -102,8 +71,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var restored = false
     private var lastSessionJson = ""
     private var keyboard: KeyboardPanel? = null
-    private lateinit var home: HomePanel
-    private lateinit var dockControls: DockControls
+    private lateinit var library: LibraryHomePanel
+    private lateinit var taskbar: TaskbarPanel
+    /** Library opened from the taskbar (Dock mode, or over windows in New mode). */
+    private var libraryShown = false
+    /** "camera", "dim" or an environment id. */
+    private var background = ""
     private val gaze = RayPointer(0, PointerSource.GAZE)
     private val ctrlPointers = arrayOf(RayPointer(1, PointerSource.JOYCON), RayPointer(2, PointerSource.JOYCON))
     private val touches = arrayOf(DirectTouch(3), DirectTouch(4))
@@ -113,8 +86,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var reticleTex = 0
     private var ringTex = 0
     private var installedApps: List<AppEntry> = emptyList()
-    private var movingTile: AppTile? = null
-    private var movingDistance = 1.6f
     private var currentEnvId = ""
 
     override val trackingDescription: String get() = if (::ctx.isInitialized) ctx.trackingDescription else ""
@@ -128,7 +99,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- catalog
     private var appsCache: List<AppEntry> = BuiltinApps.all
     private val surfaces = ArrayList<InteractionSurface>()
-    private val visibleTiles = ArrayList<AppTile>()
     override fun allApps(): List<AppEntry> = appsCache
     override fun icons(): IconFactory = ctx.icons
 
@@ -147,8 +117,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         this.ctx = ctx
         app.packages.installBundled()
         refreshInstalled()
-        home = HomePanel(this)
-        dockControls = DockControls(this) { openSystem(it) }
+        library = LibraryHomePanel(this, asWindow = false)
+        taskbar = TaskbarPanel(this)
         reticleTex = Gl.uploadBitmap(reticleBitmap())
         ringTex = Gl.uploadBitmap(ringBitmap())
         val env = app.environments.installed().firstOrNull { it.id == app.settings.current.launcher.environmentId } ?: PolyHavenCatalog.STUDIO
@@ -159,9 +129,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun onResume() { if (::ctx.isInitialized) activity.runOnUiThread { refreshInstalled() } }
 
     override fun onGlRelease() {
-        tiles.values.forEach { Gl.deleteTexture(it.texture); Gl.deleteTexture(it.labelTexture) }
-        tiles.clear()
-        (windows + home + dockControls).forEach { it.release() }
+        (windows + library + taskbar).forEach { it.release() }
         appWindows.forEach { it.close(); it.screen.release() }
         windowControls.values.forEach { it.release() }
         keyboard?.release()
@@ -191,21 +159,16 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         if (ctx.frameIndex % 90 == 0L) saveSession()
         val windowsShown = !windowsMinimized && appWindows.any { it.visible }
-        ctx.scene.background = if (ctx.passthroughAvailable) Background.PASSTHROUGH else Background.ENVIRONMENT
+        applyBackground()
 
-        layoutTiles(s.launcher.mode, dt)
         surfaces.clear()
-        val ids = visibleIds(s.launcher.mode)
-        visibleTiles.clear()
-        // inside a 360 photo/video only the dock and the open panels stay
+        // inside a 360 photo/video only the taskbar and the open panels stay
         val immersiveMedia = ctx.renderer.immersive != null
-        if (!immersiveMedia) for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
-        // New mode: the dimmed icons behind open windows do not catch the pointer
-        if (!(s.launcher.mode == LauncherMode.NEW && windowsShown)) surfaces += visibleTiles
-        // Dock: the home panel gives way to open windows (they sit above the dock row)
-        val showHome = s.launcher.mode == LauncherMode.DOCK && !windowsShown && !immersiveMedia
-        if (showHome) surfaces += home
-        surfaces += dockControls
+        // New mode: the library is home while no window is open; otherwise it opens from the taskbar
+        val showLibrary = !immersiveMedia && (libraryShown || (s.launcher.mode == LauncherMode.NEW && !windowsShown))
+        if (!showLibrary && libraryShown) libraryShown = false
+        if (showLibrary) surfaces += library
+        surfaces += taskbar
         surfaces += windows.filter { it.visible }
         if (!windowsMinimized) for (w in appWindows) if (w.visible) {
             surfaces += w
@@ -216,15 +179,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
         lab?.update(dt, ctx.input.hands, head, if (cursorRayValid) cursorRay else null, cursorLabDown)
-        handleTileEvents(visibleTiles)
 
         // submit
-        // New mode: icons behind open windows fade so the windows read as being on top
-        val dim = s.launcher.mode == LauncherMode.NEW && windowsShown
-        for (t in visibleTiles) submitTile(t, dim)
-        if (showHome) { home.update(dt); home.submit(ctx.scene) }
+        if (showLibrary) { library.update(dt); library.submit(ctx.scene) }
         lab?.submit()
-        dockControls.submit(ctx.scene)
+        taskbar.update(dt); taskbar.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
         for (w in windows) { w.update(dt); w.submit(ctx.scene) }
         if (!windowsMinimized) for ((w, c) in windowControls) {
@@ -237,68 +196,14 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         submitRadialMenus()
     }
 
-    private fun visibleIds(mode: LauncherMode): Set<String> =
-        if (mode == LauncherMode.DOCK) app.settings.current.launcher.pinned.toSet() else allApps().filter { it.kind != AppKind.ANDROID_PACKAGE }.map { it.id }.toSet()
-
     private fun anchorTo(head: Pose) {
         val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
         anchorYaw = kotlin.math.atan2(-f.x, -f.z)
-        home.pose.position.set(head.position.x - sin(anchorYaw) * 1.5f, head.position.y + 0.22f, head.position.z - cos(anchorYaw) * 1.5f)
-        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, home.pose.orientation)
-        dockControls.pose.position.set(head.position.x - sin(anchorYaw) * 1.25f, head.position.y - 0.62f, head.position.z - cos(anchorYaw) * 1.25f)
-        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, dockControls.pose.orientation)
-        // tilt the controls up towards the eyes
-        dockControls.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), dockControls.pose.orientation)
-    }
-
-    private fun tileFor(a: AppEntry): AppTile = tiles.getOrPut(a.id) {
-        AppTile(a).also { t ->
-            t.texture = Gl.uploadBitmap(ctx.icons.icon(a.iconKey, 256), mipmap = true)
-            val label = TextRenderer.render(a.title, 44f, Color.WHITE, isBold = true, maxWidth = 420)
-            t.labelAspect = label.width.toFloat() / label.height
-            t.labelTexture = Gl.uploadBitmap(label)
-            label.recycle()
-        }
-    }
-
-    private fun layoutTiles(mode: LauncherMode, dt: Float) {
-        val head = ctx.input.head
-        val s = app.settings.current.launcher
-        if (mode == LauncherMode.DOCK) {
-            val apps = model.dockApps(s)
-            val n = apps.size
-            apps.forEachIndexed { i, a ->
-                val t = tileFor(a)
-                t.size = 0.15f
-                val yaw = anchorYaw + Math.toRadians(((i - (n - 1) / 2f) * 9.5f).toDouble()).toFloat()
-                val r = 1.3f
-                t.target.position.set(head.position.x - sin(yaw) * r, head.position.y - 0.34f, head.position.z - cos(yaw) * r)
-                Quat.fromAxisAngle(0f, 1f, 0f, yaw, t.target.orientation)
-                t.target.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.25f), t.target.orientation)
-            }
-        } else {
-            val apps = allApps().filter { it.kind != AppKind.ANDROID_PACKAGE }
-            val slots = model.spatialPlacement(s, apps)
-            val origin = Vec3(head.position.x, head.position.y, head.position.z)
-            for (a in apps) {
-                val t = tileFor(a)
-                if (t === movingTile) continue
-                t.size = 0.2f
-                val slot = slots.getValue(a.id)
-                val rel = SpatialSlot(slot.yawDeg + Math.toDegrees(anchorYaw.toDouble()).toFloat(), slot.pitchDeg, slot.distance, slot.custom).toPosition()
-                t.phase += dt
-                val bob = if (app.settings.current.accessibility.reduceMotion) 0f else sin(t.phase * 0.9f) * 0.012f
-                t.target.position.set(origin.x + rel.x, origin.y + rel.y + bob, origin.z + rel.z)
-                faceTowards(t.target, origin)
-            }
-        }
-        for (t in tiles.values) {
-            if (t === movingTile) continue
-            val k = (dt * 10f).coerceIn(0f, 1f)
-            t.pose.position.lerp(t.target.position, k)
-            t.pose.orientation.slerp(t.target.orientation, k, t.pose.orientation)
-            t.hover += ((if (t.hovered) 1f else 0f) - t.hover) * (dt * 12f).coerceIn(0f, 1f)
-        }
+        placeLibraryHome(head)
+        taskbar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f, head.position.y - 0.5f, head.position.z - cos(anchorYaw) * 1.2f)
+        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, taskbar.pose.orientation)
+        // tilt the taskbar up towards the eyes
+        taskbar.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), taskbar.pose.orientation)
     }
 
     private fun faceTowards(p: Pose, eye: Vec3) {
@@ -310,29 +215,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         p.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, pitch), p.orientation)
     }
 
-    private fun submitTile(t: AppTile, dim: Boolean = false) {
-        val sc = ctx.scene
-        val grow = 1f + 0.12f * t.hover + if (t.pressed) -0.05f else 0f
-        val p = sc.addPanel()
-        p.texture = t.texture
-        p.pose.set(t.pose)
-        // pop the tile slightly towards the viewer when hovered
-        val fwd = t.pose.orientation.rotate(Vec3(0f, 0f, 1f))
-        p.pose.position.addScaled(fwd, 0.02f * t.hover)
-        p.width = t.size * grow; p.height = t.size * grow
-        p.radius = t.size * 0.18f * grow
-        p.glow = 0.35f * t.hover
-        if (t.app.kind == AppKind.UNAVAILABLE) p.alpha = 0.5f
-        if (dim) p.alpha *= 0.3f + 0.7f * t.hover
-        // label under the icon
-        val l = sc.addPanel()
-        l.texture = t.labelTexture
-        l.pose.set(t.pose)
-        val down = t.pose.orientation.rotate(Vec3(0f, -1f, 0f))
-        l.pose.position.addScaled(down, t.size * 0.5f + 0.028f)
-        l.height = 0.032f; l.width = l.height * t.labelAspect
-        l.radius = 0f
-        l.alpha = (0.6f + 0.4f * t.hover) * if (dim) 0.3f else 1f
+    /** The library as New mode's home: straight ahead of the launcher anchor, a little above the taskbar. */
+    private fun placeLibraryHome(head: Pose) {
+        library.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f, head.position.y + 0.06f, head.position.z - cos(anchorYaw) * 1.55f)
+        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, library.pose.orientation)
     }
 
     // ---------------------------------------------------------------- pointers
@@ -579,39 +465,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val target = p.captured as? XrPanel ?: return
         if (down && target.isDragging) target.drag(r.origin, r.direction, ctx.input.head)
         if (!down) target.endDrag()
-        // tiles being moved in New mode follow the ray at their distance
-        val mt = movingTile
-        if (mt != null) {
-            if (down) {
-                mt.pose.position.set(r.pointAt(movingDistance))
-                faceTowards(mt.pose, ctx.input.head.position)
-            }
-        }
-    }
-
-    private fun handleTileEvents(visible: List<AppTile>) {
-        val mode = app.settings.current.launcher.mode
-        for (t in visible) {
-            if (t.longPressed && mode == LauncherMode.NEW && movingTile == null) {
-                movingTile = t; t.moving = true
-                movingDistance = ctx.input.head.position.distanceTo(t.pose.position)
-            }
-            if (t.longPressed && mode == LauncherMode.DOCK) {
-                t.longPressed = false
-                openWindow(InfoPanel(t.app.title, "Segure no modo New para mover. Na Biblioteca use Fixar/Soltar para editar a dock.").apply { placeInFront(ctx.input.head) })
-            }
-            if (t.clicked) { t.clicked = false; launch(t.app) }
-        }
-        val mt = movingTile
-        if (mt != null && !mt.pressed) {
-            // release: persist the new spherical placement relative to the launcher anchor
-            val rel = Vec3.sub(mt.pose.position, ctx.input.head.position)
-            val slot = SpatialSlot.fromPosition(rel)
-            val yaw = slot.yawDeg - Math.toDegrees(anchorYaw.toDouble()).toFloat()
-            app.settings.update { it.copy(launcher = model.place(it.launcher, mt.app.id, yaw, slot.pitchDeg, slot.distance)) }
-            mt.moving = false; mt.longPressed = false
-            movingTile = null
-        }
     }
 
     private fun submitPointerVisuals() {
@@ -690,7 +543,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val head = ctx.input.head
         val w: XrPanel = when (target) {
             "settings" -> QuickSettingsPanel(this) { openSystem(it) }
-            "library" -> LibraryPanel(this)
+            "library" -> { if (!libraryOpen()) toggleLibrary(); return }
             "environments" -> EnvironmentsPanel(this)
             "files" -> com.hyperxr.files.FilesPanel(this)
             "gallery" -> com.hyperxr.files.GalleryPanel(this)
@@ -970,6 +823,56 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
     private val pendingClose = ArrayList<SpatialWindow>()
 
+    // ---------------------------------------------------------------- home UI (library + taskbar)
+    override fun backgroundOptions(): List<Pair<String, String>> = buildList {
+        if (::ctx.isInitialized && ctx.passthroughAvailable) { add("camera" to "Câmera"); add("dim" to "Escurecer MR") }
+        app.environments.installed().take(3).forEach { add(it.id to it.name.take(14)) }
+    }
+
+    override fun backgroundChoice(): String = background.ifEmpty { if (ctx.passthroughAvailable) "camera" else currentEnvId }
+
+    override fun setBackgroundChoice(id: String) {
+        background = id
+        if (id != "camera" && id != "dim") app.environments.installed().firstOrNull { it.id == id }?.let { selectEnvironment(it) }
+    }
+
+    /** Camera (optionally darkened behind the UI) or the chosen 3D environment. */
+    private fun applyBackground() {
+        val choice = backgroundChoice()
+        val camera = ctx.passthroughAvailable && (choice == "camera" || choice == "dim")
+        ctx.scene.background = if (camera) Background.PASSTHROUGH else Background.ENVIRONMENT
+        ctx.renderer.passthroughDim = if (camera && choice == "dim") 0.6f else 0f
+    }
+
+    override fun openTarget(target: String) = openSystem(target)
+
+    private val androidIcons = HashMap<String, Bitmap>()
+    override fun appIcon(app: AppEntry, size: Int): Bitmap {
+        if (app.kind != AppKind.ANDROID_PACKAGE || app.iconKey != null) return ctx.icons.icon(app.iconKey, size)
+        val pkg = app.target.substringBefore('/')
+        return androidIcons.getOrPut("$pkg@$size") {
+            try {
+                val d = activity.packageManager.getApplicationIcon(pkg)
+                Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { b ->
+                    val c = Canvas(b); d.setBounds(0, 0, size, size); d.draw(c)
+                }
+            } catch (_: Throwable) { ctx.icons.icon(null, size) }
+        }
+    }
+
+    override fun pinnedApps(): List<AppEntry> = model.dockApps(app.settings.current.launcher)
+    override fun libraryOpen(): Boolean = libraryShown || (mode() == LauncherMode.NEW && (windowsMinimized || appWindows.none { it.visible }))
+    override fun toggleLibrary() {
+        if (libraryOpen()) {
+            // in New mode with nothing open the library is home: hide the windows' absence instead
+            if (libraryShown) libraryShown = false else if (appWindows.isNotEmpty()) windowsMinimized = false
+            return
+        }
+        libraryShown = true
+        placeAboveDock(library, yawOffsetDeg = 0f, distance = 1.3f)
+    }
+    override fun isRunning(app: AppEntry): Boolean = appWindows.any { it.title == app.title } || windows.any { it.visible && it.title == app.title }
+
     // ---------------------------------------------------------------- MediaHost (files, gallery, viewers)
     override fun openPanel(p: XrPanel, distance: Float) {
         placeAboveDock(p, yawOffsetDeg = (windows.size % 3 - 1) * 8f, distance = distance)
@@ -986,6 +889,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     // ---------------------------------------------------------------- LauncherActions
     override fun launch(app: AppEntry) {
+        libraryShown = false  // the library opened from the taskbar gives way to what was launched
         this.app.settings.update { it.copy(launcher = model.recordLaunch(it.launcher, app.id)) }
         when (app.kind) {
             AppKind.HYPERX_PACKAGE -> {
@@ -1008,14 +912,17 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         this.app.settings.update { s -> s.copy(launcher = if (isPinned(app)) model.unpin(s.launcher, app.id) else model.pin(s.launcher, app.id)) }
     }
     override fun isPinned(app: AppEntry) = app.id in this.app.settings.current.launcher.pinned
-    override fun setMode(mode: LauncherMode) { app.settings.setLauncherMode(mode); dockControls.dirty = true }
+    override fun setMode(mode: LauncherMode) {
+        app.settings.setLauncherMode(mode); taskbar.dirty = true
+        libraryShown = false
+        if (mode == LauncherMode.NEW) placeLibraryHome(ctx.input.head)
+    }
     override fun mode(): LauncherMode = app.settings.current.launcher.mode
     override fun recenter() { ctx.requestRecenter(); anchored = false }
     override fun exitToSettings() = ctx.ui {
         activity.startActivity(Intent(activity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         activity.finish()
     }
-    override fun resetLayout() { app.settings.update { it.copy(launcher = model.resetLayout(it.launcher)) } }
     override fun currentEnvironmentId(): String = currentEnvId
 
     override fun selectEnvironment(entry: EnvironmentEntry) {

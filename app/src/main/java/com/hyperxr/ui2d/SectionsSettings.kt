@@ -71,8 +71,8 @@ fun LauncherSection(a: MainActivity) {
     val model = remember { LauncherModel { BuiltinApps.all } }
     SectionCard("Estilo do launcher", "A mesma preferência pode ser trocada dentro do XR (Ajustes rápidos ou barra da dock).") {
         Segmented(listOf("DOCK" to "Dock", "NEW" to "New"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
-        Note(if (s.mode == LauncherMode.DOCK) "Dock: barra espacial com apps fixados, painel inicial com relógio e recentes."
-        else "New: apps flutuam ao seu redor em 3D. Segure um ícone para movê-lo; a posição é salva.")
+        Note(if (s.mode == LauncherMode.DOCK) "Dock: janelas lado a lado sobre a barra de tarefas (relógio, apps fixados, Biblioteca, Ajustes)."
+        else "New: a Biblioteca fica à sua frente (fundo, pesquisa, categorias, grade de apps) com a barra de tarefas embaixo. Segure um app para fixá-lo na barra.")
         ToggleRow("Reabrir janelas ao entrar no XR", s.restoreWindows, "Abas do navegador e apps Android abertos voltam onde estavam") { v ->
             a.update { it.copy(launcher = it.launcher.copy(restoreWindows = v)) }
         }
@@ -94,7 +94,6 @@ fun LauncherSection(a: MainActivity) {
                 Button(onClick = { a.update { it.copy(launcher = model.pin(it.launcher, choice!!.id)) } }) { Text("Fixar") }
             }
         }
-        OutlinedButton(onClick = { a.update { it.copy(launcher = model.resetLayout(it.launcher)) } }) { Text("Restaurar posições do modo New") }
     }
 }
 

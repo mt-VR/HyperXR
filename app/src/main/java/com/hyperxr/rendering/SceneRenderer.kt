@@ -147,6 +147,9 @@ class SceneRenderer {
     private lateinit var panoOesProg: Program
     private lateinit var oesFullProg: Program
     private lateinit var guardProg: Program
+    private lateinit var dimProg: Program
+    /** 0..1: how much the camera image is darkened behind the UI ("dimmed MR"). */
+    @Volatile var passthroughDim = 0f
     private var fullVao = 0
     /** Fill each eye with the camera image (true) or keep its real angular size (false). */
     var passthroughFill = true
@@ -197,6 +200,7 @@ class SceneRenderer {
         panoOesProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_OES_FS, "pano-oes"))
         oesFullProg = Program(Gl.compile(Shaders.OES_FULL_VS, Shaders.OES_FS, "oes-full"))
         guardProg = Program(Gl.compile(Shaders.GUARD_VS, Shaders.GUARD_FS, "guard"))
+        dimProg = Program(Gl.compile(Shaders.DIM_VS, Shaders.DIM_FS, "dim"))
         fullVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(fullVao)
         FullscreenTriangle.bind()
@@ -234,10 +238,13 @@ class SceneRenderer {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
         immersive?.let { drawImmersive(eye, it); return }
         when (scene.background) {
-            Background.PASSTHROUGH -> when {
-                camera == null || !camera.hasFrame -> drawEnvironment(eye, scene)
-                passthroughFill -> drawCameraFull(eye, camera)
-                else -> drawCamera(eye, camera, headPose)
+            Background.PASSTHROUGH -> {
+                when {
+                    camera == null || !camera.hasFrame -> drawEnvironment(eye, scene)
+                    passthroughFill -> drawCameraFull(eye, camera)
+                    else -> drawCamera(eye, camera, headPose)
+                }
+                if (passthroughDim > 0f) drawDim(passthroughDim)
             }
             Background.ENVIRONMENT -> drawEnvironment(eye, scene)
             Background.COLOR -> Unit
@@ -347,6 +354,21 @@ class SceneRenderer {
     private val floorMatrix = Mat4.compose(Vec3(0f, 0f, 0f), Quat(), 60f, 1f, 60f, FloatArray(16))
 
     /** Camera image stretched over the whole eye with a centre crop that preserves its aspect. */
+    private fun drawDim(amount: Float) {
+        GLES30.glUseProgram(dimProg.id)
+        GLES30.glUniform1f(dimProg.u("uDim"), amount.coerceIn(0f, 1f))
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glBindVertexArray(fullVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        GLES30.glBindVertexArray(0)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+    }
+
     private fun drawCameraFull(eye: EyeView, camera: CameraImageSource) {
         val (cropU, cropV) = fillCrop(eye.proj[5] / eye.proj[0], camera)
         GLES30.glUseProgram(oesFullProg.id)

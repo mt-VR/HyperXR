@@ -295,6 +295,54 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         return tw + 28f
     }
 
+    /**
+     * App cell of a launcher grid: the icon as a rounded square, the name under it; the cell lights
+     * up when hovered and shrinks a little while pressed (like the Quest library).
+     */
+    fun appCell(id: String, icon: Bitmap, label: String, x: Float, top: Float, cw: Float, ch: Float,
+                onLong: (() -> Unit)? = null, action: () -> Unit) {
+        val r = RectF(x, top, x + cw, top + ch)
+        val hover = panel.isHovered(id); val press = panel.isPressed(id)
+        if (hover || press) {
+            fill.color = if (press) XrTheme.buttonPressed else XrTheme.buttonHover
+            canvas.drawRoundRect(r, 22f, 22f, fill)
+        }
+        val labelH = 40f
+        var s = minOf(cw - 24f, ch - labelH - 20f)
+        if (press) s *= 0.94f
+        val ix = x + (cw - s) / 2; val iy = top + 10f + (ch - labelH - 10f - s) / 2
+        canvas.save()
+        val clip = android.graphics.Path().apply { addRoundRect(RectF(ix, iy, ix + s, iy + s), s * 0.22f, s * 0.22f, android.graphics.Path.Direction.CW) }
+        canvas.clipPath(clip)
+        canvas.drawBitmap(icon, null, RectF(ix, iy, ix + s, iy + s), bmpPaint)
+        canvas.restore()
+        text.textSize = 24f; text.typeface = XrTheme.medium; text.color = XrTheme.text
+        val t = TextUtilsEllipsize(label, text, cw - 10f)
+        canvas.drawText(t, x + (cw - text.measureText(t)) / 2, top + ch - 12f, text)
+        panel.addRegion(XrPanel.Region(r, id, action, onLong))
+    }
+
+    /** Square button showing only an app icon (taskbar). */
+    fun iconButton(id: String, icon: Bitmap, x: Float, top: Float, size: Float, active: Boolean = false, action: () -> Unit) {
+        val r = RectF(x, top, x + size, top + size)
+        val hover = panel.isHovered(id); val press = panel.isPressed(id)
+        if (hover || press) {
+            fill.color = if (press) XrTheme.buttonPressed else XrTheme.buttonHover
+            canvas.drawRoundRect(r, size * 0.28f, size * 0.28f, fill)
+        }
+        val inset = size * (if (press) 0.16f else 0.12f)
+        val ir = RectF(x + inset, top + inset, x + size - inset, top + size - inset)
+        canvas.save()
+        canvas.clipPath(android.graphics.Path().apply { addRoundRect(ir, ir.width() * 0.24f, ir.width() * 0.24f, android.graphics.Path.Direction.CW) })
+        canvas.drawBitmap(icon, null, ir, bmpPaint)
+        canvas.restore()
+        if (active) {
+            fill.color = XrTheme.text
+            canvas.drawRoundRect(RectF(r.centerX() - 10f, r.bottom - 5f, r.centerX() + 10f, r.bottom - 1f), 2f, 2f, fill)
+        }
+        panel.addRegion(XrPanel.Region(r, id, action))
+    }
+
     fun image(b: Bitmap, x: Float, top: Float, iw: Float, ih: Float) = canvas.drawBitmap(b, null, RectF(x, top, x + iw, top + ih), bmpPaint)
 
     fun divider() {

@@ -196,6 +196,17 @@ void main() {
     fragColor = vec4(tint, a);
 }"""
 
+    /** Darkens the whole view (dimmed passthrough behind the UI). */
+    const val DIM_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+void main() { gl_Position = vec4(aPos.xy, 0.999, 1.0); }"""
+
+    const val DIM_FS = """#version 300 es
+precision mediump float;
+uniform float uDim;
+out vec4 fragColor;
+void main() { fragColor = vec4(0.0, 0.0, 0.0, uDim); }"""
+
     /** Gradient sky for the procedural studio environment. */
     const val SKY_VS = """#version 300 es
 layout(location=0) in vec3 aPos;

@@ -36,7 +36,6 @@ interface LauncherActions {
     fun capture()
     fun allApps(): List<AppEntry>
     fun icons(): IconFactory
-    fun resetLayout()
     fun windowCount(): Int
     fun windowsMinimized(): Boolean
     /** Dock Home button: hide all windows (they keep running) or bring them back. */
@@ -44,112 +43,22 @@ interface LauncherActions {
     val trackingDescription: String
     val modeDescription: String
     val handStatus: String
+    /** Background tabs of the library: id ("camera", "dim" or an environment id) to label. */
+    fun backgroundOptions(): List<Pair<String, String>>
+    fun backgroundChoice(): String
+    fun setBackgroundChoice(id: String)
+    /** Opens a system panel by its catalog target ("files", "settings", "environments"...). */
+    fun openTarget(target: String)
+    fun appIcon(app: AppEntry, size: Int): Bitmap
+    fun openKeyboard(target: com.hyperxr.windows.KeyTarget)
+    fun closeKeyboard()
+    fun pinnedApps(): List<AppEntry>
+    fun libraryOpen(): Boolean
+    fun toggleLibrary()
+    fun isRunning(app: AppEntry): Boolean
 }
 
 private val background = Executors.newSingleThreadExecutor()
-
-/** Status + clock + recents (Dock mode home). */
-class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = "") {
-    init { closable = false; priority = 0 }
-    private var lastMinute = -1
-    private val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
-    private val dateFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
-
-    override fun update(dt: Float) {
-        val m = (System.currentTimeMillis() / 60000).toInt()
-        if (m != lastMinute) { lastMinute = m; dirty = true }
-    }
-
-    override fun draw(c: PanelCanvas) {
-        c.label(fmt.format(Date()), c.pad, 30f, 96f, XrTheme.text, bold = true)
-        c.label(dateFmt.format(Date()), c.pad + 4f, 150f, 30f, XrTheme.textDim)
-        var x = c.pad
-        x += c.chip(a.modeDescription, x, 200f, XrTheme.accent) + 10f
-        c.chip(a.trackingDescription, x, 200f, XrTheme.button)
-        c.label("Recentes", 560f, 36f, 30f, XrTheme.textDim, bold = true)
-        val recents = a.allApps().let { all -> HyperXRApp.instance.settings.current.launcher.recents.mapNotNull { id -> all.firstOrNull { it.id == id } } }.take(4)
-        if (recents.isEmpty()) c.label("Nenhum app aberto ainda", 560f, 90f, 26f, XrTheme.textDim)
-        recents.forEachIndexed { i, app ->
-            c.button("recent:${app.id}", app.title, 560f + (i % 2) * 230f, 84f + (i / 2) * 100f, 218f, 86f, icon = a.icons().icon(app.iconKey, 96)) { a.launch(app) }
-        }
-    }
-}
-
-/** Dock controls strip: library, quick settings, mode switch, recenter. */
-class DockControls(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.36f, 0.13f, title = "") {
-    init { closable = false; priority = 0 }
-    private var lastMinute = -1L
-    private var lastWindows = -1
-    private var battery = ""
-
-    override fun update(dt: Float) {
-        val minute = System.currentTimeMillis() / 60_000
-        val n = a.windowCount() * 2 + if (a.windowsMinimized()) 1 else 0
-        if (minute != lastMinute || n != lastWindows) {
-            lastMinute = minute; lastWindows = n
-            battery = batteryText()
-            dirty = true
-        }
-    }
-
-    private fun batteryText(): String {
-        val i = com.hyperxr.HyperXRApp.instance.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)) ?: return ""
-        val level = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
-        val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)
-        val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
-        if (level < 0) return ""
-        return "${level * 100 / scale.coerceAtLeast(1)}%" + if (plugged) " carregando" else ""
-    }
-
-    override fun draw(c: PanelCanvas) {
-        val n = a.windowCount()
-        val count = if (n > 0) 5 else 4
-        val statusW = 230f
-        val bw = (c.w - c.pad * 2 - statusW - count * 14f) / count
-        val y = 16f
-        var x = c.pad
-        fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 86f, accent = accent) { act() }; x += bw + 14f }
-        if (n > 0) b("win", if (a.windowsMinimized()) "Janelas ($n)" else "Início", accent = a.windowsMinimized()) { a.toggleWindows() }
-        b("lib", "Biblioteca") { open("library") }
-        b("qs", "Ajustes rápidos") { open("settings") }
-        b("mode", if (a.mode() == LauncherMode.DOCK) "Modo: Dock" else "Modo: New", accent = true) {
-            a.setMode(if (a.mode() == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)
-        }
-        b("rc", "Recentralizar") { a.recenter() }
-        val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-        c.label(time, x + 10f, 14f, 40f, XrTheme.text, bold = true)
-        if (battery.isNotEmpty()) c.label(battery, x + 10f, 64f, 26f, XrTheme.textDim)
-    }
-}
-
-class LibraryPanel(private val a: LauncherActions) : XrPanel(1.3f, 0.95f, title = "Biblioteca") {
-    private var category: AppCategory? = null
-    private var page = 0
-    override fun draw(c: PanelCanvas) {
-        val cats = listOf(null to "Todos", AppCategory.HYPERXR_GAME to "Jogos", AppCategory.WEB to "Web",
-            AppCategory.CARDBOARD to "Cardboard", AppCategory.OPENXR to "OpenXR", AppCategory.SYSTEM to "Sistema")
-        val bw = (c.w - 2 * c.pad - 5 * 10f) / 6
-        cats.forEachIndexed { i, (cat, label) ->
-            c.button("cat$i", label, c.pad + i * (bw + 10f), c.y, bw, 70f, accent = category == cat) { category = cat; page = 0; dirty = true }
-        }
-        c.y += 90f
-        val apps = a.allApps().filter { category == null || it.category == category }
-        val perPage = 8
-        val pages = maxOf(1, (apps.size + perPage - 1) / perPage)
-        page = page.coerceIn(0, pages - 1)
-        val colW = (c.w - 2 * c.pad - 20f) / 2
-        apps.drop(page * perPage).take(perPage).forEachIndexed { i, app ->
-            val x = c.pad + (i % 2) * (colW + 20f)
-            val y = c.y + (i / 2) * 120f
-            c.button("open:${app.id}", app.title, x, y, colW - 110f, 104f, icon = a.icons().icon(app.iconKey, 128)) { a.launch(app) }
-            c.button("pin:${app.id}", if (a.isPinned(app)) "Soltar" else "Fixar", x + colW - 100f, y, 100f, 104f, accent = a.isPinned(app)) { a.togglePin(app); dirty = true }
-        }
-        val by = c.h - 110f
-        c.button("prev", "‹ Anterior", c.pad, by, 220f, 80f, enabled = page > 0) { page--; dirty = true }
-        c.label("Página ${page + 1} de $pages  •  ${apps.size} apps", c.w / 2 - 150f, by + 22f, 28f, XrTheme.textDim)
-        c.button("next", "Próxima ›", c.w - c.pad - 220f, by, 220f, 80f, enabled = page < pages - 1) { page++; dirty = true }
-    }
-}
 
 class QuickSettingsPanel(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.0f, 1.1f, title = "Ajustes rápidos") {
     private var t = 0f
@@ -166,7 +75,6 @@ class QuickSettingsPanel(private val a: LauncherActions, private val open: (Stri
         }
         c.toggle("dt", "Direct Touch", s.current.handTracking.directTouch) { v -> s.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) }; dirty = true }
         c.row("env", "Ambientes…") { open("environments") }
-        c.row("reset", "Reorganizar ícones (modo New)") { a.resetLayout() }
         c.row("rc", "Recentralizar visão") { a.recenter() }
         c.row("exit", "Sair para as configurações 2D", accent = true) { a.exitToSettings() }
     }
