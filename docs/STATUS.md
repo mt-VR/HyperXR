@@ -53,6 +53,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Captura da visão para a Galeria | 🟡 |
 | Home estilo Quest: Biblioteca (abas de fundo, pesquisa, categorias, grade) no modo New; janelas lado a lado + barra de tarefas no modo Dock | 🟡 |
 | MR escurecido atrás da UI | 🟡 |
+| App-to-World: música (sessão de mídia) como caixa de som, notificações como cartas com ações/resposta, estante de arquivos, portais de apps com compartilhamento por arrastar | 🟡 |
+| App-to-World API: manifesto espacial de apps de terceiros (objetos, gestos, intents ao próprio pacote, estado por provider) | ✅ parser (testes) · 🟡 aparelho |
 | Jogo "Gato vs. Vovó" (VR, Joy-Cons, física, IA da vovó) — docs/CAT_GAME.md | 🟡 |
 | Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |

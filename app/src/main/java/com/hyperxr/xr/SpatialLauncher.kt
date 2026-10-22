@@ -75,6 +75,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private lateinit var taskbar: TaskbarPanel
     /** Library opened from the taskbar (Dock mode, or over windows in New mode). */
     private var libraryShown = false
+    /** App-to-World: apps as objects around the user. */
+    private lateinit var appWorld: com.hyperxr.appworld.AppWorld
     /** "camera", "dim" or an environment id. */
     private var background = ""
     private val gaze = RayPointer(0, PointerSource.GAZE)
@@ -119,6 +121,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         refreshInstalled()
         library = LibraryHomePanel(this, asWindow = false)
         taskbar = TaskbarPanel(this)
+        appWorld = com.hyperxr.appworld.AppWorld(ctx, this, this)
+        ctx.ui { com.hyperxr.appworld.MediaHub.start(activity) }
         reticleTex = Gl.uploadBitmap(reticleBitmap())
         ringTex = Gl.uploadBitmap(ringBitmap())
         val env = app.environments.installed().firstOrNull { it.id == app.settings.current.launcher.environmentId } ?: PolyHavenCatalog.STUDIO
@@ -130,6 +134,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override fun onGlRelease() {
         (windows + library + taskbar).forEach { it.release() }
+        if (::appWorld.isInitialized) appWorld.release()
         appWindows.forEach { it.close(); it.screen.release() }
         windowControls.values.forEach { it.release() }
         keyboard?.release()
@@ -176,6 +181,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         keyboard?.let { if (it.visible) surfaces += it }
         lab?.let { surfaces += it.panel }
+        // App-to-World objects (hidden inside a 360 photo/video, like the library)
+        if (!immersiveMedia) surfaces += appWorld.hits
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
         lab?.update(dt, ctx.input.hands, head, if (cursorRayValid) cursorRay else null, cursorLabDown)
@@ -183,6 +190,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         // submit
         if (showLibrary) { library.update(dt); library.submit(ctx.scene) }
         lab?.submit()
+        if (!immersiveMedia) { appWorld.update(dt); appWorld.submit() }
         taskbar.update(dt); taskbar.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
         for (w in windows) { w.update(dt); w.submit(ctx.scene) }
@@ -200,6 +208,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
         anchorYaw = kotlin.math.atan2(-f.x, -f.z)
         placeLibraryHome(head)
+        appWorld.anchorTo(head, anchorYaw)
         taskbar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f, head.position.y - 0.5f, head.position.z - cos(anchorYaw) * 1.2f)
         Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, taskbar.pose.orientation)
         // tilt the taskbar up towards the eyes
@@ -462,6 +471,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
 
     private fun dragWindows(p: RayPointer, r: Ray, down: Boolean) {
+        (p.captured as? com.hyperxr.appworld.WorldHit)?.let { appWorld.drag(it, r, down); return }
         val target = p.captured as? XrPanel ?: return
         if (down && target.isDragging) target.drag(r.origin, r.direction, ctx.input.head)
         if (!down) target.endDrag()
@@ -554,6 +564,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
+            "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }

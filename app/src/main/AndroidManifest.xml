@@ -65,6 +65,10 @@
         <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
         <package android:name="com.google.ar.core" />
         <package android:name="moe.shizuku.privileged.api" />
+        <!-- Apps that declare objects for App-to-World (spatial manifest). -->
+        <intent>
+            <action android:name="com.hyperxr.action.SPATIAL" />
+        </intent>
         <!-- Launchable apps for XR windows (Shizuku). -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -141,6 +145,18 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- App-to-World: notifications and media sessions of other apps become objects in the
+             world (the user enables notification access in Android settings). -->
+        <service
+            android:name=".appworld.HxNotificationListener"
+            android:exported="true"
+            android:label="HyperXR App-to-World"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Gato vs. Vovó (cat game, VR, Joy-Cons). -->
         <activity
