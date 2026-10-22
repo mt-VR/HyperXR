@@ -81,6 +81,7 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
     /** Curved windows wrap around the user at this radius. */
     var radius = 1.6f
     override val curvatureRadius: Float get() = if (curved) radius else 0f
+    override val hitPriority: Int get() = 1
     var visible = true
     @Volatile var status: String? = null
 

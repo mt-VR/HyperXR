@@ -116,6 +116,7 @@ class BrowserBar(val w: BrowserWindow, private val host: BrowserUiHost) : XrPane
 /** A page dialog (alert, confirm, <select>, prompt) as an XR panel; text answers use the keyboard. */
 class PromptPanel(val prompt: BrowserPrompt, private val host: BrowserUiHost) : XrPanel(1.0f, 0.2f + 0.085f * minOf(prompt.options.size, 8) + 0.12f, title = prompt.title) {
     private var page = 0
+    init { priority = 2 }
     private val text = object : KeyTarget {
         var value = prompt.defaultText
         override fun typeText(text: String) { value += text; dirty = true }

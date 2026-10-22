@@ -187,6 +187,8 @@ fun HandsSection(a: MainActivity) {
         ChoiceRow("Visual das mãos", com.hyperxr.settings.HandVisual.values().toList(), h.handVisual, {
             when (it) { com.hyperxr.settings.HandVisual.SKELETON -> "Esqueleto"; com.hyperxr.settings.HandVisual.AURA -> "Aura"; com.hyperxr.settings.HandVisual.BOTH -> "Ambos"; else -> "Ocultas" }
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }
+        SliderRow("Inclinação do raio da mão", h.rayPitchDeg, 0f..45f, { "%.0f° para cima".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(rayPitchDeg = v)) } }
+        Note("Maior = alcança janelas altas com a mão mais baixa. Se o cursor ficar preso na dock, aumente.")
         SliderRow("Filtro de Kalman: resposta", h.kalmanProcessNoise, 0.3f..30f, { "%.1f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(kalmanProcessNoise = v)) } }
         Note("Kalman menor = mais suave; maior = segue movimentos rápidos. O One Euro abaixo remove o tremor restante.")
         SliderRow("Opacidade da aura", h.auraOpacity, 0.1f..0.9f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }

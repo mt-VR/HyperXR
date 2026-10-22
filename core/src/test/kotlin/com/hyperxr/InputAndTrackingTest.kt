@@ -304,6 +304,12 @@ class InputAndTrackingTest {
     }
 
     @Test fun imuDriftIsPulledTowardsTheHandRay() {
+        val oldTilt = com.hyperxr.input.HandRay.pitchOffsetDeg
+        com.hyperxr.input.HandRay.pitchOffsetDeg = 0f // this test compares against the raw shoulder-to-hand line
+        try { imuDriftBody() } finally { com.hyperxr.input.HandRay.pitchOffsetDeg = oldTilt }
+    }
+
+    private fun imuDriftBody() {
         val fusion = ControllerPoseFusion().apply { useImu = true; imuCorrectionRate = 2f }
         val head = Pose(Vec3(0f, 1.6f, 0f))
         val hand = trackedHand(Vec3(0.2f, 1.38f, -0.5f))

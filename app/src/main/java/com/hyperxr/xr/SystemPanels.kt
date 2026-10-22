@@ -50,7 +50,7 @@ private val background = Executors.newSingleThreadExecutor()
 
 /** Status + clock + recents (Dock mode home). */
 class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = "") {
-    init { closable = false }
+    init { closable = false; priority = 0 }
     private var lastMinute = -1
     private val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val dateFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
@@ -77,7 +77,7 @@ class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = 
 
 /** Dock controls strip: library, quick settings, mode switch, recenter. */
 class DockControls(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.36f, 0.13f, title = "") {
-    init { closable = false }
+    init { closable = false; priority = 0 }
     private var lastMinute = -1L
     private var lastWindows = -1
     private var battery = ""
@@ -345,6 +345,7 @@ class KeyboardPanel(
     /** Starts voice dictation; the recognized text is passed to the callback (null when unavailable). */
     private val dictate: ((onText: (String?) -> Unit) -> Unit)? = null,
 ) : XrPanel(0.82f, 0.38f, ppm = 1500f, title = "Teclado") {
+    init { priority = 2 } // the keyboard is always reachable
     private var shift = false
     private var layer = 0 // 0 letters, 1 symbols, 2 accents
     @Volatile private var listening = false

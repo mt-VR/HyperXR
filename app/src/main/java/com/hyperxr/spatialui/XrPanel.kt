@@ -51,6 +51,9 @@ abstract class XrPanel(
     override val pose = Pose()
     var visible = true
     var closable = true
+    /** Panels and windows are above the launcher icons for pointing (see InteractionSurface). */
+    override val hitPriority: Int get() = priority
+    var priority = 1
     var onClose: (() -> Unit)? = null
     val pxW get() = (widthMeters * ppm).toInt()
     val pxH get() = (heightMeters * ppm).toInt()

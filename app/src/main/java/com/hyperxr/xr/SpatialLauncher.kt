@@ -198,7 +198,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val ids = visibleIds(s.launcher.mode)
         visibleTiles.clear()
         for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
-        surfaces += visibleTiles
+        // New mode: the dimmed icons behind open windows do not catch the pointer
+        if (!(s.launcher.mode == LauncherMode.NEW && windowsShown)) surfaces += visibleTiles
         // Dock: the home panel gives way to open windows (they sit above the dock row)
         val showHome = s.launcher.mode == LauncherMode.DOCK && !windowsShown
         if (showHome) surfaces += home
@@ -361,6 +362,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
 
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
         val now = System.nanoTime()
+        com.hyperxr.input.HandRay.pitchOffsetDeg = app.settings.current.handTracking.rayPitchDeg
         hitPoints.clear()
         val input = ctx.input
         val controls = app.settings.current.controllers

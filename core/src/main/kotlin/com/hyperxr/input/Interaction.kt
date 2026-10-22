@@ -17,6 +17,11 @@ interface InteractionSurface {
      * is the arc length.
      */
     val curvatureRadius: Float get() = 0f
+    /**
+     * When a pointer ray crosses several surfaces, the highest priority wins, then the nearest:
+     * windows sit "on top" of the launcher icons even where an icon is physically closer.
+     */
+    val hitPriority: Int get() = 0
 
     /** u,v in [0,1] with v=0 at the top edge. */
     fun onPointerEvent(event: PointerEvent)
@@ -246,10 +251,13 @@ class RayPointer(val pointerId: Int, val source: PointerSource) {
         var best: InteractionSurface? = null
         var bestD = Float.POSITIVE_INFINITY
         var bu = 0f; var bv = 0f
+        var bestP = Int.MIN_VALUE
         for (s in surfaces) {
             if (!s.interactive) continue
             val d = SurfaceMath.raycast(s, ray, uv)
-            if (!d.isNaN() && d < bestD) { bestD = d; best = s; bu = uv[0]; bv = uv[1] }
+            if (d.isNaN()) continue
+            val p = s.hitPriority
+            if (p > bestP || (p == bestP && d < bestD)) { bestP = p; bestD = d; best = s; bu = uv[0]; bv = uv[1] }
         }
         uv[0] = bu; uv[1] = bv
         if (best !== hovered) {

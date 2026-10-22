@@ -71,6 +71,15 @@ class DwellClick(var dwellNs: Long = 1_100_000_000L, var tolerance: Float = 0.03
 object HandRay {
     private val tmp = Vec3()
     private val yaw = Quat()
+    private val right = Vec3()
+    private val tilt = Quat()
+
+    /**
+     * Upward tilt of the ray (degrees). Shoulder-through-hand points where the arm points; with the
+     * hand at a relaxed chest height that is the floor area in front of the user (the dock), so
+     * windows at eye level needed the arm raised high. The tilt lets a relaxed hand reach them.
+     */
+    var pitchOffsetDeg = 25f
 
     fun compute(hand: HandState, head: Pose, rightHand: Boolean, out: Ray): Ray? {
         if (!hand.isUsable) return null
@@ -80,6 +89,17 @@ object HandRay {
         out.direction.set(target).sub(out.origin)
         if (out.direction.length() < 0.05f) return null
         out.direction.normalize()
+        if (pitchOffsetDeg != 0f) {
+            // rotate upwards about the horizontal axis perpendicular to the ray
+            right.set(-out.direction.z, 0f, out.direction.x) // dir x up: the ray's right-hand side
+            if (right.length() > 1e-4f) {
+                right.normalize()
+                Quat.fromAxisAngle(right.x, right.y, right.z, Math.toRadians(pitchOffsetDeg.toDouble()).toFloat(), tilt)
+                tilt.rotate(out.direction, tmp)
+                // never tilt past straight up
+                if (tmp.y < 0.97f) out.direction.set(tmp).normalize()
+            }
+        }
         return out
     }
 }

@@ -71,6 +71,8 @@ data class HandTrackingSettings(
     /** How tracked hands are drawn. */
     val handVisual: HandVisual = HandVisual.SKELETON,
     val auraOpacity: Float = 0.45f,
+    /** Upward tilt of the hand ray (degrees) so a relaxed hand reaches eye-level windows. */
+    val rayPitchDeg: Float = 25f,
     /** Kalman process noise (m/s²)²: higher follows fast motion, lower smooths more. */
     val kalmanProcessNoise: Float = 3f,
     val directTouch: Boolean = true,

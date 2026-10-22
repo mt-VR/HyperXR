@@ -88,4 +88,24 @@ class ClickAssistTest {
         assertTrue(r!!.direction.z < -0.9f)
         assertEquals(0.17f, r.origin.x, 1e-5f)
     }
+
+    @Test fun relaxedHandAtChestHeightPointsAtEyeLevelWindows() {
+        // hand 35 cm below the eyes, 40 cm forward: shoulder-through-hand alone points at the floor
+        val hand = HandState(Handedness.RIGHT).apply { state = TrackingState.TRACKING }
+        hand.joints[HandJoint.INDEX_MCP].set(0.17f, 1.6f - 0.35f, -0.4f)
+        val head = Pose(Vec3(0f, 1.6f, 0f))
+        val old = HandRay.pitchOffsetDeg
+        try {
+            HandRay.pitchOffsetDeg = 0f
+            val raw = HandRay.compute(hand, head, rightHand = true, Ray())!!.direction.copy()
+            HandRay.pitchOffsetDeg = 25f
+            val tilted = HandRay.compute(hand, head, rightHand = true, Ray())!!
+            assertTrue("tilt must go up: ${raw.y} -> ${tilted.direction.y}", tilted.direction.y > raw.y + 0.3f)
+            // at 1.45 m the tilted ray is at or above the bottom of the windows (17 cm under the eyes)
+            val t = (1.45f - 0.05f) / -tilted.direction.z
+            val y = tilted.origin.y + tilted.direction.y * t
+            assertTrue("hits at y=$y", y > 1.6f - 0.17f)
+            assertEquals(1f, tilted.direction.length(), 1e-4f)
+        } finally { HandRay.pitchOffsetDeg = old }
+    }
 }
