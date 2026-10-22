@@ -44,6 +44,10 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
     var error: String? = null; private set
     var intrinsics: CameraIntrinsics? = null; private set
     private val stTransform = FloatArray(16)
+    /** Display rotation of the activity (Surface.ROTATION_*), set by the engine before [start]. */
+    @Volatile var displayRotation = Surface.ROTATION_90
+    private val displayToNatural = FloatArray(16)
+    private val tmpM = FloatArray(16)
     private var surfaceTexture: SurfaceTexture? = null
     private var surface: Surface? = null
     private var reader: ImageReader? = null
@@ -132,8 +136,22 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         frameAvailable = false
         st.updateTexImage()
         st.getTransformMatrix(stTransform)
+        // The camera's SurfaceTexture transform makes the image upright in the phone's natural
+        // (portrait) orientation. HyperXR runs in landscape, so the quad UV (display, top-left
+        // origin) is first turned into natural-orientation UV, otherwise the image lies sideways.
+        // Devices whose transform has no 90-degree turn already deliver landscape images.
+        val turned = kotlin.math.abs(stTransform[1]) > kotlin.math.abs(stTransform[0])
+        Matrix.setIdentityM(displayToNatural, 0)
+        if (turned) when (displayRotation) {
+            // device top to the left: natural (s, t) = (1 - v, u)
+            Surface.ROTATION_90 -> { displayToNatural[0] = 0f; displayToNatural[1] = 1f; displayToNatural[4] = -1f; displayToNatural[5] = 0f; displayToNatural[12] = 1f; displayToNatural[13] = 0f }
+            // device top to the right: natural (s, t) = (v, 1 - u)
+            Surface.ROTATION_270 -> { displayToNatural[0] = 0f; displayToNatural[1] = -1f; displayToNatural[4] = 1f; displayToNatural[5] = 0f; displayToNatural[12] = 0f; displayToNatural[13] = 1f }
+            Surface.ROTATION_180 -> { displayToNatural[0] = -1f; displayToNatural[5] = -1f; displayToNatural[12] = 1f; displayToNatural[13] = 1f }
+        }
         // quad UV has a top-left origin; SurfaceTexture expects bottom-left
-        Matrix.multiplyMM(texMatrix, 0, stTransform, 0, FLIP_Y, 0)
+        Matrix.multiplyMM(tmpM, 0, FLIP_Y, 0, displayToNatural, 0)
+        Matrix.multiplyMM(texMatrix, 0, stTransform, 0, tmpM, 0)
         hasFrame = true
         if (realtimeTimestamps) {
             Diagnostics.record(Stage.CAMERA_CAPTURE, SystemClock.elapsedRealtimeNanos() - st.timestamp)

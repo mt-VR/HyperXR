@@ -234,6 +234,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
     private fun startCameraPassthrough() {
         val cam = CameraPassthrough(activity)
+        cam.displayRotation = displayRotation()
         cam.onCpuFrame = { img, intr ->
             val camPose = Pose().also { p -> synchronized(input) { p.set(input.head) } }
             hands.submit(img, intr, camPose, null, rotation180 = displayRotation() == android.view.Surface.ROTATION_270)
