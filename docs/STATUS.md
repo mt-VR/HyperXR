@@ -33,6 +33,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Mãos (hand tracking) para apps OpenXR (XR_EXT_hand_tracking) | ⏳ |
 | Importar jogos Quest: análise do APK (motor, loader, VrApi, Platform SDK, Vulkan/GLES, extensões) e veredito | ✅ análise (testes) · 🟡 aparelho |
 | Instalar APK + OBB (Shizuku `pm install`, sem perguntas; sem Shizuku pelo instalador do sistema) | 🟡 |
+| Patcher no celular ("Corrigir e instalar"): targetSdk 29, features de headset opcionais, loader da Meta → Khronos, reassinatura com chave do Android Keystore | ✅ testes (APK verificado pelo apksig) · 🟡 aparelho |
+| Jogos abertos pelo HyperXR recebem concessões de URI que tornam o runtime e o broker visíveis | 🟡 |
+| Adaptador VrApi → OpenXR (gearvr-shim) e driver `com.oculus.systemdriver` | ⏳ fontes em third_party; binários não embutidos |
 | Jogos Quest com VrApi, loader da Meta, só Vulkan ou extensões Meta obrigatórias | 🚫 não rodam (o importador avisa) |
 | Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
 | Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |
@@ -45,6 +48,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | New: ícones 3D, foco, animações, segurar para mover (persistido) | ✅ modelo · 🟡 XR |
 | Janelas espaciais móveis (biblioteca, ajustes, arquivos, galeria, mensagens, ajuda, TV, apps XR, ambientes) | 🟡 |
 | Captura da visão para a Galeria | 🟡 |
+| Home estilo Quest: Biblioteca (abas de fundo, pesquisa, categorias, grade) no modo New; janelas lado a lado + barra de tarefas no modo Dock | 🟡 |
+| MR escurecido atrás da UI | 🟡 |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |
 | Visualizadores: texto (1 MB, rolagem, fonte), foto (zoom, arrastar, girar), PDF (PdfRenderer), vídeo/áudio (MediaPlayer → textura externa) | 🟡 |

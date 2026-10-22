@@ -74,7 +74,10 @@ outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 
 ### Jogos de Quest e apps OpenXR
 
-Abra o APK em **Arquivos**. O HyperXR lê o APK antes de instalar e diz, sem rodeios, se ele pode
+Abra o APK em **Arquivos**. **Corrigir e instalar** prepara o jogo no próprio celular (sem PC):
+targetSdk 29, recursos de headset opcionais e o loader OpenXR da Meta trocado pelo da Khronos;
+depois assina com uma chave criada no Keystore do celular. Se o original já estiver instalado com
+outra assinatura, o painel oferece desinstalá-lo (os dados do jogo são apagados). O HyperXR lê o APK antes de instalar e diz, sem rodeios, se ele pode
 rodar no runtime HyperXR: motor (Unity/Unreal/Godot), loader OpenXR (o da Khronos funciona; o da
 Meta não), VrApi (não roda), Meta Platform SDK (a checagem de licença pode fechar o jogo), Vulkan
 ou OpenGL ES e extensões Meta citadas. Com o Shizuku ativo a instalação é direta e o OBB que estiver
