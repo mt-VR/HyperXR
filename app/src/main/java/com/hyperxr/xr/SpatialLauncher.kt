@@ -561,7 +561,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "messages" -> MessagesPanel()
             "help" -> HelpPanel()
             "tv" -> TvPanel(this)
-            "xrapps" -> XrAppsPanel(this)
+            "xrapps" -> XrAppsPanel(this, this)
             "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
@@ -569,6 +569,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
+            "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")

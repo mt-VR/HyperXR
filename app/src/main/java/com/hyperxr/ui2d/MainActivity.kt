@@ -53,6 +53,8 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         io.execute { app.capabilities.probe(app.runtimeBroker); runOnUiThread { refresh++ } }
     }
+    val apkImport = ApkImportState(this)
+    val pickApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { apkImport.import(it) } }
     val pickPackage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { onPackagePicked(it) } }
     var pendingInstall by mutableStateOf<Pair<java.io.File, com.hyperxr.sdk.InspectionResult>?>(null)
     var message by mutableStateOf<String?>(null)

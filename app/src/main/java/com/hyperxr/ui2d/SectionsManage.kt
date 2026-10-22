@@ -123,6 +123,7 @@ fun PermissionsSection(a: MainActivity) {
 
 @Composable
 fun RuntimeSection(a: MainActivity) {
+    ApkImportCard(a)
     val broker = a.app.runtimeBroker
     val runtimes = remember(a.refresh) { broker.discover() }
     val brokerInstalled = remember(a.refresh) { broker.brokerInstalled() }
@@ -270,6 +271,7 @@ private fun kindLabel(k: EnvironmentKind) = when (k) {
 @Composable
 fun AppsSection(a: MainActivity) {
     val xr = remember(a.refresh) { a.app.xrApps.discover() }
+    ApkImportCard(a)
     SectionCard("Aplicativos Cardboard e OpenXR", "Detectados pelas categorias de intent que declaram. O HyperXR inicia o app como ele é; não converte Cardboard em OpenXR.") {
         if (xr.isEmpty()) Note("Nenhum app XR encontrado.")
         xr.forEach { x ->
@@ -350,6 +352,7 @@ fun DiagnosticsCard() {
 
 @Composable
 fun Dialogs(a: MainActivity) {
+    ApkImportDialog(a)
     a.pendingInstall?.let { (_, r) ->
         AlertDialog(
             onDismissRequest = { a.pendingInstall = null },

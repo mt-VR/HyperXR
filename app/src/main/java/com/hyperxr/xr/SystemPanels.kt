@@ -176,14 +176,19 @@ class TvPanel(private val a: LauncherActions) : XrPanel(1.0f, 0.7f, title = "TV"
     }
 }
 
-class XrAppsPanel(private val a: LauncherActions) : XrPanel(1.3f, 1.0f, title = "Apps XR (Cardboard e OpenXR)") {
+class XrAppsPanel(private val a: LauncherActions, private val host: com.hyperxr.files.MediaHost) : XrPanel(1.3f, 1.0f, title = "Apps XR (OpenXR, Quest, Daydream, Cardboard)") {
     private val apps by lazy { HyperXRApp.instance.xrApps.discover() }
     override fun draw(c: PanelCanvas) {
+        // importing comes first: patching is how OpenXR / Quest / Daydream APKs get here
+        c.row("import", "Importar APK para corrigir (OpenXR, Quest, Daydream)", accent = true,
+            detail = "Escolha um APK do celular: o HyperXR diz se roda e oferece Corrigir e instalar") {
+            host.openPanel(com.hyperxr.files.ApkPickerPanel(host), 1.25f)
+        }
         if (apps.isEmpty()) {
-            c.paragraph("Nenhum app Cardboard/OpenXR instalado foi encontrado. Apps são detectados pelas categorias de intent que declaram (CARDBOARD, DAYDREAM, IMMERSIVE_HMD).")
+            c.paragraph("Nenhum app Cardboard/OpenXR instalado ainda. Apps são detectados pelas categorias de intent que declaram (CARDBOARD, DAYDREAM, IMMERSIVE_HMD).")
             return
         }
-        for (x in apps.take(7)) {
+        for (x in apps.take(6)) {
             val icon = x.icon?.let { d -> Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { b -> d.setBounds(0, 0, 96, 96); d.draw(android.graphics.Canvas(b)) } }
             c.row("xr:${x.packageName}", x.entry.title, icon = icon, detail = "${x.entry.runtime} • ${x.entry.compatibility} • ${x.entry.limitations}") { a.launch(x.entry) }
         }

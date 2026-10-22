@@ -98,6 +98,12 @@ abstract class ImmersiveActivity : Activity() {
         super.onDestroy()
     }
 
+    @Deprecated("Activity result API of the platform Activity")
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (!ActivityResults.dispatch(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (::engine.isInitialized && event.keyCode != KeyEvent.KEYCODE_BACK && engine.onKey(event)) return true
         return super.dispatchKeyEvent(event)
