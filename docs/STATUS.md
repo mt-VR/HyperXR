@@ -51,6 +51,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Teclado XR menor e próximo, acentos (áç), ditado por voz (SpeechRecognizer) | 🟡 |
 | Bolinha de pinça na mão, sem feixe; pinçar = toque real (down/move/up) | 🟡 |
 | Apps Android em janela plana ou curva via Shizuku (display virtual + injeção de toque/tecla/texto) | 🟡 · 🚫 sem Shizuku |
+| Shizuku: display criado com identidade do shell (como o scrcpy) e flags do `--new-display`; erro real exibido na janela | 🟡 |
+| Pinça/A em janelas vira toque limpo (TapSynthesizer): toque, arrasto ou toque longo | ✅ lógica · 🟡 aparelho |
 | Teclado XR (QWERTY, símbolos) para navegador e apps | 🟡 |
 | Arrastar link entre janelas (pinça longa no link, soltar em outra janela ou no vazio) | ✅ lógica · 🟡 aparelho |
 | Área de trabalho remota | ⏳ (exibida como indisponível) |

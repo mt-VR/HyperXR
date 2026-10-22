@@ -26,4 +26,7 @@ interface IShellService {
 
     // Opens an http(s) URL with ACTION_VIEW on the display; returns "" or the error text.
     String openUrl(int displayId, String url) = 8;
+
+    // Why the last call failed (exception text), "" if it did not.
+    String lastError() = 9;
 }

@@ -46,12 +46,20 @@ object ShellBridge {
         try { Shizuku.requestPermission(REQUEST_CODE) } catch (t: Throwable) { Shizuku.removeRequestPermissionResultListener(l); onResult(false) }
     }
 
-    private val args by lazy {
+    private var argsCache: Shizuku.UserServiceArgs? = null
+
+    /**
+     * The service version changes with every install: Shizuku reuses a running service of the same
+     * version, which after an update would still run the old code.
+     */
+    private fun args(context: Context): Shizuku.UserServiceArgs = argsCache ?: run {
+        val installed = try { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime } catch (t: Throwable) { 0L }
         Shizuku.UserServiceArgs(ComponentName(BuildConfig.APPLICATION_ID, ShellService::class.java.name))
             .daemon(false)
             .processNameSuffix("shell")
             .debuggable(BuildConfig.DEBUG)
-            .version(BuildConfig.VERSION_CODE)
+            .version(((installed / 1000L) % Int.MAX_VALUE).toInt().coerceAtLeast(1))
+            .also { argsCache = it }
     }
 
     private val connection = object : ServiceConnection {
@@ -74,7 +82,7 @@ object ShellBridge {
         synchronized(waiters) { waiters += ready }
         if (binding) return
         binding = true
-        try { Shizuku.bindUserService(args, connection) } catch (t: Throwable) {
+        try { Shizuku.bindUserService(args(context), connection) } catch (t: Throwable) {
             binding = false
             Diagnostics.log("Shizuku bind failed: ${t.message}")
             val w = synchronized(waiters) { waiters.toList().also { waiters.clear() } }
@@ -83,7 +91,7 @@ object ShellBridge {
     }
 
     fun unbind() {
-        try { Shizuku.unbindUserService(args, connection, true) } catch (_: Throwable) {}
+        argsCache?.let { a -> try { Shizuku.unbindUserService(a, connection, true) } catch (_: Throwable) {} }
         service = null
     }
 }

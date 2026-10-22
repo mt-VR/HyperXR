@@ -37,32 +37,88 @@ class ShellService() : IShellService.Stub() {
 
     override fun info(): String = "uid=${android.os.Process.myUid()} sdk=${Build.VERSION.SDK_INT}"
 
+    @Volatile private var lastError = ""
+    override fun lastError(): String = lastError
+
+    /**
+     * Context that identifies as the shell package. This process runs with the shell uid but its
+     * context reports the HyperXR package, and system services reject a package name that does
+     * not belong to the calling uid (DisplayManager: "packageName must match the calling uid").
+     * scrcpy uses the same technique for its virtual displays.
+     */
+    private class ShellContext(base: Context) : android.content.ContextWrapper(base) {
+        override fun getPackageName(): String = SHELL_PACKAGE
+        override fun getOpPackageName(): String = SHELL_PACKAGE
+        override fun getApplicationContext(): Context = this
+        @androidx.annotation.RequiresApi(31)
+        override fun getAttributionSource(): android.content.AttributionSource =
+            android.content.AttributionSource.Builder(android.os.Process.myUid()).setPackageName(SHELL_PACKAGE).build()
+        @Suppress("WrongConstant")
+        override fun getSystemService(name: String): Any? = super.getSystemService(name)
+    }
+
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    private fun systemContext(): Context? = try {
+        val at = Class.forName("android.app.ActivityThread")
+        val current = at.getMethod("currentActivityThread").invoke(null) ?: at.getMethod("systemMain").invoke(null)
+        at.getMethod("getSystemContext").invoke(current) as Context
+    } catch (t: Throwable) { context }
+
+    /** A DisplayManager bound to the shell identity (its constructor is hidden). */
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    private fun shellDisplayManager(): DisplayManager? {
+        val base = systemContext() ?: context ?: return null
+        val shell = ShellContext(base)
+        return try {
+            val ctor = DisplayManager::class.java.getDeclaredConstructor(Context::class.java)
+            ctor.isAccessible = true
+            ctor.newInstance(shell)
+        } catch (t: Throwable) {
+            lastError = "DisplayManager: ${t.javaClass.simpleName}: ${t.message}"
+            shell.getSystemService(DisplayManager::class.java)
+        }
+    }
+
     override fun createDisplay(surface: Surface, width: Int, height: Int, dpi: Int, name: String): Int {
-        val ctx = context ?: return -1
-        val dm = ctx.getSystemService(DisplayManager::class.java) ?: return -1
-        val base = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or FLAG_SUPPORTS_TOUCH or FLAG_ROTATES_WITH_CONTENT or
-            FLAG_DESTROY_CONTENT_ON_REMOVAL
-        // Android 13+: a trusted display in its own group behaves like a real screen (focus, IME, unlocked).
-        val attempts = if (Build.VERSION.SDK_INT >= 33) {
-            listOf(base or FLAG_TRUSTED or FLAG_OWN_DISPLAY_GROUP or FLAG_ALWAYS_UNLOCKED or FLAG_TOUCH_FEEDBACK_DISABLED, base)
-        } else listOf(base)
-        for (flags in attempts) {
+        lastError = ""
+        val dm = shellDisplayManager() ?: run { lastError = "sem contexto no serviço"; return -1 }
+        // Same flags scrcpy uses for --new-display: a public display that owns its content, takes
+        // touch, and (Android 13/14+) is trusted with its own focus so input and IME work there.
+        var flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+            FLAG_SUPPORTS_TOUCH or FLAG_ROTATES_WITH_CONTENT or FLAG_DESTROY_CONTENT_ON_REMOVAL
+        val attempts = ArrayList<Int>()
+        if (Build.VERSION.SDK_INT >= 33) {
+            var full = flags or FLAG_TRUSTED or FLAG_OWN_DISPLAY_GROUP or FLAG_ALWAYS_UNLOCKED or FLAG_TOUCH_FEEDBACK_DISABLED
+            if (Build.VERSION.SDK_INT >= 34) full = full or FLAG_OWN_FOCUS or FLAG_DEVICE_DISPLAY_GROUP
+            attempts += full
+            attempts += flags or FLAG_TRUSTED
+        }
+        attempts += flags
+        val errors = ArrayList<String>()
+        for (f in attempts) {
             try {
-                val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, flags) ?: continue
+                val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, f)
+                if (vd == null) { errors += "flags 0x${Integer.toHexString(f)}: null"; continue }
                 displays[vd.display.displayId] = vd
                 return vd.display.displayId
             } catch (t: Throwable) {
-                // try the next, less privileged flag set
+                errors += "flags 0x${Integer.toHexString(f)}: ${t.javaClass.simpleName}: ${t.message}"
             }
         }
+        lastError = errors.joinToString(" | ")
         return -1
     }
 
     override fun startApp(component: String, displayId: Int): String {
         if (!component.matches(Regex("^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$"))) return "componente inválido"
-        return run(listOf("am", "start", "--display", displayId.toString(), "--activity-multiple-task", "-n", component))
-            .let { out -> if (out.contains("Error", ignoreCase = true) || out.contains("Exception")) out.trim() else "" }
+        val cmd = arrayListOf("am", "start", "--display", displayId.toString(), "--activity-multiple-task")
+        // fullscreen on the virtual display (Android 10+ also accepts freeform/pinned there)
+        if (Build.VERSION.SDK_INT >= 29) { cmd += "--windowingMode"; cmd += "1" }
+        cmd += listOf("-n", component)
+        val out = run(cmd)
+        val failed = out.contains("Error", ignoreCase = true) || out.contains("Exception") || out.contains("Warning: Activity not started")
+        if (failed) lastError = out.trim()
+        return if (failed) out.trim() else ""
     }
 
     override fun injectMotion(displayId: Int, action: Int, x: Float, y: Float, downTime: Long, eventTime: Long): Boolean {
@@ -132,5 +188,8 @@ class ShellService() : IShellService.Stub() {
         const val FLAG_OWN_DISPLAY_GROUP = 1 shl 11
         const val FLAG_ALWAYS_UNLOCKED = 1 shl 12
         const val FLAG_TOUCH_FEEDBACK_DISABLED = 1 shl 13
+        const val FLAG_OWN_FOCUS = 1 shl 14
+        const val FLAG_DEVICE_DISPLAY_GROUP = 1 shl 15
+        const val SHELL_PACKAGE = "com.android.shell"
     }
 }

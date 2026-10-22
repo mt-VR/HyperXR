@@ -32,10 +32,16 @@ class AndroidAppWindow(
                 io.execute {
                     try {
                         val id = s.createDisplay(surface, screen.widthPx, screen.heightPx, DPI, "hyperxr-$packageName")
-                        if (id < 0) { status = "O shell não conseguiu criar o display virtual"; return@execute }
+                        if (id < 0) {
+                            val why = runCatching { s.lastError() }.getOrNull().orEmpty()
+                            status = "O shell não conseguiu criar o display virtual" + if (why.isNotEmpty()) ": $why" else ""
+                            com.hyperxr.diagnostics.Diagnostics.log("Shizuku createDisplay failed: $why")
+                            return@execute
+                        }
                         shell = s; displayId = id
                         val err = s.startApp(component, id)
                         status = if (err.isEmpty()) null else "Falha ao abrir: $err"
+                        if (err.isNotEmpty()) com.hyperxr.diagnostics.Diagnostics.log("Shizuku startApp failed: $err")
                     } catch (t: Throwable) {
                         status = "Erro do Shizuku: ${t.message}"
                     }

@@ -95,9 +95,6 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
 
     /** After a drag starts, the rest of that press is not sent to the content (no accidental click). */
     @Volatile protected var suppressUntilUp = false
-    private var downX = 0f
-    private var downY = 0f
-    private var longFired = false
     abstract override fun typeText(text: String)
     abstract override fun sendKey(keyCode: Int)
     /** Pointer that pressed most recently (used to hand a drag-and-drop to the same pointer). */
@@ -127,30 +124,28 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
         injectTouch(android.view.MotionEvent.ACTION_UP, cx, cy - half, t0, t0 + 16L * steps + 130)
     }
 
-    private var downTime = 0L
+    private val taps = com.hyperxr.input.TapSynthesizer().also { t ->
+        t.onLongHold = { x, y -> onLongPress(x, y, lastPointerId) }
+    }
+    private val tapSink = com.hyperxr.input.TapSynthesizer.Sink { a, x, y, d, e ->
+        if (suppressUntilUp) {
+            if (a == com.hyperxr.input.TapSynthesizer.UP || a == com.hyperxr.input.TapSynthesizer.CANCEL) suppressUntilUp = false
+            return@Sink
+        }
+        injectTouch(a, x, y, d, e)
+    }
 
     override fun onPointerEvent(event: PointerEvent) {
-        val action = when (event.phase) {
-            PointerPhase.DOWN -> android.view.MotionEvent.ACTION_DOWN
-            PointerPhase.MOVE -> android.view.MotionEvent.ACTION_MOVE
-            PointerPhase.UP -> android.view.MotionEvent.ACTION_UP
-            PointerPhase.CANCEL -> android.view.MotionEvent.ACTION_CANCEL
-            else -> return
-        }
         val now = android.os.SystemClock.uptimeMillis()
         val x = (event.u * screen.widthPx).coerceIn(0f, screen.widthPx - 1f)
         val y = (event.v * screen.heightPx).coerceIn(0f, screen.heightPx - 1f)
-        if (action == android.view.MotionEvent.ACTION_DOWN) { lastPointerId = event.pointerId; downTime = now; downX = x; downY = y; longFired = false; suppressUntilUp = false }
-        if (action == android.view.MotionEvent.ACTION_MOVE && !longFired && now - downTime > LONG_PRESS_MS &&
-            kotlin.math.abs(x - downX) < 14f && kotlin.math.abs(y - downY) < 14f) {
-            longFired = true
-            onLongPress(x, y, event.pointerId)
+        when (event.phase) {
+            PointerPhase.DOWN -> { lastPointerId = event.pointerId; suppressUntilUp = false; taps.down(x, y, now, screen.widthPx) }
+            PointerPhase.MOVE -> taps.move(x, y, now, tapSink)
+            PointerPhase.UP -> taps.up(x, y, now, tapSink)
+            PointerPhase.CANCEL -> taps.cancel(now, tapSink)
+            else -> return
         }
-        if (suppressUntilUp) {
-            if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) suppressUntilUp = false
-            return
-        }
-        injectTouch(action, x, y, downTime, now)
     }
 
     companion object {
