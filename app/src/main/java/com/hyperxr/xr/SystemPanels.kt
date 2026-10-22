@@ -43,6 +43,7 @@ interface LauncherActions {
     fun toggleWindows()
     val trackingDescription: String
     val modeDescription: String
+    val handStatus: String
 }
 
 private val background = Executors.newSingleThreadExecutor()
@@ -150,10 +151,13 @@ class LibraryPanel(private val a: LauncherActions) : XrPanel(1.3f, 0.95f, title 
     }
 }
 
-class QuickSettingsPanel(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.0f, 1.0f, title = "Ajustes rápidos") {
+class QuickSettingsPanel(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.0f, 1.1f, title = "Ajustes rápidos") {
+    private var t = 0f
+    override fun update(dt: Float) { t += dt; if (t > 1f) { t = 0f; dirty = true } } // live hand status
     override fun draw(c: PanelCanvas) {
         val s = HyperXRApp.instance.settings
         c.paragraph("${a.modeDescription} • ${a.trackingDescription}", 26f)
+        c.paragraph(a.handStatus, 22f)
         c.toggle("mode", "Launcher no modo New", a.mode() == LauncherMode.NEW) { a.setMode(if (it) LauncherMode.NEW else LauncherMode.DOCK); dirty = true }
         val hv = s.current.handTracking.handVisual
         c.row("handvis", "Mãos: " + when (hv) { com.hyperxr.settings.HandVisual.SKELETON -> "esqueleto"; com.hyperxr.settings.HandVisual.AURA -> "aura"; com.hyperxr.settings.HandVisual.BOTH -> "esqueleto + aura"; else -> "ocultas" }) {

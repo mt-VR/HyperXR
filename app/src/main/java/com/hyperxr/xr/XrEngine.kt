@@ -89,6 +89,8 @@ class XrContext(
     /** Set by content; the engine fills it with the left-eye image after the next composite. */
     @Volatile var captureRequest: ((android.graphics.Bitmap) -> Unit)? = null
     var trackingDescription = ""
+    /** Live hand-tracking status for in-XR diagnostics. */
+    var handStatus: () -> String = { "" }
 }
 
 interface XrContent {
@@ -165,6 +167,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         aura.opacity = settings.handTracking.auraOpacity
         ctx = XrContext(activity, settings, decision, renderer, images, icons, audio, scene, input)
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
+        ctx.handStatus = {
+            if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
+            else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats}"
+        }
 
         val forced3Dof = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.ROTATION_VECTOR_3DOF
         when (decision.mode) {
@@ -288,7 +294,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         updateBoundary(dt)
 
         val visual = settings.handTracking.handVisual
-        if ((visual == com.hyperxr.settings.HandVisual.SKELETON || visual == com.hyperxr.settings.HandVisual.BOTH) && joyCons.controllers.isEmpty()) {
+        if (visual == com.hyperxr.settings.HandVisual.SKELETON || visual == com.hyperxr.settings.HandVisual.BOTH) {
             skeleton.submit(scene, renderer, input.hands)
         }
 
@@ -348,7 +354,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         }
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
-        if ((visual == com.hyperxr.settings.HandVisual.AURA || visual == com.hyperxr.settings.HandVisual.BOTH) && joyCons.controllers.isEmpty()) {
+        if (visual == com.hyperxr.settings.HandVisual.AURA || visual == com.hyperxr.settings.HandVisual.BOTH) {
             aura.render(handList, eye, target.fbo, target.width, target.height)
         }
         renderer.renderPanels(scene, eye, overlayPass = true)
@@ -445,7 +451,9 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     private fun submitArCoreHands(ar: ArCoreSession) {
         if (!input.handsAvailable || !hands.wantsFrame()) return
         val intr = ar.cpuIntrinsics() ?: return
-        if (!ar.cameraPose(camPose)) return
+        // While ARCore is not tracking (dark viewer, featureless wall) the hands must keep
+        // working: place them relative to the head, like the Camera2 path does.
+        if (!ar.cameraPose(camPose)) synchronized(input) { camPose.set(input.head) }
         val img = ar.acquireCpuImage() ?: return
         val depth = if (settings.handTracking.useArCoreDepth) ar.depthImage(intr.width, intr.height) else null
         try {

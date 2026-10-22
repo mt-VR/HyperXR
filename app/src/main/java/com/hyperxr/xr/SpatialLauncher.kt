@@ -118,6 +118,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private var currentEnvId = ""
 
     override val trackingDescription: String get() = if (::ctx.isInitialized) ctx.trackingDescription else ""
+    override val handStatus: String get() = if (::ctx.isInitialized) ctx.handStatus() else ""
     override val modeDescription: String get() = if (!::ctx.isInitialized) "" else when (ctx.decision.mode) {
         com.hyperxr.capabilities.XrMode.MIXED_REALITY_ARCORE, com.hyperxr.capabilities.XrMode.MIXED_REALITY_CAMERA -> "Realidade mista"
         com.hyperxr.capabilities.XrMode.OPENXR_RUNTIME -> "OpenXR"
@@ -411,14 +412,14 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
             val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active ||
                 lab?.handBusy?.get(i) == true
-            if (!anyController && h.isUsable) {
+            if (h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
                 radials[i].update(pinching, pinchPoint, input.head, overTarget, now)?.let { radialAction(it) }
             } else radials[i].update(false, pinchPoint, input.head, true, now)
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
             // a hand working on the lab bench (holding or reaching an object) does not point at the UI
             val labBusy = lab?.handBusy?.get(i) == true
-            val raw = if (!anyController && !menuOpen && !labBusy) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            val raw = if (!menuOpen && !labBusy) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
             if (raw != null) {
                 // the (invisible) ray starts at the pinch ball; same line, so the hit point does not move
                 pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
@@ -435,14 +436,14 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             pinchStrength[i] = if (h.isUsable) h.pinchStrength else 0f
             if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch) }
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
-            if (!anyController && h.isUsable && !menuOpen && handRays[i].captured == null) {
+            if (h.isUsable && !menuOpen && handRays[i].captured == null) {
                 when (val e = microGestures[i].update(h, now)) {
                     is com.hyperxr.handtracking.MicroGestures.Event.Scroll -> scrollTarget(i)?.let { w -> w.scroll(e.delta * MICRO_SCROLL_SCREENS * w.screen.heightPx) }
                     com.hyperxr.handtracking.MicroGestures.Event.DoubleTap -> radialAction(0)
                     null -> {}
                 }
             } else microGestures[i].reset()
-            val tip = if (directTouch && !anyController && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
+            val tip = if (directTouch && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
         }
         // gaze: screen tap / viewer button, or dwell (look at a button to click it)
