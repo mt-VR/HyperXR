@@ -140,6 +140,8 @@ data class LauncherSettings(
     /** New-mode free placement, appId -> [yawDeg, pitchDeg, distanceM]. */
     val spatialLayout: Map<String, List<Float>> = emptyMap(),
     val environmentId: String = "builtin:studio",
+    /** Reopen the windows (browser tabs, Android apps) that were open when XR was last closed. */
+    val restoreWindows: Boolean = true,
 ) {
     companion object {
         val DEFAULT_PINNED = listOf(

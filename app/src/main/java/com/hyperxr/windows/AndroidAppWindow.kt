@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
 class AndroidAppWindow(
     private val context: Context,
     val packageName: String,
-    private val component: String,
+    val component: String,
     title: String,
     widthPx: Int = 1280,
     heightPx: Int = 800,

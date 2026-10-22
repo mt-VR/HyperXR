@@ -81,14 +81,21 @@ class AppTile(val app: AppEntry, var size: Float = 0.17f) : InteractionSurface {
  * around the user in 3D and can be grabbed and re-arranged (placements persist). Both modes share
  * the window manager (system panels, spatial web apps) and the pointer stack.
  */
-class SpatialLauncher(private val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions {
+class SpatialLauncher(private val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost {
     private val app = HyperXRApp.instance
     private val model = LauncherModel { allApps() }
     private lateinit var ctx: XrContext
     private val tiles = LinkedHashMap<String, AppTile>()
     private val windows = ArrayList<XrPanel>()
     private val appWindows = ArrayList<SpatialWindow>()
-    private val windowControls = HashMap<SpatialWindow, WindowControls>()
+    private val windowControls = LinkedHashMap<SpatialWindow, XrPanel>()
+    /** Work posted from the UI thread (Gecko callbacks) to run on the GL thread at the next frame. */
+    private val glTasks = java.util.concurrent.ConcurrentLinkedQueue<() -> Unit>()
+    private val browserStore by lazy { com.hyperxr.browser.BrowserStore(File(app.filesDir, "browser.json")) }
+    /** Windows hidden by the dock's Home button (they keep running). */
+    private var windowsMinimized = false
+    private var restored = false
+    private var lastSessionJson = ""
     private var keyboard: KeyboardPanel? = null
     private lateinit var home: HomePanel
     private lateinit var dockControls: DockControls
@@ -168,10 +175,16 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
 
     // ---------------------------------------------------------------- per frame
     override fun onFrame(ctx: XrContext, dt: Float) {
+        while (true) { val t = glTasks.poll() ?: break; t() }
         processPendingCloses()
         val s = app.settings.current
         val head = ctx.input.head
-        if (!anchored && ctx.frameIndex > 5) { anchorTo(head); anchored = true }
+        if (!anchored && ctx.frameIndex > 5) {
+            anchorTo(head); anchored = true
+            if (!restored) { restored = true; restoreSession() }
+        }
+        if (ctx.frameIndex % 90 == 0L) saveSession()
+        val windowsShown = !windowsMinimized && appWindows.any { it.visible }
         ctx.scene.background = if (ctx.passthroughAvailable) Background.PASSTHROUGH else Background.ENVIRONMENT
 
         layoutTiles(s.launcher.mode, dt)
@@ -180,22 +193,32 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         visibleTiles.clear()
         for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
         surfaces += visibleTiles
-        if (s.launcher.mode == LauncherMode.DOCK) { surfaces += home; surfaces += dockControls } else surfaces += dockControls
+        // Dock: the home panel gives way to open windows (they sit above the dock row)
+        val showHome = s.launcher.mode == LauncherMode.DOCK && !windowsShown
+        if (showHome) surfaces += home
+        surfaces += dockControls
         surfaces += windows.filter { it.visible }
-        for (w in appWindows) if (w.visible) surfaces += w
-        surfaces += windowControls.values
+        if (!windowsMinimized) for (w in appWindows) if (w.visible) {
+            surfaces += w
+            if (!isTheater(w)) windowControls[w]?.let { surfaces += it }
+        }
         keyboard?.let { if (it.visible) surfaces += it }
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
         handleTileEvents(visibleTiles)
 
         // submit
-        for (t in visibleTiles) submitTile(t)
-        if (s.launcher.mode == LauncherMode.DOCK) { home.update(dt); home.submit(ctx.scene) }
+        // New mode: icons behind open windows fade so the windows read as being on top
+        val dim = s.launcher.mode == LauncherMode.NEW && windowsShown
+        for (t in visibleTiles) submitTile(t, dim)
+        if (showHome) { home.update(dt); home.submit(ctx.scene) }
         dockControls.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
         for (w in windows) { w.update(dt); w.submit(ctx.scene) }
-        for ((w, c) in windowControls) { placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene) }
+        if (!windowsMinimized) for ((w, c) in windowControls) {
+            if (isTheater(w)) { w.submit(ctx.scene); continue }
+            placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene)
+        }
         keyboard?.let { k -> if (k.visible) k.submit(ctx.scene) else { k.release(); keyboard = null } }
         submitPointerVisuals()
         updateLinkDrag()
@@ -275,7 +298,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         p.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, pitch), p.orientation)
     }
 
-    private fun submitTile(t: AppTile) {
+    private fun submitTile(t: AppTile, dim: Boolean = false) {
         val sc = ctx.scene
         val grow = 1f + 0.12f * t.hover + if (t.pressed) -0.05f else 0f
         val p = sc.addPanel()
@@ -288,6 +311,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         p.radius = t.size * 0.22f * grow
         p.glow = 0.35f * t.hover
         if (t.app.kind == AppKind.UNAVAILABLE) p.alpha = 0.5f
+        if (dim) p.alpha *= 0.3f + 0.7f * t.hover
         // label under the icon
         val l = sc.addPanel()
         l.texture = t.labelTexture
@@ -296,7 +320,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         l.pose.position.addScaled(down, t.size * 0.5f + 0.028f)
         l.height = 0.032f; l.width = l.height * t.labelAspect
         l.radius = 0f
-        l.alpha = 0.6f + 0.4f * t.hover
+        l.alpha = (0.6f + 0.4f * t.hover) * if (dim) 0.3f else 1f
     }
 
     // ---------------------------------------------------------------- pointers
@@ -319,6 +343,9 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private val radialTex = IntArray(4)
     private val radialAspect = FloatArray(4)
     private val pinchPoint = Vec3()
+    private val pinchBall = arrayOf(Vec3(), Vec3())
+    private val pinchBallVisible = BooleanArray(2)
+    private val identityQ = Quat()
     private val MICRO_SCROLL_SCREENS = 1.5f
     private val microGestures = arrayOf(com.hyperxr.handtracking.MicroGestures(), com.hyperxr.handtracking.MicroGestures())
     private var gazeHit: Vec3? = null
@@ -353,6 +380,13 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             } else radials[i].update(false, pinchPoint, input.head, true, now)
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
             val raw = if (!anyController && !menuOpen) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            if (raw != null) {
+                // the visible ray starts at the pinch ball; same line, so the hit point does not move
+                pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+                val along = (pinchBall[i].x - raw.origin.x) * raw.direction.x + (pinchBall[i].y - raw.origin.y) * raw.direction.y + (pinchBall[i].z - raw.origin.z) * raw.direction.z
+                if (along > 0f) raw.origin.addScaled(raw.direction, along)
+            }
+            pinchBallVisible[i] = raw != null
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
             // pinch is the click; it is read from the (held) state so a lost frame does not release it
             val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
@@ -422,7 +456,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         if (drop != null) {
             val t = drop.target as? com.hyperxr.windows.SpatialWindow
             if (t != null) t.openUrl(drop.payload)
-            else openWindow(WebWindow(activity, drop.payload, "Navegador", app.settings.current.network.webAppsDesktopMode))
+            else openBrowser(drop.payload, app.settings.current.network.webAppsDesktopMode)
             return
         }
         if (r != null) {
@@ -442,7 +476,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         when (i) {
             0 -> windows.lastOrNull { it.visible && it.closable }?.let { it.visible = false } ?: appWindows.lastOrNull()?.back()
             1 -> { anchored = false } // re-anchor the launcher in front of the user
-            2 -> appWindows.lastOrNull()?.let { w -> keyboard = KeyboardPanel(w).also { k -> k.placeInFront(ctx.input.head, 0.9f, -0.35f) } }
+            2 -> appWindows.lastOrNull()?.let { w -> openKeyboard(w) }
                 ?: openWindow(InfoPanel("Teclado", "Abra um navegador ou app para digitar.").apply { placeInFront(ctx.input.head) })
             3 -> capture()
         }
@@ -549,6 +583,27 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             p.width = 0.018f; p.height = 0.018f; p.radius = 0f
             p.overlay = true
         }
+        // pinch ball: a small sphere between thumb and index; the ring around it closes with the pinch
+        for (i in 0..1) {
+            if (!pinchBallVisible[i]) continue
+            val k = pinchStrength[i]
+            val pinched = handRays[i].captured != null || ctx.input.hands[i].gesture == com.hyperxr.handtracking.Gesture.PINCH
+            val ball = ctx.scene.addDraw()
+            ball.mesh = ctx.renderer.sphere
+            ball.unlit = true; ball.transparent = true
+            if (pinched) { ball.color[0] = 0.94f; ball.color[1] = 0.36f; ball.color[2] = 0.75f } else { ball.color[0] = 1f; ball.color[1] = 1f; ball.color[2] = 1f }
+            ball.color[3] = 0.95f
+            val r = if (pinched) 0.007f else 0.009f
+            com.hyperxr.math.Mat4.compose(pinchBall[i], identityQ, 2 * r, 2 * r, 2 * r, ball.matrix) // unit sphere mesh has radius 0.5
+            val ring = ctx.scene.addPanel()
+            ring.texture = ringTex
+            ring.pose.position.set(pinchBall[i])
+            faceTowards(ring.pose, ctx.input.head.position)
+            val sz = 0.045f - 0.027f * k
+            ring.width = sz; ring.height = sz; ring.radius = 0f
+            ring.alpha = 0.35f + 0.65f * k
+            ring.overlay = true
+        }
         // hand ray beams: brighter and thinner as the pinch closes
         for (i in 0..1) {
             if (!handRayVisible[i]) continue
@@ -619,11 +674,16 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             "capture" -> { capture(); return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
-        w.placeInFront(head, 1.35f, -0.05f, yawOffsetDeg = (windows.size % 3 - 1) * 8f)
+        placeAboveDock(w, yawOffsetDeg = (windows.size % 3 - 1) * 8f)
         openWindow(w)
     }
 
-    /** The control bar is the window's handle: dragging it moves the window placed right above it. */
+    // Windows sit above the dock row: the bar's centre is BAR_Y below the eyes at WIN_DIST, so its
+    // bottom edge stays above the dock icons; in New mode they are nearer than the floating icons.
+    private val WIN_DIST = 1.45f
+    private val BAR_Y = -0.17f
+
+    /** The bar is the window's handle: dragging it moves the window placed right above it. */
     private fun placeAbove(w: SpatialWindow, c: XrPanel) {
         w.pose.orientation.set(c.pose.orientation)
         val up = c.pose.orientation.rotate(Vec3(0f, 1f, 0f))
@@ -632,51 +692,240 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     }
 
     private fun openWindow(w: SpatialWindow) {
-        val c = WindowControls(w)
+        val c: XrPanel = if (w is com.hyperxr.browser.BrowserWindow) BrowserBar(w, this) else WindowControls(w)
         val head = ctx.input.head
         val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
-        val yaw = kotlin.math.atan2(-f.x, -f.z) + Math.toRadians(((appWindows.size % 3) - 1) * 12.0).toFloat()
-        c.pose.position.set(head.position.x - sin(yaw) * 1.6f, head.position.y - 0.55f, head.position.z - cos(yaw) * 1.6f)
+        // new windows fill slots centre, left, right, far left, far right (~45 degrees apart)
+        val slot = appWindows.count { it.visible }
+        val offsetDeg = when (slot % 5) { 0 -> 0f; 1 -> -46f; 2 -> 46f; 3 -> -92f; else -> 92f }
+        val yaw = kotlin.math.atan2(-f.x, -f.z) + Math.toRadians(offsetDeg.toDouble()).toFloat()
+        c.pose.position.set(head.position.x - sin(yaw) * WIN_DIST, head.position.y + BAR_Y, head.position.z - cos(yaw) * WIN_DIST)
         Quat.fromAxisAngle(0f, 1f, 0f, yaw, c.pose.orientation)
         w.onLinkDrag = { url, pid -> pendingDrags += url to pid }
+        w.onKeyboardRequest = { glTasks += { if (appWindows.contains(w)) openKeyboard(w) } }
+        if (w is com.hyperxr.browser.BrowserWindow) {
+            w.onPrompt = { pr -> glTasks += { showPrompt(pr) } }
+            w.onFullscreen = { on -> glTasks += { if (on) enterTheater(w) else exitTheater(w) } }
+        }
+        windowsMinimized = false
         appWindows += w
         windowControls[w] = c
     }
 
-    private fun closeWindow(w: SpatialWindow) {
+    override fun closeWindow(w: SpatialWindow) {
+        if (!appWindows.contains(w)) return
+        exitTheater(w)
         appWindows.remove(w)
         windowControls.remove(w)?.release()
-        if (keyboard?.target === w) { keyboard?.release(); keyboard = null }
+        val k = keyboard
+        if (k != null && (k.target === w || (k.target as? UrlEditor) != null)) closeKeyboard()
         w.close()
         w.screen.release()
+        saveSession()
     }
 
     private fun openWeb(a: AppEntry) {
         val desktop = app.settings.current.network.webAppsDesktopMode || a.id == "web:whatsapp"
-        openWindow(WebWindow(activity, a.target, a.title, desktop))
+        openBrowser(a.target, desktop, a.title)
+    }
+
+    /** GeckoView browser (Wolvic's engine) when available, otherwise the system WebView. */
+    private fun openBrowser(url: String, desktop: Boolean, title: String = "Navegador") {
+        // a second web app opens as a tab of an existing browser window instead of a new window
+        appWindows.firstOrNull { it is com.hyperxr.browser.BrowserWindow }?.let { b ->
+            if (title != "Navegador") { (b as com.hyperxr.browser.BrowserWindow).openInNewTab(url); b.visible = true; windowsMinimized = false; return }
+        }
+        ctx.ui {
+            val runtime = com.hyperxr.browser.GeckoEngine.runtime(activity)
+            glTasks += {
+                if (runtime != null) openWindow(com.hyperxr.browser.BrowserWindow(activity, root, runtime, url, desktop, browserStore))
+                else {
+                    Diagnostics.log("Browser fallback to WebView: ${com.hyperxr.browser.GeckoEngine.error}")
+                    openWindow(WebWindow(activity, url, title, desktop))
+                }
+            }
+        }
     }
 
     fun openAndroidApp(pkg: String, component: String, title: String) {
         openWindow(AndroidAppWindow(activity, pkg, component, title))
     }
 
-    /** Control bar under a window: title + status, back/reload/keyboard/curve/external/close. */
+    // ---------------------------------------------------------------- keyboard, prompts, sizes
+    override fun openKeyboard(target: com.hyperxr.windows.KeyTarget) {
+        val k = keyboard
+        if (k != null && k.visible && k.target === target) return
+        k?.release()
+        keyboard = KeyboardPanel(target) { cb -> dictate(cb) }.also { kb ->
+            // close and low, tilted up: reachable with the fingertip (Direct Touch) or a pinch
+            kb.placeInFront(ctx.input.head, 0.72f, -0.32f)
+            kb.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.45f), kb.pose.orientation)
+        }
+    }
+
+    override fun closeKeyboard() {
+        keyboard?.let { k -> (k.target as? UrlEditor)?.let { if (it.active) it.cancel() }; k.release() }
+        keyboard = null
+    }
+
+    override fun openBookmarks(w: com.hyperxr.browser.BrowserWindow) {
+        openWindow(BookmarksPanel(w, browserStore).apply { placeAboveDock(this, yawOffsetDeg = 0f, distance = 1.15f) })
+    }
+
+    override fun resize(w: SpatialWindow, factor: Float) {
+        w.widthMeters = (w.widthMeters * factor).coerceIn(0.6f, 2.8f)
+    }
+
+    private fun showPrompt(pr: com.hyperxr.browser.BrowserPrompt) {
+        val p = PromptPanel(pr, this)
+        placeAboveDock(p, 0f, 1.05f)
+        windows += p
+    }
+
+    /** Speech recognition into the focused text target (Android SpeechRecognizer, on the UI thread). */
+    private fun dictate(onText: (String?) -> Unit) = ctx.ui {
+        if (activity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            activity.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 77)
+            onText(null); return@ui
+        }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(activity)) { onText(null); return@ui }
+        val sr = android.speech.SpeechRecognizer.createSpeechRecognizer(activity)
+        sr.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onResults(results: android.os.Bundle?) {
+                val text = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                onText(text); sr.destroy()
+            }
+            override fun onError(error: Int) { onText(null); sr.destroy() }
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        })
+        sr.startListening(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+        })
+    }
+
+    // ---------------------------------------------------------------- theater (fullscreen video)
+    private class Saved(val width: Float, val curved: Boolean, val radius: Float, val pose: Pose)
+    private val theater = HashMap<SpatialWindow, Saved>()
+    private fun isTheater(w: SpatialWindow) = theater.containsKey(w)
+
+    /** Fullscreen page video: a large curved screen at 2.4 m, centred on the eyes, bar hidden. */
+    private fun enterTheater(w: SpatialWindow) {
+        if (isTheater(w) || !appWindows.contains(w)) return
+        theater[w] = Saved(w.widthMeters, w.curved, w.radius, Pose().also { it.set(w.pose) })
+        val head = ctx.input.head
+        val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
+        val yaw = kotlin.math.atan2(-f.x, -f.z)
+        val d = 2.4f
+        w.pose.position.set(head.position.x - sin(yaw) * d, head.position.y + 0.05f, head.position.z - cos(yaw) * d)
+        Quat.fromAxisAngle(0f, 1f, 0f, yaw, w.pose.orientation)
+        w.widthMeters = 3.2f; w.curved = true; w.radius = d
+        closeKeyboard()
+    }
+
+    private fun exitTheater(w: SpatialWindow) {
+        val sv = theater.remove(w) ?: return
+        w.widthMeters = sv.width; w.curved = sv.curved; w.radius = sv.radius; w.pose.set(sv.pose)
+    }
+
+    // ---------------------------------------------------------------- dock Home / window state
+    override fun windowCount(): Int = appWindows.size
+    override fun windowsMinimized(): Boolean = windowsMinimized
+    override fun toggleWindows() { windowsMinimized = !windowsMinimized; if (windowsMinimized) closeKeyboard() }
+
+    /** Places a system panel so its bottom edge stays above the dock row. */
+    private fun placeAboveDock(p: XrPanel, yawOffsetDeg: Float, distance: Float = 1.35f) {
+        val bottom = BAR_Y * distance / WIN_DIST - 0.06f
+        p.placeInFront(ctx.input.head, distance, bottom + p.heightMeters / 2, yawOffsetDeg)
+    }
+
+    // ---------------------------------------------------------------- session restore
+    private val sessionFile by lazy { File(app.filesDir, "xr_session.json") }
+    private val sessionIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun sessionJson(): String {
+        val arr = org.json.JSONArray()
+        for (w in appWindows) {
+            val o = org.json.JSONObject().put("w", w.widthMeters.toDouble()).put("curved", w.curved)
+            when (w) {
+                is com.hyperxr.browser.BrowserWindow -> {
+                    val urls = org.json.JSONArray(); w.tabs.forEach { t -> if (t.url.startsWith("http")) urls.put(t.url) }
+                    if (urls.length() == 0) continue
+                    o.put("t", "browser").put("urls", urls).put("active", w.tabs.indexOf(w.active).coerceAtLeast(0)).put("desktop", w.active?.desktop == true)
+                }
+                is AndroidAppWindow -> o.put("t", "android").put("pkg", w.packageName).put("comp", w.component).put("title", w.title)
+                is WebWindow -> o.put("t", "web").put("url", w.url).put("title", w.title)
+                else -> continue
+            }
+            arr.put(o)
+        }
+        return arr.toString()
+    }
+
+    private fun saveSession() {
+        if (!restored) return
+        val json = sessionJson()
+        if (json == lastSessionJson) return
+        lastSessionJson = json
+        sessionIo.execute { runCatching { sessionFile.writeText(json) } }
+    }
+
+    private fun restoreSession() {
+        if (!app.settings.current.launcher.restoreWindows) return
+        val arr = runCatching { org.json.JSONArray(sessionFile.readText()) }.getOrNull() ?: return
+        lastSessionJson = arr.toString()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            when (o.optString("t")) {
+                "browser" -> {
+                    val urls = o.optJSONArray("urls") ?: continue
+                    if (urls.length() == 0) continue
+                    val desktop = o.optBoolean("desktop")
+                    val active = o.optInt("active")
+                    ctx.ui {
+                        val rt = com.hyperxr.browser.GeckoEngine.runtime(activity) ?: return@ui
+                        val bw = com.hyperxr.browser.BrowserWindow(activity, root, rt, urls.getString(0), desktop, browserStore)
+                        for (k in 1 until urls.length()) bw.newTab(urls.getString(k), desktop)
+                        bw.tabs.getOrNull(active)?.let { bw.switchTo(it) }
+                        bw.widthMeters = o.optDouble("w", 1.25).toFloat(); bw.curved = o.optBoolean("curved")
+                        glTasks += { openWindow(bw) }
+                    }
+                }
+                "android" -> {
+                    val w = AndroidAppWindow(activity, o.optString("pkg"), o.optString("comp"), o.optString("title"))
+                    w.widthMeters = o.optDouble("w", 1.6).toFloat(); w.curved = o.optBoolean("curved")
+                    openWindow(w)
+                }
+                "web" -> openWindow(WebWindow(activity, o.optString("url"), o.optString("title", "Navegador"), false))
+            }
+        }
+    }
+
+    /** Control bar under a window: title + status, back/reload/keyboard/curve/size/external/close. */
     private inner class WindowControls(val w: SpatialWindow) : XrPanel(1.4f, 0.2f, title = w.title) {
         init { closable = false }
         private var lastStatus: String? = null
         override fun update(dt: Float) { if (w.status != lastStatus) { lastStatus = w.status; dirty = true } }
         override fun draw(c: com.hyperxr.spatialui.PanelCanvas) {
             w.status?.let { c.label(it, 420f, 34f, 24f, com.hyperxr.spatialui.XrTheme.accent2, maxWidth = c.w - 560f) }
-            val n = if (w.supportsReload) 6 else 5
-            val bw = (c.w - 2 * c.pad - (n - 1) * 12f) / n
+            val n = if (w.supportsReload) 8 else 7
+            val bw = (c.w - 2 * c.pad - (n - 1) * 10f) / n
             var x = c.pad
             val y = c.y
-            fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 70f, accent = accent) { act() }; x += bw + 12f }
+            fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 70f, accent = accent) { act() }; x += bw + 10f }
             b("back", "Voltar") { w.back() }
             if (w.supportsReload) b("reload", "Recarregar") { w.reload() }
-            b("kbd", "Teclado") { keyboard = KeyboardPanel(w).also { k -> k.placeInFront(ctx.input.head, 0.9f, -0.35f) } }
+            b("kbd", "Teclado") { openKeyboard(w) }
             b("curve", if (w.curved) "Plano" else "Curvar") { w.curved = !w.curved; dirty = true }
-            b("ext", if (w is WebWindow) "Navegador externo" else "Tela cheia 2D") { w.openExternally() }
+            b("smaller", "Menor") { resize(w, 1f / 1.15f) }
+            b("bigger", "Maior") { resize(w, 1.15f) }
+            b("ext", if (w is WebWindow) "Externo" else "Tela 2D") { w.openExternally() }
             b("close", "Fechar", accent = true) { pendingClose += w }
         }
     }

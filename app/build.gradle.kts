@@ -49,7 +49,8 @@ android {
         }
     }
 
-    packaging { jniLibs { useLegacyPackaging = false } }
+    // Compressed native libs: GeckoView's libxul alone is ~150 MB uncompressed.
+    packaging { jniLibs { useLegacyPackaging = true } }
     // MediaPipe memory-maps the model from the APK: it must be stored uncompressed.
     androidResources { noCompress += "task" }
 
@@ -89,6 +90,8 @@ dependencies {
     implementation(libs.shizuku.provider)
     implementation(libs.openxr.loader)
     implementation(libs.webkit)
+    // Browser engine (arm64 only; other ABIs fall back to the system WebView at runtime).
+    implementation(libs.geckoview)
     implementation(libs.browser)
     testImplementation(libs.junit)
 }

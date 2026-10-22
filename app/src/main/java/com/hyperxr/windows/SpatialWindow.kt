@@ -44,11 +44,17 @@ class VirtualScreen(val widthPx: Int, val heightPx: Int) {
     }
 }
 
+/** Anything the XR keyboard can type into (a window's focused field, the browser address bar...). */
+interface KeyTarget {
+    fun typeText(text: String)
+    fun sendKey(keyCode: Int)
+}
+
 /**
  * A window in space showing a display: flat or curved, movable, with pointer input converted to
  * display pixels. Subclasses route input to their content (WebView, another Android app...).
  */
-abstract class SpatialWindow(val title: String, val screen: VirtualScreen, override var widthMeters: Float) : InteractionSurface {
+abstract class SpatialWindow(val title: String, val screen: VirtualScreen, override var widthMeters: Float) : InteractionSurface, KeyTarget {
     override val surfaceId: String = "window:" + System.identityHashCode(this)
     override val pose = Pose()
     override val heightMeters: Float get() = widthMeters * screen.heightPx / screen.widthPx
@@ -73,8 +79,12 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
     private var downX = 0f
     private var downY = 0f
     private var longFired = false
-    abstract fun typeText(text: String)
-    abstract fun sendKey(keyCode: Int)
+    abstract override fun typeText(text: String)
+    abstract override fun sendKey(keyCode: Int)
+    /** Pointer that pressed most recently (used to hand a drag-and-drop to the same pointer). */
+    protected var lastPointerId = 0
+    /** Shown by the launcher: the window asks for the XR keyboard (a text field got focus). */
+    var onKeyboardRequest: (() -> Unit)? = null
     abstract fun back()
     abstract fun close()
     open val supportsReload: Boolean get() = false
@@ -111,7 +121,7 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
         val now = android.os.SystemClock.uptimeMillis()
         val x = (event.u * screen.widthPx).coerceIn(0f, screen.widthPx - 1f)
         val y = (event.v * screen.heightPx).coerceIn(0f, screen.heightPx - 1f)
-        if (action == android.view.MotionEvent.ACTION_DOWN) { downTime = now; downX = x; downY = y; longFired = false; suppressUntilUp = false }
+        if (action == android.view.MotionEvent.ACTION_DOWN) { lastPointerId = event.pointerId; downTime = now; downX = x; downY = y; longFired = false; suppressUntilUp = false }
         if (action == android.view.MotionEvent.ACTION_MOVE && !longFired && now - downTime > LONG_PRESS_MS &&
             kotlin.math.abs(x - downX) < 14f && kotlin.math.abs(y - downY) < 14f) {
             longFired = true
@@ -124,7 +134,19 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
         injectTouch(action, x, y, downTime, now)
     }
 
-    companion object { const val LONG_PRESS_MS = 550L }
+    companion object {
+        const val LONG_PRESS_MS = 550L
+        private val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_FINGER })
+        private val coords = arrayOf(android.view.MotionEvent.PointerCoords())
+
+        /** A single-finger touchscreen event (tool type FINGER, as engines expect from a real touch). */
+        fun fingerEvent(downTimeMs: Long, eventTimeMs: Long, action: Int, x: Float, y: Float): android.view.MotionEvent {
+            val c = coords[0]
+            c.clear(); c.x = x; c.y = y; c.pressure = 1f; c.size = 1f
+            return android.view.MotionEvent.obtain(downTimeMs, eventTimeMs, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0,
+                android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+        }
+    }
 
     /** GL thread. */
     fun submit(scene: FrameScene) {

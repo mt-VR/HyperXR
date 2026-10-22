@@ -39,7 +39,14 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | New: ícones 3D, foco, animações, segurar para mover (persistido) | ✅ modelo · 🟡 XR |
 | Janelas espaciais móveis (biblioteca, ajustes, arquivos, galeria, mensagens, ajuda, TV, apps XR, ambientes) | 🟡 |
 | Captura da visão para a Galeria | 🟡 |
-| Navegador em janela espacial (VirtualDisplay + Presentation com WebView real), plana ou curva | 🟡 |
+| Navegador GeckoView (motor do Firefox, o mesmo do Wolvic) renderizando direto na textura da janela | 🟡 (arm64; WebView como fallback) |
+| Navegador: abas, barra de endereço com pesquisa, progresso, favoritos, histórico, modo desktop/celular | 🟡 |
+| Navegador: `<select>`, alert/confirm/prompt como painéis XR; teclado abre sozinho ao focar um campo | 🟡 |
+| Navegador: vídeo em tela cheia vira tela de cinema curva (3,2 m a 2,4 m); downloads para Downloads | 🟡 |
+| Janelas acima da dock (Dock) e à frente dos ícones (New); botão Início minimiza/restaura | 🟡 |
+| Reabrir janelas (abas e apps Android) ao entrar no XR; redimensionar (Menor/Maior) | 🟡 |
+| Teclado XR menor e próximo, acentos (áç), ditado por voz (SpeechRecognizer) | 🟡 |
+| Bolinha de pinça na mão: o raio sai dela; pinçar = toque real (down/move/up) | 🟡 |
 | Apps Android em janela plana ou curva via Shizuku (display virtual + injeção de toque/tecla/texto) | 🟡 · 🚫 sem Shizuku |
 | Teclado XR (QWERTY, símbolos) para navegador e apps | 🟡 |
 | Arrastar link entre janelas (pinça longa no link, soltar em outra janela ou no vazio) | ✅ lógica · 🟡 aparelho |

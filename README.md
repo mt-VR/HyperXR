@@ -45,11 +45,21 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 4. Coloque o celular no VR Box. Para clicar: olhe para o botão por ~1 s (anel de progresso no
    retículo), toque na tela/botão do visor, pinçe com a mão apontada para o botão, toque o botão com
    o dedo (Direct Touch) ou use o R do Joy-Con.
-5. Gestos: pinçar e segurar longe de botões abre o **menu radial** (Voltar, Início, Teclado,
+5. Mãos: uma **bolinha** fica entre o polegar e o indicador e o raio sai dela; o anel em volta
+   fecha conforme você pinça, e **pinçar é tocar** (segurar e mover arrasta/rola a página).
+6. Gestos: pinçar e segurar longe de botões abre o **menu radial** (Voltar, Início, Teclado,
    Captura); deslizar o polegar sobre o indicador **rola**; dois toques do polegar **voltam**;
    pinça longa num link do navegador **arrasta** o link para outra janela.
-6. Em VR com ARCore Depth, a câmera aparece aos poucos ao se aproximar de obstáculos (**alerta de
+7. Em VR com ARCore Depth, a câmera aparece aos poucos ao se aproximar de obstáculos (**alerta de
    limite**; Configurações > Gráficos).
+
+### Navegador
+
+O navegador usa o **GeckoView** (motor do Firefox), o mesmo motor do [Wolvic](https://wolvic.com),
+e, como o Wolvic, desenha a página direto na textura da janela. Tem abas, barra de endereço
+(digite um endereço ou uma pesquisa), favoritos, histórico, modo desktop, downloads e tela de
+cinema para vídeos em tela cheia. O GeckoView vem só para arm64 (cerca de 60 MB no APK); em
+outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 
 ### Apps Android em janelas (Shizuku)
 
@@ -76,6 +86,8 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 - LuaJIT — MIT (`native/luajit/COPYRIGHT`)
 - Khronos OpenXR loader — Apache-2.0 (dependência Maven `org.khronos.openxr:openxr_loader_for_android`)
 - ARCore SDK, MediaPipe Tasks Vision, AndroidX, Jetpack Compose — Apache-2.0
+- GeckoView (Mozilla) — MPL-2.0 (dependência Maven `org.mozilla.geckoview:geckoview-arm64-v8a`)
+- Shizuku API — Apache-2.0
 - Modelo MediaPipe Hand Landmarker — Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Ambientes Poly Haven — CC0 (licença registrada por ambiente baixado, com `ATTRIBUTION.txt`)
 - Ícones dos apps — arte original do autor do HyperXR (não afiliada à Meta)

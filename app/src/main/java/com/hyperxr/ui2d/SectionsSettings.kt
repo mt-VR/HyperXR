@@ -73,6 +73,9 @@ fun LauncherSection(a: MainActivity) {
         Segmented(listOf("DOCK" to "Dock", "NEW" to "New"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
         Note(if (s.mode == LauncherMode.DOCK) "Dock: barra espacial com apps fixados, painel inicial com relógio e recentes."
         else "New: apps flutuam ao seu redor em 3D. Segure um ícone para movê-lo; a posição é salva.")
+        ToggleRow("Reabrir janelas ao entrar no XR", s.restoreWindows, "Abas do navegador e apps Android abertos voltam onde estavam") { v ->
+            a.update { it.copy(launcher = it.launcher.copy(restoreWindows = v)) }
+        }
     }
     SectionCard("Apps fixados na dock", "Reordene ou remova. Para fixar novos apps use a Biblioteca no XR.") {
         model.dockApps(s).forEachIndexed { i, app ->

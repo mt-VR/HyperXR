@@ -37,6 +37,10 @@ interface LauncherActions {
     fun allApps(): List<AppEntry>
     fun icons(): IconFactory
     fun resetLayout()
+    fun windowCount(): Int
+    fun windowsMinimized(): Boolean
+    /** Dock Home button: hide all windows (they keep running) or bring them back. */
+    fun toggleWindows()
     val trackingDescription: String
     val modeDescription: String
 }
@@ -71,17 +75,49 @@ class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = 
 }
 
 /** Dock controls strip: library, quick settings, mode switch, recenter. */
-class DockControls(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.1f, 0.13f, title = "") {
+class DockControls(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.36f, 0.13f, title = "") {
     init { closable = false }
+    private var lastMinute = -1L
+    private var lastWindows = -1
+    private var battery = ""
+
+    override fun update(dt: Float) {
+        val minute = System.currentTimeMillis() / 60_000
+        val n = a.windowCount() * 2 + if (a.windowsMinimized()) 1 else 0
+        if (minute != lastMinute || n != lastWindows) {
+            lastMinute = minute; lastWindows = n
+            battery = batteryText()
+            dirty = true
+        }
+    }
+
+    private fun batteryText(): String {
+        val i = com.hyperxr.HyperXRApp.instance.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)) ?: return ""
+        val level = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+        val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)
+        val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+        if (level < 0) return ""
+        return "${level * 100 / scale.coerceAtLeast(1)}%" + if (plugged) " carregando" else ""
+    }
+
     override fun draw(c: PanelCanvas) {
-        val bw = (c.w - c.pad * 2 - 3 * 16f) / 4
+        val n = a.windowCount()
+        val count = if (n > 0) 5 else 4
+        val statusW = 230f
+        val bw = (c.w - c.pad * 2 - statusW - count * 14f) / count
         val y = 16f
-        c.button("lib", "Biblioteca", c.pad, y, bw, 86f) { open("library") }
-        c.button("qs", "Ajustes rápidos", c.pad + (bw + 16f), y, bw, 86f) { open("settings") }
-        c.button("mode", if (a.mode() == LauncherMode.DOCK) "Modo: Dock" else "Modo: New", c.pad + 2 * (bw + 16f), y, bw, 86f, accent = true) {
+        var x = c.pad
+        fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 86f, accent = accent) { act() }; x += bw + 14f }
+        if (n > 0) b("win", if (a.windowsMinimized()) "Janelas ($n)" else "Início", accent = a.windowsMinimized()) { a.toggleWindows() }
+        b("lib", "Biblioteca") { open("library") }
+        b("qs", "Ajustes rápidos") { open("settings") }
+        b("mode", if (a.mode() == LauncherMode.DOCK) "Modo: Dock" else "Modo: New", accent = true) {
             a.setMode(if (a.mode() == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)
         }
-        c.button("rc", "Recentralizar", c.pad + 3 * (bw + 16f), y, bw, 86f) { a.recenter() }
+        b("rc", "Recentralizar") { a.recenter() }
+        val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        c.label(time, x + 10f, 14f, 40f, XrTheme.text, bold = true)
+        if (battery.isNotEmpty()) c.label(battery, x + 10f, 64f, 26f, XrTheme.textDim)
     }
 }
 
@@ -296,11 +332,22 @@ class PermissionPromptPanel(private val app: AppEntry, private val packageId: St
 }
 
 /** Spatial keyboard typing into a window (web field or Android app). */
-class KeyboardPanel(val target: com.hyperxr.windows.SpatialWindow) : XrPanel(1.3f, 0.55f, title = "Teclado") {
+class KeyboardPanel(
+    val target: com.hyperxr.windows.KeyTarget,
+    /** Starts voice dictation; the recognized text is passed to the callback (null when unavailable). */
+    private val dictate: ((onText: (String?) -> Unit) -> Unit)? = null,
+) : XrPanel(0.82f, 0.38f, ppm = 1500f, title = "Teclado") {
     private var shift = false
-    private var symbols = false
+    private var layer = 0 // 0 letters, 1 symbols, 2 accents
+    @Volatile private var listening = false
+    @Volatile private var note: String? = null
+
     override fun draw(c: PanelCanvas) {
-        val rows = if (symbols) listOf("1234567890", "@#$%&*-+()", "!?/:;'\",.", "") else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm", "")
+        val rows = when (layer) {
+            1 -> listOf("1234567890", "@#$%&*-+()", "!?/:;'\",._", "")
+            2 -> listOf("áàâãéêíóôõ", "úüçñ€£¿¡ºª", "\u00ab\u00bb[]{}<>=~", "")
+            else -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm", "")
+        }
         val keyW = (c.w - 2 * c.pad - 9 * 8f) / 10
         rows.forEachIndexed { r, row ->
             val offset = c.pad + (10 - row.length) * (keyW + 8f) / 2
@@ -312,12 +359,27 @@ class KeyboardPanel(val target: com.hyperxr.windows.SpatialWindow) : XrPanel(1.3
             }
         }
         val y = c.y + 3 * 84f
-        val w4 = (c.w - 2 * c.pad - 4 * 8f) / 5
-        c.button("shift", "Shift", c.pad, y, w4, 74f, accent = shift) { shift = !shift; dirty = true }
-        c.button("sym", if (symbols) "abc" else "?123", c.pad + (w4 + 8f), y, w4, 74f) { symbols = !symbols; dirty = true }
-        c.button("space", "Espaço", c.pad + 2 * (w4 + 8f), y, w4, 74f) { target.typeText(" ") }
-        c.button("bksp", "Apagar", c.pad + 3 * (w4 + 8f), y, w4, 74f) { target.sendKey(android.view.KeyEvent.KEYCODE_DEL) }
-        c.button("enter", "Enter", c.pad + 4 * (w4 + 8f), y, w4, 74f, accent = true) { target.sendKey(android.view.KeyEvent.KEYCODE_ENTER) }
+        val keys = 7
+        val w7 = (c.w - 2 * c.pad - (keys - 1) * 8f) / keys
+        var x = c.pad
+        fun k(id: String, label: String, width: Float = w7, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, width, 74f, accent = accent) { act() }; x += width + 8f }
+        k("shift", "Shift", accent = shift) { shift = !shift; dirty = true }
+        k("sym", if (layer == 1) "abc" else "?123") { layer = if (layer == 1) 0 else 1; dirty = true }
+        k("acc", if (layer == 2) "abc" else "áç") { layer = if (layer == 2) 0 else 2; dirty = true }
+        k("space", "Espaço", w7 * 1.6f) { target.typeText(" ") }
+        k("bksp", "Apagar", w7 * 0.9f) { target.sendKey(android.view.KeyEvent.KEYCODE_DEL) }
+        if (dictate != null) k("mic", if (listening) "Ouvindo…" else "Ditado", w7 * 0.9f, accent = listening) {
+            if (!listening) {
+                listening = true; note = null; dirty = true
+                dictate.invoke { text ->
+                    listening = false
+                    if (text.isNullOrBlank()) note = "Ditado indisponível ou nada reconhecido" else target.typeText(text)
+                    dirty = true
+                }
+            }
+        }
+        k("enter", "Enter", c.w - c.pad - x, accent = true) { target.sendKey(android.view.KeyEvent.KEYCODE_ENTER) }
+        note?.let { c.label(it, c.pad, y + 80f, 24f, XrTheme.accent2) }
     }
 }
 
