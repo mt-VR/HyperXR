@@ -134,7 +134,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     private var lastFrameNs = 0L
     private var width = 0
     private var height = 0
-    @Volatile private var tapDown = false
+    private val tap = com.hyperxr.input.TapLatch()
     @Volatile var exitRequested = false
     private val pendingActions = java.util.concurrent.ConcurrentLinkedQueue<Triple<ControllerAction, Boolean, JoyConSide?>>()
 
@@ -153,6 +153,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         com.hyperxr.rendering.FullscreenTriangle.reset()
         renderer.init()
+        renderer.passthroughFill = settings.graphics.passthroughFill
         aura.init()
         compositor.init()
         aura.opacity = settings.handTracking.auraOpacity
@@ -182,7 +183,11 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
                 }
                 if (openXrSession == 0L) tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
             }
-            XrMode.VR_SBS -> tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+            XrMode.VR_SBS -> {
+                // VR shows no camera image, but the camera still feeds hand tracking when allowed.
+                if (settings.handTracking.enabled && app.capabilities.last.cameraPermission && app.capabilities.last.hasBackCamera) startCameraPassthrough()
+                else tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+            }
         }
         if (settings.handTracking.enabled && (arCore != null || passthrough != null)) {
             input.handsAvailable = hands.start(settings.handTracking.backend)
@@ -198,7 +203,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         val cam = CameraPassthrough(activity)
         cam.onCpuFrame = { img, intr ->
             val camPose = Pose().also { p -> synchronized(input) { p.set(input.head) } }
-            hands.submit(img, intr, camPose, null, null)
+            hands.submit(img, intr, camPose, null, rotation180 = displayRotation() == android.view.Surface.ROTATION_270)
         }
         cam.start()
         passthrough = cam
@@ -245,7 +250,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         // 2. hands + controllers
         hands.snapshot(input.hands[0], input.hands[1])
         updateControllers()
-        input.tapDown = tapDown
+        input.tapDown = tap.next()
         while (true) {
             val a = pendingActions.poll() ?: break
             if (a.first == ControllerAction.RECENTER && a.second) ctx.requestRecenter()
@@ -307,11 +312,14 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         renderer.renderPanels(scene, eye, overlayPass = false)
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         if (settings.handTracking.showAura && joyCons.controllers.isEmpty()) {
-            aura.render(input.hands.toList(), eye, target.fbo, target.width, target.height)
+            aura.render(handList, eye, target.fbo, target.width, target.height)
         }
         renderer.renderPanels(scene, eye, overlayPass = true)
+        // Tile-based GPUs: the depth buffer is never read back, so do not store it to memory.
+        GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
     }
 
+    private val handList by lazy { input.hands.toList() }
     private val headMatrix = FloatArray(16)
     private val eyeOffset = Vec3()
     private fun setupEye(eye: EyeView, offsetX: Float) {
@@ -340,8 +348,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         val intr = ar.cpuIntrinsics() ?: return
         if (!ar.cameraPose(camPose)) return
         val img = ar.acquireCpuImage() ?: return
-        val depth = if (settings.handTracking.useArCoreDepth) ar.depthSampler(intr.width, intr.height) else null
-        hands.submit(img, intr, camPose, depth?.first, depth?.second)
+        val depth = if (settings.handTracking.useArCoreDepth) ar.depthImage(intr.width, intr.height) else null
+        try {
+            hands.submit(img, intr, camPose, depth?.first, rotation180 = displayRotation() == android.view.Surface.ROTATION_270)
+        } finally { depth?.second?.invoke() }
     }
 
     private fun updateControllers() {
@@ -384,8 +394,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     fun onTouch(e: MotionEvent): Boolean {
         if (!settings.controllers.screenTapSelects) return false
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> tapDown = true
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> tapDown = false
+            MotionEvent.ACTION_DOWN -> tap.onDown()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> tap.onUp()
         }
         return true
     }
@@ -394,7 +404,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         if (joyCons.onKeyEvent(e)) return true
         // Viewer buttons / volume keys act as select so a plain VR Box remains usable.
         if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_ENTER || e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
-            tapDown = e.action == KeyEvent.ACTION_DOWN
+            if (e.action == KeyEvent.ACTION_DOWN) { if (e.repeatCount == 0) tap.onDown() } else tap.onUp()
             return true
         }
         return false
@@ -416,6 +426,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         compositor.release()
         xrTargets.values.forEach { it.release() }
         if (openXrSession != 0L) { OpenXrNative.nativeDestroySession(openXrSession); openXrSession = 0L }
+    }
+
+    companion object {
+        private val DEPTH_ATTACHMENT = intArrayOf(GLES30.GL_DEPTH_ATTACHMENT)
     }
 
     fun onDestroy() {

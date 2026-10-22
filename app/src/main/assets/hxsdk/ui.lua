@@ -384,12 +384,16 @@ local function dispatch(w, phase, x, y, ptr)
 end
 
 --- pointers: list of {id=, ray={o=,d=} or touch=vec3, down=bool}
-function ui.processPointers(pointers)
+function ui.processPointers(pointers, dt)
+  dt = dt or 0
   local seen = {}
   for _, ptr in ipairs(pointers) do
     seen[ptr.id] = true
     local st = pointerState[ptr.id] or {}
     pointerState[ptr.id] = st
+    -- dwell click: a synthetic one-frame press after looking at the same widget long enough
+    if st.dwellFired then ptr.down = false; st.dwellFired = false
+    elseif st.dwellPress then ptr.down = true; st.dwellPress = false; st.dwellFired = true end
     local hitPanel, hx, hy, dist
     if st.capture then
       local p = st.capture
@@ -464,6 +468,17 @@ function ui.processPointers(pointers)
       end
     end
     st.down = down
+    if (ptr.dwell or 0) > 0 and not down and not st.capture then
+      local w = hitPanel and hx and hitPanel.root:hit(hx, hy) or nil
+      local movedFar = st.dwellX and (math.abs(hx - st.dwellX) > 14 or math.abs(hy - st.dwellY) > 14)
+      if not w or w ~= st.dwellWidget or movedFar then
+        st.dwellWidget, st.dwellT, st.dwellX, st.dwellY, st.dwellDone = w, 0, hx, hy, false
+      elseif not st.dwellDone then
+        st.dwellT = st.dwellT + dt
+        if st.dwellT >= ptr.dwell then st.dwellPress = true; st.dwellDone = true end
+      end
+      st.dwellProgress = (w and not st.dwellDone) and math.min(1, st.dwellT / ptr.dwell) or 0
+    end
     if ptr.ray and hitPanel and hx then
       st.cursorPanel, st.cx, st.cy = hitPanel, hx, hy
     else

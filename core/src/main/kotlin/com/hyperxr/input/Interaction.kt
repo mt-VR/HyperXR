@@ -170,6 +170,9 @@ class RayPointer(val pointerId: Int, val source: PointerSource) {
         private set
     var hitDistance = Float.NaN
         private set
+    /** Surface coordinates of the current hit (valid when [hovered] or [captured] is set). */
+    val hitU: Float get() = uv[0]
+    val hitV: Float get() = uv[1]
     private var wasDown = false
     private var secondaryDown = false
     private val uv = FloatArray(2)

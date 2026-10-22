@@ -27,6 +27,7 @@ abstract class ImmersiveActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        requestHighestRefreshRate()
         root = FrameLayout(this)
         val content = createContent() ?: run { finish(); return }
         engine = XrEngine(this, content)
@@ -42,6 +43,17 @@ abstract class ImmersiveActivity : Activity() {
         root.addView(glView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
         hideSystemUi()
+    }
+
+    /** Highest refresh rate at the current resolution: lower frame time and photon latency. */
+    @Suppress("DEPRECATION")
+    private fun requestHighestRefreshRate() {
+        val display = windowManager.defaultDisplay
+        val current = display.mode
+        val best = display.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+            .maxByOrNull { it.refreshRate } ?: return
+        window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
     }
 
     private fun hideSystemUi() {

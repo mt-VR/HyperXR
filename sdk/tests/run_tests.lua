@@ -271,6 +271,36 @@ test("direct touch presses a button with the index fingertip", function()
   eq(rt.sandbox.clicks, 1)
 end)
 
+test("gaze dwell clicks a button once without any tap", function()
+  local rt, n = boot([[
+    clicks = 0
+    panel = hx.ui.panel{ width = 0.6, height = 0.4, position = hx.V3(0, 1.6, -1) }
+    panel:add(hx.ui.button{ text = "Go", flex = 1, onClick = function() clicks = clicks + 1 end })
+  ]], { "ui", "input", "spatial" })
+  n.inputs[242] = 1.0 -- dwell seconds
+  for i = 1, 180 do rt.frame(1 / 60) end -- 3 s staring at the button
+  eq(rt.sandbox.clicks, 1, "exactly one dwell click")
+end)
+
+test("pinch on a hand ray clicks a far button", function()
+  local rt, n = boot([[
+    clicks = 0
+    panel = hx.ui.panel{ width = 0.8, height = 0.6, position = hx.V3(0.4, 1.2, -1.5) }
+    panel:add(hx.ui.button{ text = "Far", flex = 1, onClick = function() clicks = clicks + 1 end })
+  ]], { "ui", "input", "hand_tracking" })
+  local h = 96
+  n.inputs[h] = 1; n.inputs[h + 1] = 0.9
+  -- index MCP (joint 5) on the line from the right shoulder (0.17, 1.38, 0.05) to the panel centre
+  local sx, sy, sz = 0.17, 1.38, 0.05
+  local tx, ty, tz = 0.4, 1.2, -1.5
+  local k = 0.3
+  n.inputs[h + 5 + 5 * 3] = sx + (tx - sx) * k; n.inputs[h + 5 + 5 * 3 + 1] = sy + (ty - sy) * k; n.inputs[h + 5 + 5 * 3 + 2] = sz + (tz - sz) * k
+  n.inputs[h + 3] = 1; rt.frame(1 / 60)           -- open palm: hover
+  n.inputs[h + 3] = 2; rt.frame(1 / 60); rt.frame(1 / 60) -- pinch
+  n.inputs[h + 3] = 1; rt.frame(1 / 60)           -- release
+  eq(rt.sandbox.clicks, 1)
+end)
+
 test("list selection and window mode", function()
   local rt, n = boot([[
     selected = nil

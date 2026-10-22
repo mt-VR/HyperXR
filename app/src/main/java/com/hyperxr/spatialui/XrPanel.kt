@@ -112,7 +112,8 @@ abstract class XrPanel(
         lastPointerPhase = event.phase
         val hit = regions.lastOrNull { it.rect.contains(px, py) }
         when (event.phase) {
-            PointerPhase.HOVER -> if (hit !== hoverRegion) { hoverRegion = hit; dirty = true }
+            // Regions are rebuilt on every redraw, so they are matched by id, never by identity.
+            PointerPhase.HOVER -> if (hit?.id != hoverRegion?.id) { hoverRegion = hit; dirty = true } else hoverRegion = hit
             PointerPhase.EXIT -> { if (hoverRegion != null || pressRegion != null) dirty = true; hoverRegion = null; pressRegion = null }
             PointerPhase.DOWN -> {
                 pressRegion = hit; downTimeNs = event.timestampNs; longFired = false; dirty = true
@@ -128,7 +129,7 @@ abstract class XrPanel(
             }
             PointerPhase.UP -> {
                 val pr = pressRegion
-                if (pr != null && pr === hit && !longFired) pr.action?.invoke()
+                if (pr != null && hit != null && pr.id == hit.id && !longFired) hit.action?.invoke()
                 pressRegion = null; dragging = false; dirty = true
             }
             PointerPhase.CANCEL -> { pressRegion = null; dragging = false; dirty = true }

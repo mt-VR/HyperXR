@@ -36,6 +36,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
     override val texMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     override var fovX = 1.1f; private set
     override var fovY = 0.85f; private set
+    override var imageAspect = 16f / 9f; private set
     @Volatile override var hasFrame = false; private set
 
     var error: String? = null; private set
@@ -68,6 +69,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         val previewSize = map.getOutputSizes(SurfaceTexture::class.java)
             .filter { it.width * 9 == it.height * 16 || it.width * 3 == it.height * 4 }
             .minByOrNull { kotlin.math.abs(it.width - 1280) } ?: Size(1280, 720)
+        imageAspect = previewSize.width.toFloat() / previewSize.height
         val cpu = map.getOutputSizes(ImageFormat.YUV_420_888).minByOrNull { kotlin.math.abs(it.width - cpuSize.width) + kotlin.math.abs(it.height - cpuSize.height) } ?: cpuSize
 
         // field of view from the physical sensor size and focal length
@@ -94,6 +96,9 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
                 if (cb != null && intr != null) cb(img, intr) else img.close()
             }, handler)
         }
+        // Prefer the steadiest range reaching 60 fps (lower camera-to-photon latency), else the fastest one.
+        val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty()
+        val fpsRange = ranges.filter { it.upper >= 60 }.maxByOrNull { it.lower } ?: ranges.maxByOrNull { it.upper * 1000 + it.lower } ?: Range(30, 30)
         cm.openCamera(id, object : CameraDevice.StateCallback() {
             override fun onOpened(d: CameraDevice) {
                 device = d
@@ -104,7 +109,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
                         session = s
                         val req = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             targets.forEach { addTarget(it) }
-                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))
+                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
                             set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                             set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                         }
@@ -126,8 +131,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         st.updateTexImage()
         st.getTransformMatrix(stTransform)
         // quad UV has a top-left origin; SurfaceTexture expects bottom-left
-        val flip = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
-        Matrix.multiplyMM(texMatrix, 0, stTransform, 0, flip, 0)
+        Matrix.multiplyMM(texMatrix, 0, stTransform, 0, FLIP_Y, 0)
         hasFrame = true
         if (realtimeTimestamps) {
             Diagnostics.record(Stage.CAMERA_CAPTURE, SystemClock.elapsedRealtimeNanos() - st.timestamp)
@@ -144,4 +148,8 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
     }
 
     fun shutdown() { stop(); thread.quitSafely() }
+
+    companion object {
+        private val FLIP_Y = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
+    }
 }

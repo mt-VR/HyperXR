@@ -191,7 +191,7 @@ class FilesPanel : XrPanel(1.2f, 0.95f, title = "Arquivos") {
         fun size(f: File): Long = f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         val files = app.filesDir
         c.paragraph("Ambientes: ${size(File(files, "environments")) / 1_048_576} MB • Capturas: ${File(files, "captures").listFiles()?.size ?: 0} • " +
-            "Modelos de mão: ${if (File(files, "models/hand_landmark.tflite").isFile) "instalados" else "não instalados"}")
+            "Hand tracking: MediaPipe (modelo embutido)")
         c.paragraph("Instale, remova pacotes e gerencie permissões no app 2D.", 24f)
     }
 }

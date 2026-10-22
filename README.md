@@ -42,8 +42,9 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 2. Conceda a câmera, ajuste o que quiser e toque em **Iniciar experiência XR**.
 3. O HyperXR verifica as capacidades: com ARCore inicia **realidade mista 6DoF**; sem ARCore mas com
    câmera, MR com imagem mono e 3DoF; caso contrário **VR SBS** com ambiente 3D. O motivo aparece na tela inicial.
-4. Coloque o celular no VR Box. Olhar + toque na tela seleciona; mãos usam Direct Touch; Joy-Cons
-   apontam com R/L.
+4. Coloque o celular no VR Box. Para clicar: olhe para o botão por ~1 s (anel de progresso no
+   retículo), toque na tela/botão do visor, pinçe com a mão apontada para o botão, toque o botão com
+   o dedo (Direct Touch) ou use o R do Joy-Con.
 
 ## Documentação
 
@@ -60,6 +61,7 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 
 - LuaJIT — MIT (`native/luajit/COPYRIGHT`)
 - Khronos OpenXR loader — Apache-2.0 (dependência Maven `org.khronos.openxr:openxr_loader_for_android`)
-- ARCore SDK, LiteRT/TensorFlow Lite, AndroidX, Jetpack Compose — Apache-2.0
+- ARCore SDK, MediaPipe Tasks Vision, AndroidX, Jetpack Compose — Apache-2.0
+- Modelo MediaPipe Hand Landmarker — Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Ambientes Poly Haven — CC0 (licença registrada por ambiente baixado, com `ATTRIBUTION.txt`)
 - Ícones dos apps — arte original do autor do HyperXR (não afiliada à Meta)

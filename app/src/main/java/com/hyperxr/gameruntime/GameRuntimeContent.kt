@@ -114,6 +114,7 @@ class GameRuntimeContent(private val pkg: InstalledPackage, private val onExit: 
         exited = true
         if (::vm.isInitialized) vm.destroy()
         models.values.forEach { it.release() }
+        com.hyperxr.rendering.Gl.deleteTexture(reticleTex)
         panels.values.forEach { it.release() }
         net.shutdownNow()
     }
@@ -168,6 +169,8 @@ class GameRuntimeContent(private val pkg: InstalledPackage, private val onExit: 
         }
         inb.put(LuaVm.IN_GAZE, 1f)
         inb.put(LuaVm.IN_GAZE + 1, if (i.tapDown) 1f else 0f)
+        val c = ctx.settings.controllers
+        inb.put(LuaVm.IN_GAZE + 2, if (c.dwellClick) c.dwellMs / 1000f else 0f)
         // hands, head and controllers are in tracking space; bootstrap.lua converts them with the rig
     }
 
@@ -216,6 +219,28 @@ class GameRuntimeContent(private val pkg: InstalledPackage, private val onExit: 
             android.opengl.Matrix.multiplyMM(item.matrix, 0, rigMatrix, 0, local, 0)
         }
         paintPanels()
+        submitReticle()
+    }
+
+    private var reticleTex = 0
+    /** Head-locked gaze dot so gaze/dwell selection has a visible aim point. */
+    private fun submitReticle() {
+        if (ctx.input.controllers.any { it.connected }) return
+        if (reticleTex == 0) {
+            val b = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+            val cv = android.graphics.Canvas(b)
+            val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            p.color = android.graphics.Color.argb(170, 0, 0, 0); cv.drawCircle(32f, 32f, 28f, p)
+            p.color = android.graphics.Color.WHITE; cv.drawCircle(32f, 32f, 18f, p)
+            reticleTex = com.hyperxr.rendering.Gl.uploadBitmap(b); b.recycle()
+        }
+        val head = ctx.input.head
+        val item = ctx.scene.addPanel()
+        item.texture = reticleTex
+        head.orientation.rotate(tmpV.set(0f, 0f, -1.2f), item.pose.position).add(head.position)
+        item.pose.orientation.set(head.orientation)
+        item.width = 0.014f; item.height = 0.014f; item.radius = 0f
+        item.overlay = true
     }
 
     private fun paintPanels() {

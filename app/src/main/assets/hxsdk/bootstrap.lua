@@ -150,10 +150,18 @@ local function pointers()
     local hand = state.hands[h]
     if hand.tracked and not anyController then
       list[#list + 1] = { id = 20 + h, touch = hand.joints[8] }
+      -- far pointer: ray from an estimated shoulder through the hand, clicked with a pinch
+      local yaw = Q.axisAngle(V(0, 1, 0), Q.yaw(state.head.rotation))
+      local shoulder = state.head.position + Q.rotate(yaw, V(h == 1 and 0.17 or -0.17, -0.22, 0.05))
+      local dir = hand.joints[5] - shoulder
+      if V.length(dir) > 0.05 then
+        list[#list + 1] = { id = 30 + h, ray = { o = shoulder, d = V.normalize(dir) }, down = hand.gesture == "pinch" }
+      end
     end
   end
-  -- gaze pointer with screen tap / viewer button, always available
-  list[#list + 1] = { id = 1, ray = { o = state.head.position, d = Q.forward(state.head.rotation) }, down = state.tap }
+  -- gaze pointer: screen tap / viewer button, or dwell (seconds from the host; 0 = off)
+  list[#list + 1] = { id = 1, ray = { o = state.head.position, d = Q.forward(state.head.rotation) }, down = state.tap,
+    dwell = (not anyController) and f(IN.GAZE + 2) or 0 }
   return list
 end
 
@@ -633,7 +641,7 @@ local function frame(dt)
   updateManipulators(dt)
   text.frame()
   if not started and not crashed then start() end
-  ui.processPointers(pointers())
+  ui.processPointers(pointers(), dt)
   ui.update(dt)
   if not crashed then
     local onUpdate = rawget(sandbox, "onUpdate")

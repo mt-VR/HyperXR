@@ -100,6 +100,19 @@ uniform float uAlpha;
 out vec4 fragColor;
 void main() { fragColor = vec4(texture(uTex, vUv).rgb, uAlpha); }"""
 
+    /** Camera image covering the whole eye viewport (centre crop to the eye aspect). */
+    const val OES_FULL_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+uniform mat4 uTexMatrix;
+uniform vec2 uCrop;
+out vec2 vUv;
+void main() {
+    vec2 uv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);   // top-left origin like the camera quad
+    uv = 0.5 + (uv - 0.5) * uCrop;
+    vUv = (uTexMatrix * vec4(uv, 0.0, 1.0)).xy;
+    gl_Position = vec4(aPos.xy, 0.999, 1.0);
+}"""
+
     /** Gradient sky for the procedural studio environment. */
     const val SKY_VS = """#version 300 es
 layout(location=0) in vec3 aPos;

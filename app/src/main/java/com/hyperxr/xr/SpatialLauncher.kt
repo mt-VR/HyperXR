@@ -96,6 +96,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private var anchorYaw = 0f
     private var anchored = false
     private var reticleTex = 0
+    private var ringTex = 0
     private var installedApps: List<AppEntry> = emptyList()
     private var movingTile: AppTile? = null
     private var movingDistance = 1.6f
@@ -109,7 +110,10 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     }
 
     // ---------------------------------------------------------------- catalog
-    override fun allApps(): List<AppEntry> = BuiltinApps.all + installedApps
+    private var appsCache: List<AppEntry> = BuiltinApps.all
+    private val surfaces = ArrayList<InteractionSurface>()
+    private val visibleTiles = ArrayList<AppTile>()
+    override fun allApps(): List<AppEntry> = appsCache
     override fun icons(): IconFactory = ctx.icons
 
     private fun refreshInstalled() {
@@ -119,6 +123,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         }
         val xr = try { app.xrApps.discover().map { it.entry } } catch (t: Throwable) { emptyList() }
         installedApps = pkgs + xr
+        appsCache = BuiltinApps.all + installedApps
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -129,6 +134,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         home = HomePanel(this)
         dockControls = DockControls(this) { openSystem(it) }
         reticleTex = Gl.uploadBitmap(reticleBitmap())
+        ringTex = Gl.uploadBitmap(ringBitmap())
         val env = app.environments.installed().firstOrNull { it.id == app.settings.current.launcher.environmentId } ?: PolyHavenCatalog.STUDIO
         selectEnvironment(env)
         File(app.filesDir, "crash").listFiles()?.forEach { Diagnostics.log("Package crash report: ${it.nameWithoutExtension}: ${it.readText().take(160)}") }
@@ -141,7 +147,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         tiles.clear()
         (windows + home + dockControls).forEach { it.release() }
         webPanels.forEach { it.releaseGl(); it.close() }
-        Gl.deleteTexture(reticleTex)
+        Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex)
     }
 
     override fun onAction(ctx: XrContext, action: ControllerAction, pressed: Boolean, side: JoyConSide?) {
@@ -163,8 +169,10 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         ctx.scene.background = if (ctx.passthroughAvailable) Background.PASSTHROUGH else Background.ENVIRONMENT
 
         layoutTiles(s.launcher.mode, dt)
-        val surfaces = ArrayList<InteractionSurface>()
-        val visibleTiles = tiles.values.filter { it.app.id in visibleIds(s.launcher.mode) }
+        surfaces.clear()
+        val ids = visibleIds(s.launcher.mode)
+        visibleTiles.clear()
+        for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
         surfaces += visibleTiles
         if (s.launcher.mode == LauncherMode.DOCK) { surfaces += home; surfaces += dockControls } else surfaces += dockControls
         surfaces += windows.filter { it.visible }
@@ -196,7 +204,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         dockControls.pose.position.set(head.position.x - sin(anchorYaw) * 1.25f, head.position.y - 0.62f, head.position.z - cos(anchorYaw) * 1.25f)
         Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, dockControls.pose.orientation)
         // tilt the controls up towards the eyes
-        dockControls.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, 0.35f), dockControls.pose.orientation)
+        dockControls.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), dockControls.pose.orientation)
     }
 
     private fun tileFor(a: AppEntry): AppTile = tiles.getOrPut(a.id) {
@@ -222,7 +230,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
                 val r = 1.3f
                 t.target.position.set(head.position.x - sin(yaw) * r, head.position.y - 0.34f, head.position.z - cos(yaw) * r)
                 Quat.fromAxisAngle(0f, 1f, 0f, yaw, t.target.orientation)
-                t.target.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, 0.25f), t.target.orientation)
+                t.target.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.25f), t.target.orientation)
             }
         } else {
             val apps = allApps().filter { it.kind != AppKind.ANDROID_PACKAGE }
@@ -254,7 +262,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val yaw = kotlin.math.atan2(-dx, -dz)
         val pitch = kotlin.math.atan2(dy, kotlin.math.sqrt(dx * dx + dz * dz))
         Quat.fromAxisAngle(0f, 1f, 0f, yaw, p.orientation)
-        p.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -pitch), p.orientation)
+        // rotating about +X by the (negative) pitch tilts the face up towards eyes above it
+        p.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, pitch), p.orientation)
     }
 
     private fun submitTile(t: AppTile) {
@@ -284,10 +293,15 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     // ---------------------------------------------------------------- pointers
     private val hitPoints = ArrayList<Vec3>()
 
+    private val handRays = arrayOf(RayPointer(5, PointerSource.HAND_RAY), RayPointer(6, PointerSource.HAND_RAY))
+    private val dwell = com.hyperxr.input.DwellClick()
+    private var gazeHit: Vec3? = null
+
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
         val now = System.nanoTime()
         hitPoints.clear()
         val input = ctx.input
+        val controls = app.settings.current.controllers
         var anyController = false
         for (i in 0..1) {
             val c = input.controllers[i]
@@ -300,16 +314,22 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
                 dragWindows(ctrlPointers[i], ray, primary)
             } else ctrlPointers[i].update(null, false, surfaces, now)
         }
-        // fingertips: direct touch (disabled while Joy-Cons drive the pointer)
+        // hands: far rays clicked with a pinch, plus direct touch with the fingertip
         for (i in 0..1) {
             val h = input.hands[i]
+            val handRay = if (!anyController) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
+            handRays[i].update(handRay, pinch, surfaces, now)
+            if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch) }
             val tip = if (directTouch && !anyController && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
         }
-        // gaze + screen tap is always available
+        // gaze: screen tap / viewer button, or dwell (look at a button to click it)
         input.gazeRay(ray)
-        gaze.update(ray, input.tapDown, surfaces, now)
-        trackHit(gaze, ray)
+        dwell.dwellNs = if (controls.dwellClick) controls.dwellMs * 1_000_000L else 0L
+        val dwellDown = dwell.update(gaze.hovered ?: gaze.captured, gaze.hitU, gaze.hitV, now)
+        gaze.update(ray, input.tapDown || dwellDown, surfaces, now)
+        gazeHit = if (gaze.hitDistance.isNaN()) null else ray.pointAt(gaze.hitDistance - 0.004f)
         dragWindows(gaze, ray, input.tapDown)
     }
 
@@ -357,6 +377,26 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     }
 
     private fun submitPointerVisuals() {
+        gazeHit?.let { hp ->
+            val head = ctx.input.head.position
+            val dist = head.distanceTo(hp)
+            val base = 0.012f * dist
+            val p = ctx.scene.addPanel()
+            p.texture = reticleTex
+            p.pose.position.set(hp)
+            faceTowards(p.pose, head)
+            p.width = base; p.height = base; p.radius = 0f
+            p.overlay = true
+            if (dwell.progress > 0.05f) {
+                val r = ctx.scene.addPanel()
+                r.texture = ringTex
+                r.pose.set(p.pose)
+                val sz = base * (3.2f - 1.6f * dwell.progress)
+                r.width = sz; r.height = sz; r.radius = 0f
+                r.alpha = dwell.progress
+                r.overlay = true
+            }
+        }
         for (hp in hitPoints) {
             val p = ctx.scene.addPanel()
             p.texture = reticleTex
@@ -379,6 +419,15 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val q = Quat.fromTo(Vec3(0f, 1f, 0f), ray.direction)
             com.hyperxr.math.Mat4.compose(mid, q, 0.004f, len, 0.004f, d.matrix)
         }
+    }
+
+    private fun ringBitmap(): Bitmap {
+        val b = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE }
+        p.color = Color.argb(160, 0, 0, 0); p.strokeWidth = 14f; c.drawCircle(64f, 64f, 54f, p)
+        p.color = Color.rgb(160, 150, 255); p.strokeWidth = 8f; c.drawCircle(64f, 64f, 54f, p)
+        return b
     }
 
     private fun reticleBitmap(): Bitmap {

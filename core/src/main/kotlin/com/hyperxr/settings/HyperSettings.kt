@@ -34,6 +34,8 @@ data class GraphicsSettings(
     /** Distance between lens centres of the viewer, in millimetres. */
     val lensSeparationMm: Float = 60f,
     val fovDegrees: Float = 95f,
+    /** Camera image fills each eye completely (centre crop). Off = true angular size (smaller image). */
+    val passthroughFill: Boolean = true,
     val theme: String = "aurora",
 )
 
@@ -58,7 +60,7 @@ data class HeadTrackingSettings(
 @Serializable
 data class HandTrackingSettings(
     val enabled: Boolean = true,
-    val backend: InferenceBackend = InferenceBackend.AUTO,
+    val backend: InferenceBackend = InferenceBackend.GPU,
     val useArCoreDepth: Boolean = true,
     val showAura: Boolean = true,
     val auraOpacity: Float = 0.45f,
@@ -79,7 +81,9 @@ data class ControllerSettings(
     val buttonPlus: ControllerAction = ControllerAction.MENU,
     val buttonHome: ControllerAction = ControllerAction.RECENTER,
     val screenTapSelects: Boolean = true,
-    val gazeDwellMs: Int = 0,
+    /** Look at a button for [dwellMs] to click it (works without touching the screen). */
+    val dwellClick: Boolean = true,
+    val dwellMs: Int = 1100,
 )
 
 @Serializable

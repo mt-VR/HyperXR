@@ -13,7 +13,6 @@ import com.hyperxr.capabilities.Capability
 import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.diagnostics.Stage
 import com.hyperxr.handtracking.CameraIntrinsics
-import com.hyperxr.handtracking.DepthSampler
 import com.hyperxr.headtracking.HeadTracker
 import com.hyperxr.math.Pose
 import com.hyperxr.math.Quat
@@ -41,6 +40,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     override val texMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     override var fovX = 1.1f; private set
     override var fovY = 0.85f; private set
+    /** ARCore maps VIEW_NORMALIZED to the display, so quad UVs cover the full-screen aspect. */
+    override var imageAspect = 2f; private set
     override val hasFrame: Boolean get() = lastFrame != null && lastFrame!!.timestamp != 0L
 
     private val headPose = Pose()
@@ -75,7 +76,11 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         }
     }
 
-    fun setDisplayGeometry(rotation: Int, width: Int, height: Int) { session?.setDisplayGeometry(rotation, width, height) }
+    fun setDisplayGeometry(rotation: Int, width: Int, height: Int) {
+        session?.setDisplayGeometry(rotation, width, height)
+        imageAspect = width.toFloat() / height.coerceAtLeast(1)
+        texMatrixValid = false
+    }
 
     override fun start() { try { session?.resume() } catch (t: Throwable) { error = t.message; Diagnostics.log("ARCore resume failed: ${t.message}") } }
     override fun stop() { session?.pause() }
@@ -142,25 +147,13 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     /** CPU YUV image; caller must close it. */
     fun acquireCpuImage(): Image? = try { lastFrame?.acquireCameraImage() } catch (e: NotYetAvailableException) { null } catch (t: Throwable) { null }
 
-    /**
-     * Depth sampler for the CPU image pixel space (depth image is lower resolution; coordinates are
-     * scaled). Returns null when depth is disabled or not yet available.
-     */
-    fun depthSampler(cpuW: Int, cpuH: Int): Pair<DepthSampler, () -> Unit>? {
+    /** Latest 16-bit depth image (millimetres) mapped to the CPU image size; call the closer when done. */
+    fun depthImage(cpuW: Int, cpuH: Int): Pair<com.hyperxr.handtracking.DepthImage, () -> Unit>? {
         if (!depthEnabled) return null
         val img = try { lastFrame?.acquireDepthImage16Bits() } catch (t: Throwable) { null } ?: return null
         val plane = img.planes[0]
-        val buf = plane.buffer.order(ByteOrder.nativeOrder())
-        val w = img.width; val h = img.height
-        val rowStride = plane.rowStride; val pixStride = plane.pixelStride
-        val sampler = DepthSampler { px, py ->
-            val x = (px / cpuW * w).toInt(); val y = (py / cpuH * h).toInt()
-            if (x !in 0 until w || y !in 0 until h) Float.NaN else {
-                val mm = buf.getShort(y * rowStride + x * pixStride).toInt() and 0xffff
-                if (mm == 0) Float.NaN else mm / 1000f
-            }
-        }
-        return sampler to { img.close() }
+        val d = com.hyperxr.handtracking.DepthImage(plane.buffer.order(ByteOrder.nativeOrder()), img.width, img.height, plane.rowStride, plane.pixelStride, cpuW, cpuH)
+        return d to { img.close() }
     }
 
     /** Camera pose in tracking space (needed to place hands detected in the camera image). */

@@ -101,6 +101,9 @@ fun GraphicsSection(a: MainActivity) {
     SectionCard("Renderização") {
         SliderRow("Escala de resolução por olho", g.renderScale, 0.5f..1.2f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(graphics = it.graphics.copy(renderScale = v)) } }
         SliderRow("Campo de visão (FOV)", g.fovDegrees, 70f..110f, { "%.0f°".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(fovDegrees = v)) } }
+        ToggleRow("Câmera em tela cheia (MR)", g.passthroughFill, "Preenche cada olho com a câmera. Desligado: tamanho angular real, com bordas") { v ->
+            a.update { it.copy(graphics = it.graphics.copy(passthroughFill = v)) }
+        }
         ChoiceRow("Taxa alvo", listOf(60, 72, 90, 120), g.targetFps, { "$it fps" }) { v -> a.update { it.copy(graphics = it.graphics.copy(targetFps = v)) } }
         Note("A taxa real é limitada pela tela (vsync) e pela GPU; veja Diagnóstico para medições.")
     }
@@ -149,16 +152,15 @@ fun HeadSection(a: MainActivity) {
 @Composable
 fun HandsSection(a: MainActivity) {
     val h = a.settingsState.handTracking
-    val models = remember(a.refresh) { com.hyperxr.handtracking.HandModels(a) }
     var bench by remember { mutableStateOf<List<String>>(emptyList()) }
     var running by remember { mutableStateOf(false) }
-    SectionCard("Hand tracking", "Pipeline próprio: câmera → detector → landmarks → profundidade → filtro temporal → gestos.") {
+    SectionCard("Hand tracking", "Câmera → MediaPipe Hand Landmarker (GPU) → profundidade → filtro temporal → gestos.") {
         ToggleRow("Ativado", h.enabled) { v -> a.update { it.copy(handTracking = it.handTracking.copy(enabled = v)) } }
-        ChoiceRow("Backend de inferência", InferenceBackend.entries, h.backend, { when (it) {
-            InferenceBackend.AUTO -> "Automático (GPU→CPU)"; InferenceBackend.CPU -> "CPU (XNNPACK)"; InferenceBackend.GPU -> "GPU"; InferenceBackend.NNAPI -> "NNAPI (NPU/DSP)" } }) { v ->
+        ChoiceRow("Backend de inferência", listOf(InferenceBackend.GPU, InferenceBackend.CPU), if (h.backend == InferenceBackend.CPU) InferenceBackend.CPU else InferenceBackend.GPU, {
+            if (it == InferenceBackend.CPU) "CPU" else "GPU (recomendado)" }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(backend = v)) }
         }
-        Note("Se o backend escolhido falhar, o HyperXR usa o próximo e informa qual está em uso.")
+        Note("Se a GPU não puder rodar o modelo, o HyperXR usa a CPU e informa qual backend está em uso.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
         ToggleRow("Mostrar aura preta das mãos", h.showAura, "Oculta automaticamente quando Joy-Cons estão conectados") { v -> a.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) } }
@@ -168,13 +170,7 @@ fun HandsSection(a: MainActivity) {
         SliderRow("Filtro: beta (resposta a velocidade)", h.filterBeta, 0f..0.2f, { "%.3f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterBeta = v)) } }
         SliderRow("Predição", h.predictionMs, 0f..50f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(predictionMs = v)) } }
     }
-    SectionCard("Modelos de inferência", "O HyperXR não embute modelos de mão. Importe arquivos .tflite cuja licença você aceite (formato em docs/HAND_TRACKING.md).") {
-        KeyValue("Detector", if (models.detector.isFile) "instalado (${models.detector.length() / 1024} KB)" else "não instalado")
-        KeyValue("Landmarks", if (models.landmarks.isFile) "instalado (${models.landmarks.length() / 1024} KB)" else "não instalado")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { a.pickDetector.launch(arrayOf("*/*")) }) { Text("Importar detector") }
-            OutlinedButton(onClick = { a.pickLandmarks.launch(arrayOf("*/*")) }) { Text("Importar landmarks") }
-        }
+    SectionCard("Modelo", "MediaPipe Hand Landmarker (float16, Apache-2.0), embutido no APK — não precisa importar nada.") {
         Button(enabled = !running, onClick = {
             running = true
             a.io.execute {
@@ -183,7 +179,7 @@ fun HandsSection(a: MainActivity) {
                 svc.shutdown()
                 a.runOnUiThread { bench = r; running = false }
             }
-        }) { Text(if (running) "Executando…" else "Benchmark CPU / GPU / NNAPI") }
+        }) { Text(if (running) "Executando…" else "Benchmark GPU / CPU") }
         bench.forEach { Mono(it) }
     }
 }

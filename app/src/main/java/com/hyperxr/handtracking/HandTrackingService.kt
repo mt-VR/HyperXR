@@ -1,118 +1,60 @@
 package com.hyperxr.handtracking
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.Image
-import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
+import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.diagnostics.LatencyStats
 import com.hyperxr.diagnostics.Stage
 import com.hyperxr.math.Pose
 import com.hyperxr.settings.HandTrackingSettings
 import com.hyperxr.settings.InferenceBackend
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.GpuDelegate
-import org.tensorflow.lite.nnapi.NnApiDelegate
-import java.io.File
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Model files used by the hand pipeline. HyperXR does not bundle hand models; the user imports
- * models whose licence they accept. Expected contracts (documented in docs/HAND_TRACKING.md):
- *  - detector: input [1,H,W,3] (float32 0..1 or uint8), outputs of TFLite_Detection_PostProcess:
- *    boxes [1,N,4] (ymin,xmin,ymax,xmax normalised), classes [1,N], scores [1,N], count [1].
- *  - landmarks: input [1,S,S,3]; output 0 = [1,63] (x,y in input pixels, z relative), then
- *    presence [1,1] and handedness [1,1] (> 0.5 = right).
- */
-class HandModels(context: Context) {
-    val dir = File(context.filesDir, "models").apply { mkdirs() }
-    val detector = File(dir, "hand_detector.tflite")
-    val landmarks = File(dir, "hand_landmark.tflite")
-    val available: Boolean get() = detector.isFile && landmarks.isFile
-
-    fun import(context: Context, uri: Uri, target: File) {
-        context.contentResolver.openInputStream(uri)!!.use { input -> target.outputStream().use { input.copyTo(it) } }
-    }
-}
-
-/** One TFLite interpreter on a chosen backend, reporting what actually got used. */
-class InferenceModel(file: File, requested: InferenceBackend, threads: Int = 2) : AutoCloseable {
-    val interpreter: Interpreter
-    val backend: String
-    private var gpu: GpuDelegate? = null
-    private var nnapi: NnApiDelegate? = null
-
-    init {
-        val buffer = file.readBytes().let { ByteBuffer.allocateDirect(it.size).order(ByteOrder.nativeOrder()).put(it).also { b -> b.rewind() } }
-        val order = when (requested) {
-            InferenceBackend.NNAPI -> listOf(InferenceBackend.NNAPI, InferenceBackend.GPU, InferenceBackend.CPU)
-            InferenceBackend.GPU -> listOf(InferenceBackend.GPU, InferenceBackend.CPU)
-            InferenceBackend.CPU -> listOf(InferenceBackend.CPU)
-            InferenceBackend.AUTO -> listOf(InferenceBackend.GPU, InferenceBackend.CPU)
-        }
-        var created: Interpreter? = null
-        var used = "CPU"
-        val failures = mutableListOf<String>()
-        for (b in order) {
-            try {
-                val opts = Interpreter.Options().setNumThreads(threads)
-                when (b) {
-                    InferenceBackend.GPU -> { gpu = GpuDelegate(); opts.addDelegate(gpu) }
-                    InferenceBackend.NNAPI -> {
-                        nnapi = NnApiDelegate(NnApiDelegate.Options().setAllowFp16(true).setExecutionPreference(NnApiDelegate.Options.EXECUTION_PREFERENCE_SUSTAINED_SPEED))
-                        opts.addDelegate(nnapi)
-                    }
-                    else -> opts.setUseXNNPACK(true)
-                }
-                created = Interpreter(buffer, opts)
-                used = if (b == InferenceBackend.CPU) "CPU (XNNPACK, $threads threads)" else b.name
-                break
-            } catch (t: Throwable) {
-                failures += "${b.name}: ${t.message}"
-                gpu?.close(); gpu = null
-                nnapi?.close(); nnapi = null
-            }
-        }
-        interpreter = created ?: throw IllegalStateException("No backend could run the model: $failures")
-        backend = if (failures.isEmpty()) used else "$used (fallback; ${failures.joinToString()})"
-    }
-
-    override fun close() { interpreter.close(); gpu?.close(); nnapi?.close() }
-}
-
-/**
- * Camera frames -> landmarks -> 3D fusion -> temporal tracking. Runs on its own thread, always on
- * the newest frame (older frames are dropped), at most `handInferenceHz` times per second; while a
- * hand stays tracked only the landmark model runs on a ROI predicted from the last landmarks.
+ * Camera frames -> MediaPipe Hand Landmarker (GPU delegate, CPU fallback) -> HyperXR depth fusion
+ * -> temporal tracking (One Euro, loss/recovery, prediction) -> gestures.
+ *
+ * Latency choices: only the newest frame is processed (a frame arriving while inference runs is
+ * dropped instead of queued), the YUV->RGB conversion writes into reused buffers at a reduced
+ * resolution, and MediaPipe's internal ROI tracking skips palm detection while hands stay visible.
  */
 class HandTrackingService(private val context: Context) {
-    val models = HandModels(context)
     private val thread = HandlerThread("hx-hands").apply { start() }
     private val handler = Handler(thread.looper)
     private val busy = AtomicBoolean(false)
 
-    private var detector: InferenceModel? = null
-    private var landmark: InferenceModel? = null
-    @Volatile var status: String = "stopped"; private set
+    private var landmarker: HandLandmarker? = null
+    @Volatile var status: String = "parado"; private set
     @Volatile var backendInUse: String = "-"; private set
 
     val trackers = mapOf(Handedness.LEFT to HandTracker(Handedness.LEFT), Handedness.RIGHT to HandTracker(Handedness.RIGHT))
     private val fusion = DepthFusion()
     private val fusionResult = DepthFusion.Result()
-    private val rois = HashMap<Handedness, FloatArray>() // normalized cx, cy, size
-    private var lastRunNs = 0L
-    private var frameCounter = 0
-    private var settings = HandTrackingSettings()
-
-    /** Snapshot for the render thread (copied under lock). */
     private val lock = Any()
     private val published = mapOf(Handedness.LEFT to HandState(Handedness.LEFT), Handedness.RIGHT to HandState(Handedness.RIGHT))
+    private var minIntervalNs = 33_000_000L
+    private var lastSubmitNs = 0L
+    private var lastTimestampMs = 0L
+
+    // Context of the frame currently inside MediaPipe (only one at a time).
+    private var pendingIntr: CameraIntrinsics? = null
+    private var pendingPose: Pose? = null
+    private val pendingDepth = DepthSnapshot()
+    private var pendingSubmitNs = 0L
+    private val converter = YuvToBitmap()
 
     fun configure(s: HandTrackingSettings, inferenceHz: Int) {
-        settings = s
         minIntervalNs = 1_000_000_000L / inferenceHz.coerceIn(5, 60)
         trackers.values.forEach {
             it.setFilterParams(s.filterMinCutoff, s.filterBeta)
@@ -121,81 +63,103 @@ class HandTrackingService(private val context: Context) {
         }
     }
 
-    private var minIntervalNs = 33_000_000L
-
+    /** Creates the landmarker on the worker thread. Returns false only if the model asset is missing. */
     fun start(backend: InferenceBackend): Boolean {
-        if (!models.available) { status = "No hand models installed (Settings > Hand tracking > Import models)"; return false }
+        val hasModel = try { context.assets.openFd(MODEL_ASSET).close(); true } catch (t: Throwable) { false }
+        if (!hasModel) { status = "Modelo $MODEL_ASSET ausente do APK"; return false }
         handler.post {
-            try {
-                detector?.close(); landmark?.close()
-                detector = InferenceModel(models.detector, backend)
-                landmark = InferenceModel(models.landmarks, backend)
-                backendInUse = "detector: ${detector!!.backend}; landmarks: ${landmark!!.backend}"
-                status = "running"
-            } catch (t: Throwable) {
-                status = "Model load failed: ${t.message}"
-                Diagnostics.log(status)
+            landmarker?.close()
+            landmarker = null
+            val order = if (backend == InferenceBackend.CPU) listOf(Delegate.CPU) else listOf(Delegate.GPU, Delegate.CPU)
+            val failures = mutableListOf<String>()
+            for (d in order) {
+                try {
+                    landmarker = create(d, RunningMode.LIVE_STREAM)
+                    backendInUse = (if (d == Delegate.GPU) "GPU" else "CPU") + if (failures.isEmpty()) "" else " (fallback: ${failures.joinToString()})"
+                    status = "rodando"
+                    break
+                } catch (t: Throwable) {
+                    failures += "${d.name}: ${t.message}"
+                }
             }
+            if (landmarker == null) status = "Falha ao iniciar o MediaPipe: ${failures.joinToString()}"
+            Diagnostics.log("Hand tracking: $status, backend $backendInUse")
         }
         return true
     }
 
-    fun stop() {
-        handler.post { detector?.close(); landmark?.close(); detector = null; landmark = null; status = "stopped" }
+    private fun create(delegate: Delegate, mode: RunningMode): HandLandmarker {
+        val base = BaseOptions.builder().setModelAssetPath(MODEL_ASSET).setDelegate(delegate).build()
+        val opts = HandLandmarker.HandLandmarkerOptions.builder()
+            .setBaseOptions(base)
+            .setRunningMode(mode)
+            .setNumHands(2)
+            .setMinHandDetectionConfidence(0.5f)
+            .setMinHandPresenceConfidence(0.5f)
+            .setMinTrackingConfidence(0.5f)
+        if (mode == RunningMode.LIVE_STREAM) {
+            opts.setResultListener { result, _ -> onResult(result) }
+            opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; busy.set(false) }
+        }
+        return HandLandmarker.createFromOptions(context, opts.build())
     }
+
+    fun stop() { handler.post { landmarker?.close(); landmarker = null; status = "parado" } }
 
     /**
-     * Submit a camera frame. [cameraPose] is the camera pose in tracking space at capture time
-     * (null when only 3DoF is known: joints are then relative to the head-locked camera).
+     * Submit a camera frame (closed here). [cameraPose] is the camera pose in tracking space at
+     * capture time; [rotation180] is true when the landscape display is upside down relative to
+     * the sensor (ROTATION_270).
      */
-    fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthSampler?, releaseDepth: (() -> Unit)?) {
+    fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthImage?, rotation180: Boolean = false) {
+        val lm = landmarker
         val now = System.nanoTime()
-        if (detector == null || landmark == null || now - lastRunNs < minIntervalNs || !busy.compareAndSet(false, true)) {
-            image.close(); releaseDepth?.invoke(); return
-        }
-        lastRunNs = now
-        // Convert on the caller thread while the Image is valid, then infer asynchronously.
-        val frame = YuvFrame.from(image)
-        image.close()
-        val pose = cameraPose?.copy()
-        handler.post {
-            try { process(frame, intr, pose, depth, now) } catch (t: Throwable) { status = "Inference error: ${t.message}" }
-            finally { releaseDepth?.invoke(); busy.set(false) }
+        if (lm == null || now - lastSubmitNs < minIntervalNs || !busy.compareAndSet(false, true)) { image.close(); return }
+        lastSubmitNs = now
+        val bitmap = try { converter.convert(image, rotation180) } finally { image.close() }
+        pendingIntr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
+        pendingPose = cameraPose?.copy()
+        pendingDepth.capture(depth, rotation180)
+        pendingSubmitNs = System.nanoTime()
+        var ts = SystemClock.uptimeMillis()
+        if (ts <= lastTimestampMs) ts = lastTimestampMs + 1 // MediaPipe needs strictly increasing timestamps
+        lastTimestampMs = ts
+        try {
+            lm.detectAsync(BitmapImageBuilder(bitmap).build(), ts)
+        } catch (t: Throwable) {
+            busy.set(false)
+            status = "detectAsync falhou: ${t.message}"
         }
     }
 
-    private fun process(frame: YuvFrame, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthSampler?, ts: Long) {
-        frameCounter++
-        val det = detector ?: return
-        val lm = landmark ?: return
+    private fun onResult(result: HandLandmarkerResult) {
         val t0 = System.nanoTime()
-        // Detector only when a hand is missing, and at most every 3rd frame.
-        if (rois.size < 2 && frameCounter % 3 == 0) {
-            for (box in runDetector(det, frame)) {
-                val overlaps = rois.values.any { kotlin.math.abs(it[0] - box[0]) < box[2] * 0.5f && kotlin.math.abs(it[1] - box[1]) < box[2] * 0.5f }
-                if (!overlaps) rois[if (rois.containsKey(Handedness.RIGHT)) Handedness.LEFT else Handedness.RIGHT] = box
-            }
-        }
+        Diagnostics.record(Stage.HAND_INFERENCE, t0 - pendingSubmitNs)
+        val intr = pendingIntr ?: run { busy.set(false); return }
         val seen = HashSet<Handedness>()
-        for ((hand, roi) in rois.entries.toList()) {
-            val obs = runLandmarks(lm, frame, roi) ?: run { rois.remove(hand); null } ?: continue
-            Diagnostics.record(Stage.HAND_INFERENCE, System.nanoTime() - t0)
-            val tp = System.nanoTime()
-            val side = obs.handedness
-            obs.timestampNs = ts
-            if (fusion.fuse(obs, intr, depth, cameraPose, fusionResult)) {
-                trackers.getValue(side).update(fusionResult.cameraSpace, obs.score, fusionResult.depthSource, ts)
+        val depth = if (pendingDepth.valid) pendingDepth else null
+        for (i in result.landmarks().indices) {
+            val lms = result.landmarks()[i]
+            if (lms.size < HandJoint.COUNT) continue
+            val cat = result.handedness().getOrNull(i)?.firstOrNull()
+            // MediaPipe labels assume a mirrored (selfie) image; the back camera is not mirrored.
+            val side = if (cat?.categoryName() == "Left") Handedness.RIGHT else Handedness.LEFT
+            if (side in seen) continue
+            val obs = LandmarkObservation(side)
+            obs.score = cat?.score() ?: 0.8f
+            for (j in 0 until HandJoint.COUNT) {
+                val p = lms[j]
+                obs.image[j * 3] = p.x(); obs.image[j * 3 + 1] = p.y(); obs.image[j * 3 + 2] = p.z()
+            }
+            if (fusion.fuse(obs, intr, depth, pendingPose, fusionResult)) {
+                trackers.getValue(side).update(fusionResult.cameraSpace, obs.score, fusionResult.depthSource, t0)
                 seen += side
             }
-            // next ROI from the landmarks bounding box
-            rois.remove(hand)
-            rois[side] = roiFromLandmarks(obs.image)
-            Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - tp)
         }
-        for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, ts)
-        synchronized(lock) {
-            for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side))
-        }
+        for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
+        synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
+        Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
+        busy.set(false)
     }
 
     /** Thread-safe copy of the latest hand states. */
@@ -212,140 +176,108 @@ class HandTrackingService(private val context: Context) {
         dst.pinchStrength = src.pinchStrength; dst.gesture = src.gesture; dst.timestampNs = src.timestampNs
     }
 
-    private fun roiFromLandmarks(img: FloatArray): FloatArray {
-        var minX = 1f; var minY = 1f; var maxX = 0f; var maxY = 0f
-        for (i in 0 until HandJoint.COUNT) {
-            minX = minOf(minX, img[i * 3]); maxX = maxOf(maxX, img[i * 3])
-            minY = minOf(minY, img[i * 3 + 1]); maxY = maxOf(maxY, img[i * 3 + 1])
-        }
-        val size = maxOf(maxX - minX, maxY - minY) * 1.7f
-        return floatArrayOf((minX + maxX) / 2, (minY + maxY) / 2, size.coerceIn(0.05f, 1.2f))
-    }
-
-    // ------------------------------------------------------------------ models
-    private fun inputBuffer(model: InferenceModel, frame: YuvFrame, cx: Float, cy: Float, size: Float, aspectCorrect: Boolean): Pair<ByteBuffer, Int> {
-        val t = model.interpreter.getInputTensor(0)
-        val shape = t.shape() // [1,H,W,3]
-        val h = shape[1]; val w = shape[2]
-        val isFloat = t.dataType() == org.tensorflow.lite.DataType.FLOAT32
-        val buf = ByteBuffer.allocateDirect(w * h * 3 * if (isFloat) 4 else 1).order(ByteOrder.nativeOrder())
-        frame.sampleRgb(buf, w, h, cx, cy, size, if (aspectCorrect) frame.width.toFloat() / frame.height else 1f, isFloat)
-        buf.rewind()
-        return buf to w
-    }
-
-    private fun runDetector(model: InferenceModel, frame: YuvFrame): List<FloatArray> {
-        val (input, _) = inputBuffer(model, frame, 0.5f, 0.5f, 1f, aspectCorrect = false)
-        val outCount = model.interpreter.outputTensorCount
-        if (outCount < 4) { status = "Detector output format not supported (expected detection post-process)"; return emptyList() }
-        val n = model.interpreter.getOutputTensor(0).shape()[1]
-        val boxes = Array(1) { Array(n) { FloatArray(4) } }
-        val classes = Array(1) { FloatArray(n) }
-        val scores = Array(1) { FloatArray(n) }
-        val count = FloatArray(1)
-        model.interpreter.runForMultipleInputsOutputs(arrayOf(input), mapOf(0 to boxes, 1 to classes, 2 to scores, 3 to count))
-        val out = mutableListOf<FloatArray>()
-        for (i in 0 until minOf(n, count[0].toInt())) {
-            if (scores[0][i] < 0.5f) continue
-            val b = boxes[0][i]
-            val cx = (b[1] + b[3]) / 2; val cy = (b[0] + b[2]) / 2
-            out += floatArrayOf(cx, cy, maxOf(b[3] - b[1], b[2] - b[0]) * 2.0f)
-            if (out.size == 2) break
+    /**
+     * Times MediaPipe on GPU and CPU (IMAGE mode, [iterations] runs after warm-up). The input is a
+     * synthetic frame without hands, so this measures palm detection, the stage that runs when no
+     * hand is being tracked.
+     */
+    fun benchmark(iterations: Int = 40): List<String> {
+        val out = mutableListOf<String>()
+        val bmp = Bitmap.createBitmap(480, 360, Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF808080.toInt()) }
+        val img = BitmapImageBuilder(bmp).build()
+        for (d in listOf(Delegate.GPU, Delegate.CPU)) {
+            try {
+                val lm = create(d, RunningMode.IMAGE)
+                try {
+                    val stats = LatencyStats("MediaPipe ${d.name} (detector de palma)", iterations)
+                    repeat(5) { lm.detect(img) }
+                    repeat(iterations) {
+                        val t0 = System.nanoTime()
+                        lm.detect(img)
+                        stats.record(System.nanoTime() - t0)
+                    }
+                    out += stats.snapshot().format()
+                } finally { lm.close() }
+            } catch (t: Throwable) {
+                out += "${d.name}: indisponível (${t.message})"
+            }
         }
         return out
     }
 
-    private fun runLandmarks(model: InferenceModel, frame: YuvFrame, roi: FloatArray): LandmarkObservation? {
-        val (input, size) = inputBuffer(model, frame, roi[0], roi[1], roi[2], aspectCorrect = true)
-        val lmOut = Array(1) { FloatArray(63) }
-        val presence = Array(1) { FloatArray(1) }
-        val handed = Array(1) { FloatArray(1) }
-        val outputs = HashMap<Int, Any>()
-        outputs[0] = lmOut
-        if (model.interpreter.outputTensorCount > 1) outputs[1] = presence
-        if (model.interpreter.outputTensorCount > 2) outputs[2] = handed
-        model.interpreter.runForMultipleInputsOutputs(arrayOf(input), outputs)
-        val score = if (outputs.containsKey(1)) presence[0][0] else 1f
-        if (score < 0.5f) return null
-        val obs = LandmarkObservation(if (handed[0][0] > 0.5f) Handedness.RIGHT else Handedness.LEFT)
-        obs.score = score
-        // crop pixels -> full-image normalized coordinates
-        val aspect = frame.width.toFloat() / frame.height
-        val roiW = roi[2] / aspect
-        val roiH = roi[2]
-        for (i in 0 until HandJoint.COUNT) {
-            obs.image[i * 3] = roi[0] + (lmOut[0][i * 3] / size - 0.5f) * roiW
-            obs.image[i * 3 + 1] = roi[1] + (lmOut[0][i * 3 + 1] / size - 0.5f) * roiH
-            obs.image[i * 3 + 2] = lmOut[0][i * 3 + 2] / size * roiW
-        }
-        return obs
-    }
-
-    /** Runs each available backend [iterations] times on a synthetic frame and reports the timing. */
-    fun benchmark(iterations: Int = 50): List<String> {
-        if (!models.available) return listOf("No hand models installed: nothing to benchmark")
-        val results = mutableListOf<String>()
-        val frame = YuvFrame.synthetic(640, 480)
-        for (b in listOf(InferenceBackend.CPU, InferenceBackend.GPU, InferenceBackend.NNAPI)) {
-            try {
-                InferenceModel(models.landmarks, b).use { m ->
-                    val stats = LatencyStats("landmarks ${m.backend}", iterations)
-                    repeat(5) { runLandmarks(m, frame, floatArrayOf(0.5f, 0.5f, 0.6f)) } // warm-up
-                    repeat(iterations) {
-                        val t0 = System.nanoTime()
-                        runLandmarks(m, frame, floatArrayOf(0.5f, 0.5f, 0.6f))
-                        stats.record(System.nanoTime() - t0)
-                    }
-                    results += stats.snapshot().format()
-                }
-            } catch (t: Throwable) {
-                results += "${b.name}: unavailable (${t.message})"
-            }
-        }
-        return results
-    }
-
     fun shutdown() { stop(); thread.quitSafely() }
-}
-
-/** Compact copy of a YUV_420_888 image with bilinear-free nearest sampling into model inputs. */
-class YuvFrame private constructor(val width: Int, val height: Int, private val y: ByteArray, private val u: ByteArray, private val v: ByteArray,
-                                   private val yRow: Int, private val uvRow: Int, private val uvPix: Int) {
-    /** Samples a square ROI (normalized centre/size, size relative to height) into an RGB tensor. */
-    fun sampleRgb(out: ByteBuffer, w: Int, h: Int, cx: Float, cy: Float, size: Float, aspect: Float, asFloat: Boolean) {
-        val roiW = size / aspect * width
-        val roiH = size * height
-        val x0 = cx * width - roiW / 2
-        val y0 = cy * height - roiH / 2
-        for (j in 0 until h) {
-            val sy = (y0 + (j + 0.5f) / h * roiH).toInt()
-            for (i in 0 until w) {
-                val sx = (x0 + (i + 0.5f) / w * roiW).toInt()
-                var r = 0; var g = 0; var b = 0
-                if (sx in 0 until width && sy in 0 until height) {
-                    val yy = (y[sy * yRow + sx].toInt() and 0xff) - 16
-                    val ui = (sy / 2) * uvRow + (sx / 2) * uvPix
-                    val uu = (u[ui].toInt() and 0xff) - 128
-                    val vv = (v[ui].toInt() and 0xff) - 128
-                    val c = 1192 * maxOf(yy, 0)
-                    r = ((c + 1634 * vv) shr 10).coerceIn(0, 255)
-                    g = ((c - 833 * vv - 400 * uu) shr 10).coerceIn(0, 255)
-                    b = ((c + 2066 * uu) shr 10).coerceIn(0, 255)
-                }
-                if (asFloat) { out.putFloat(r / 255f); out.putFloat(g / 255f); out.putFloat(b / 255f) }
-                else { out.put(r.toByte()); out.put(g.toByte()); out.put(b.toByte()) }
-            }
-        }
-    }
 
     companion object {
-        fun from(img: Image): YuvFrame {
-            val p = img.planes
-            fun bytes(b: ByteBuffer): ByteArray { val a = ByteArray(b.remaining()); b.get(a); return a }
-            return YuvFrame(img.width, img.height, bytes(p[0].buffer), bytes(p[1].buffer), bytes(p[2].buffer), p[0].rowStride, p[1].rowStride, p[1].pixelStride)
-        }
+        const val MODEL_ASSET = "models/hand_landmarker.task"
+        const val MAX_WIDTH = 480
+    }
+}
 
-        fun synthetic(w: Int, h: Int): YuvFrame =
-            YuvFrame(w, h, ByteArray(w * h) { 128.toByte() }, ByteArray(w * h / 2) { 128.toByte() }, ByteArray(w * h / 2) { 128.toByte() }, w, w / 2, 1)
+/** A CPU depth image (ARCore 16-bit millimetres) handed to the hand pipeline by the caller. */
+class DepthImage(val buffer: ByteBuffer, val width: Int, val height: Int, val rowStride: Int, val pixelStride: Int, val sourceWidth: Int, val sourceHeight: Int)
+
+/** Copy of the depth image taken at submit time, because inference finishes asynchronously. */
+class DepthSnapshot : DepthSampler {
+    private var data = ShortArray(0)
+    private var w = 0; private var h = 0
+    private var srcW = 1; private var srcH = 1
+    private var flip = false
+    var valid = false; private set
+
+    fun capture(d: DepthImage?, rotation180: Boolean) {
+        if (d == null) { valid = false; return }
+        if (data.size < d.width * d.height) data = ShortArray(d.width * d.height)
+        w = d.width; h = d.height; srcW = d.sourceWidth; srcH = d.sourceHeight; flip = rotation180
+        for (y in 0 until h) for (x in 0 until w) data[y * w + x] = d.buffer.getShort(y * d.rowStride + x * d.pixelStride)
+        valid = true
+    }
+
+    override fun depthAt(px: Float, py: Float): Float {
+        var x = (px / srcW * w).toInt(); var y = (py / srcH * h).toInt()
+        if (flip) { x = w - 1 - x; y = h - 1 - y }
+        if (x !in 0 until w || y !in 0 until h) return Float.NaN
+        val mm = data[y * w + x].toInt() and 0xffff
+        return if (mm == 0) Float.NaN else mm / 1000f
+    }
+}
+
+/**
+ * YUV_420_888 -> ARGB bitmap at <= [HandTrackingService.MAX_WIDTH] px wide, written into buffers
+ * that are reused frame after frame (no per-frame allocation). Integer BT.601 conversion.
+ */
+class YuvToBitmap {
+    private var pixels = IntArray(0)
+    private var bitmap: Bitmap? = null
+
+    fun convert(img: Image, rotate180: Boolean): Bitmap {
+        val step = maxOf(1, (img.width + HandTrackingService.MAX_WIDTH - 1) / HandTrackingService.MAX_WIDTH)
+        val ow = img.width / step
+        val oh = img.height / step
+        if (pixels.size != ow * oh) pixels = IntArray(ow * oh)
+        val b = bitmap?.takeIf { it.width == ow && it.height == oh } ?: Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888).also { bitmap = it }
+        val p = img.planes
+        val yb = p[0].buffer; val ub = p[1].buffer; val vb = p[2].buffer
+        val yRow = p[0].rowStride; val yPix = p[0].pixelStride
+        val uvRow = p[1].rowStride; val uvPix = p[1].pixelStride
+        for (oy in 0 until oh) {
+            val sy = oy * step
+            val yBase = sy * yRow
+            val uvBase = (sy shr 1) * uvRow
+            val dstRow = (if (rotate180) oh - 1 - oy else oy) * ow
+            for (ox in 0 until ow) {
+                val sx = ox * step
+                val yy = (yb.get(yBase + sx * yPix).toInt() and 0xff) - 16
+                val ui = uvBase + (sx shr 1) * uvPix
+                val u = (ub.get(ui).toInt() and 0xff) - 128
+                val v = (vb.get(ui).toInt() and 0xff) - 128
+                val c = 1192 * (if (yy < 0) 0 else yy)
+                var r = (c + 1634 * v) shr 10; if (r < 0) r = 0 else if (r > 255) r = 255
+                var g = (c - 833 * v - 400 * u) shr 10; if (g < 0) g = 0 else if (g > 255) g = 255
+                var bl = (c + 2066 * u) shr 10; if (bl < 0) bl = 0 else if (bl > 255) bl = 255
+                pixels[dstRow + (if (rotate180) ow - 1 - ox else ox)] = (0xff shl 24) or (r shl 16) or (g shl 8) or bl
+            }
+        }
+        b.setPixels(pixels, 0, ow, 0, 0, ow, oh)
+        return b
     }
 }

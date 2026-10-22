@@ -54,8 +54,6 @@ class MainActivity : ComponentActivity() {
         io.execute { app.capabilities.probe(app.runtimeBroker); runOnUiThread { refresh++ } }
     }
     val pickPackage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { onPackagePicked(it) } }
-    val pickDetector = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { importModel(it, detector = true) } }
-    val pickLandmarks = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { importModel(it, detector = false) } }
     var pendingInstall by mutableStateOf<Pair<java.io.File, com.hyperxr.sdk.InspectionResult>?>(null)
     var message by mutableStateOf<String?>(null)
 
@@ -103,17 +101,6 @@ class MainActivity : ComponentActivity() {
         pendingInstall = null
         io.execute {
             val msg = try { val p = app.packages.commitInstall(file, result); "Instalado: ${p.manifest.name} ${p.manifest.version}" } catch (t: Throwable) { "Falha: ${t.message}" }
-            runOnUiThread { message = msg; refresh++ }
-        }
-    }
-
-    private fun importModel(uri: android.net.Uri, detector: Boolean) {
-        io.execute {
-            val models = com.hyperxr.handtracking.HandModels(this)
-            val msg = try {
-                models.import(this, uri, if (detector) models.detector else models.landmarks)
-                "Modelo importado (${if (detector) "detector" else "landmarks"})"
-            } catch (t: Throwable) { "Falha ao importar: ${t.message}" }
             runOnUiThread { message = msg; refresh++ }
         }
     }

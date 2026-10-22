@@ -107,6 +107,8 @@ interface CameraImageSource {
     /** Horizontal and vertical field of view of the image, radians. */
     val fovX: Float
     val fovY: Float
+    /** Width/height of the area that quad UVs 0..1 cover through [texMatrix]. */
+    val imageAspect: Float
     val hasFrame: Boolean
 }
 
@@ -116,6 +118,10 @@ class SceneRenderer {
     private lateinit var oesProg: Program
     private lateinit var skyProg: Program
     private lateinit var panoProg: Program
+    private lateinit var oesFullProg: Program
+    private var fullVao = 0
+    /** Fill each eye with the camera image (true) or keep its real angular size (false). */
+    var passthroughFill = true
     lateinit var cube: GpuMesh; private set
     lateinit var sphere: GpuMesh; private set
     lateinit var plane: GpuMesh; private set
@@ -151,6 +157,11 @@ class SceneRenderer {
         oesProg = Program(Gl.compile(Shaders.OES_VS, Shaders.OES_FS, "oes"))
         skyProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.SKY_FS, "sky"))
         panoProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_FS, "pano"))
+        oesFullProg = Program(Gl.compile(Shaders.OES_FULL_VS, Shaders.OES_FS, "oes-full"))
+        fullVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
+        GLES30.glBindVertexArray(fullVao)
+        FullscreenTriangle.bind()
+        GLES30.glBindVertexArray(0)
         cube = GpuMesh.cube(); sphere = GpuMesh.sphere(); plane = GpuMesh.plane(); cylinder = GpuMesh.cylinder(); quad = GpuMesh.quad()
         skySphere = GpuMesh.sphere(16, 24, inward = true, radius = 50f)
         floorMesh = GpuMesh.plane(40f)
@@ -182,7 +193,11 @@ class SceneRenderer {
         GLES30.glClearColor(c[0], c[1], c[2], c[3])
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
         when (scene.background) {
-            Background.PASSTHROUGH -> if (camera != null && camera.hasFrame) drawCamera(eye, camera, headPose) else drawEnvironment(eye, scene)
+            Background.PASSTHROUGH -> when {
+                camera == null || !camera.hasFrame -> drawEnvironment(eye, scene)
+                passthroughFill -> drawCameraFull(eye, camera)
+                else -> drawCamera(eye, camera, headPose)
+            }
             Background.ENVIRONMENT -> drawEnvironment(eye, scene)
             Background.COLOR -> Unit
         }
@@ -192,9 +207,7 @@ class SceneRenderer {
         when (val env = environment) {
             is EnvironmentVisual.Studio -> {
                 drawSky(eye, floatArrayOf(0.10f, 0.08f, 0.24f), floatArrayOf(0.42f, 0.30f, 0.62f), floatArrayOf(0.05f, 0.05f, 0.08f))
-                val m = FloatArray(16)
-                Mat4.compose(Vec3(0f, 0f, 0f), Quat(), 60f, 1f, 60f, m)
-                drawMesh(floorMesh, m, eye, floatArrayOf(1f, 1f, 1f, 1f), gridTexture, scene, unlit = false)
+                drawMesh(floorMesh, floorMatrix, eye, WHITE, gridTexture, scene, unlit = false)
             }
             is EnvironmentVisual.Panorama -> {
                 GLES30.glUseProgram(panoProg.id)
@@ -247,10 +260,9 @@ class SceneRenderer {
         val d = 20f
         val w = 2f * d * kotlin.math.tan(camera.fovX / 2)
         val h = 2f * d * kotlin.math.tan(camera.fovY / 2)
-        val model = FloatArray(16)
-        val p = headPose.transformPoint(Vec3(0f, 0f, -d))
-        Mat4.compose(p, headPose.orientation, w, h, 1f, model)
-        Matrix.multiplyMM(mvp, 0, eye.viewProj, 0, model, 0)
+        headPose.transformPoint(camForward.set(0f, 0f, -d), camPos)
+        Mat4.compose(camPos, headPose.orientation, w, h, 1f, camModel)
+        Matrix.multiplyMM(mvp, 0, eye.viewProj, 0, camModel, 0)
         GLES30.glUniformMatrix4fv(oesProg.u("uMvp"), 1, false, mvp, 0)
         GLES30.glUniformMatrix4fv(oesProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
         GLES30.glUniform1f(oesProg.u("uAlpha"), 1f)
@@ -260,6 +272,34 @@ class SceneRenderer {
         GLES30.glDepthMask(false)
         quad.draw()
         GLES30.glDepthMask(true)
+    }
+
+    private val camForward = Vec3()
+    private val camPos = Vec3()
+    private val camModel = FloatArray(16)
+    private val floorMatrix = Mat4.compose(Vec3(0f, 0f, 0f), Quat(), 60f, 1f, 60f, FloatArray(16))
+
+    /** Camera image stretched over the whole eye with a centre crop that preserves its aspect. */
+    private fun drawCameraFull(eye: EyeView, camera: CameraImageSource) {
+        val eyeAspect = eye.proj[5] / eye.proj[0]
+        val ratio = eyeAspect / camera.imageAspect
+        // crop the dimension that overflows so the image covers the viewport without distortion
+        val cropU = if (ratio < 1f) ratio else 1f
+        val cropV = if (ratio < 1f) 1f else 1f / ratio
+        GLES30.glUseProgram(oesFullProg.id)
+        GLES30.glUniformMatrix4fv(oesFullProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
+        GLES30.glUniform2f(oesFullProg.u("uCrop"), cropU, cropV)
+        GLES30.glUniform1f(oesFullProg.u("uAlpha"), 1f)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
+        GLES30.glUniform1i(oesFullProg.u("uTex"), 0)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glBindVertexArray(fullVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        GLES30.glBindVertexArray(0)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
     }
 
     fun renderScene(scene: FrameScene, eye: EyeView) {
@@ -381,6 +421,8 @@ class SceneRenderer {
     private val flipY = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
 
     companion object {
+        private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
+
         /** Gradient used for placeholder icon tiles (no glyph, see docs/ICONS.md). */
         fun placeholderTile(size: Int): Bitmap {
             val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

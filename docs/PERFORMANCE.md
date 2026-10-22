@@ -36,8 +36,13 @@ Cada estágio guarda 512 amostras e reporta média, p50, p95, p99, mínimo, máx
 - Buffers diretos compartilhados com o LuaJIT; chamadas de host numéricas não alocam.
 - Física e UI em LuaJIT (sem JNI por entidade); painéis só re-renderizam quando mudam.
 - Pools de `DrawItem`/`PanelItem`; culling por esfera envolvente por olho.
-- Hand tracking: só o quadro mais novo, ROI derivada dos landmarks (detector só quando a mão some),
-  taxa configurável, conversão YUV→RGB direto no tamanho do modelo.
+- Hand tracking: MediaPipe na GPU, só o quadro mais novo (descarta em vez de enfileirar), ROI interna
+  do MediaPipe, taxa configurável, YUV→RGB em buffers reutilizados a ≤ 480 px.
+- Câmera: faixa de FPS que alcança 60 com o menor limite inferior possível, estabilização desligada;
+  passthrough em tela cheia desenhado como um único triângulo por olho, sem teste de profundidade.
+- Tela na maior taxa de atualização disponível na resolução atual.
+- `glInvalidateFramebuffer` do depth de cada olho (GPUs por tiles não gravam o depth na memória).
+- Sem alocações por quadro no renderer de ambiente, câmera e launcher (listas e matrizes reutilizadas).
 - Predição de rotação por giroscópio; predição de mãos pela velocidade do filtro One Euro.
 - Modo de desempenho sustentado; escala de resolução por olho; texturas glTF limitadas a 2048 px.
 

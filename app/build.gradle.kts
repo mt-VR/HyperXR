@@ -48,6 +48,8 @@ android {
     }
 
     packaging { jniLibs { useLegacyPackaging = false } }
+    // MediaPipe memory-maps the model from the APK: it must be stored uncompressed.
+    androidResources { noCompress += "task" }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/hyperx-assets"))
     testOptions { unitTests.isReturnDefaultValues = true }
@@ -80,9 +82,7 @@ dependencies {
     implementation(libs.lifecycle.runtime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.arcore)
-    implementation(libs.tflite)
-    implementation(libs.tflite.gpu)
-    implementation(libs.tflite.gpu.api)
+    implementation(libs.mediapipe.tasks.vision)
     implementation(libs.openxr.loader)
     implementation(libs.webkit)
     implementation(libs.browser)

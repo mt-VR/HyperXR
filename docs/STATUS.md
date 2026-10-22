@@ -21,6 +21,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | MR com ARCore (passthrough, 6DoF, Depth quando suportado) | 🟡 |
 | MR com Camera2 + 3DoF (imagem mono) | 🟡 |
 | VR SBS com distorção de lente, IPD, FOV configuráveis | 🟡 |
+| Câmera preenchendo todo o SBS (recorte central por olho; opção de escala angular real) | 🟡 |
 | 3DoF por vetor de rotação + predição por giroscópio + modelo de pescoço | 🟡 |
 | OpenXR: sonda real do runtime (loader Khronos) | 🟡 |
 | OpenXR: sessão GLES, swapchains, laço de quadros | 🟡 (código completo; precisa de runtime instalado) |
@@ -44,7 +45,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 |---|---|
 | Filtros, perda/recuperação, gestos, fusão de profundidade | ✅ |
 | Direct Touch (proximidade, contato, histerese, anti-duplo-clique, arrastar) | ✅ lógica · 🟡 integração |
-| Inferência de mãos (LiteRT CPU/GPU/NNAPI, ROI, benchmark) | 🟡 · modelos não embarcados (usuário importa) |
+| Inferência de mãos (MediaPipe Hand Landmarker na GPU, fallback CPU, modelo embutido, benchmark) | 🟡 |
+| Hand tracking também no modo VR (câmera só para as mãos) | 🟡 |
+| Clique por olhar (dwell com anel de progresso), toque travado (não perde toques curtos), raio de mão + pinça | ✅ lógica (core e Lua) · 🟡 aparelho |
 | Aura preta (campo SDF unido + composição) | 🟡 |
 | Joy-Cons: botões, R/L configuráveis, reconexão, IMU quando o driver expõe | ✅ lógica · 🟡 Android |
 | Fusão mão + orientação do controle com calibração | ✅ |
@@ -77,6 +80,13 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Instrumentação por estágio (média, p50/p95/p99, desvio) | ✅ |
 | Medições em aparelhos reais | ⏳ nenhuma ainda |
 | Resolução dinâmica, timer de GPU, ETC2/ASTC, LOD, glTF assíncrono, reação térmica | ⏳ |
+
+## Correções após o primeiro teste em aparelho
+- Botões de painéis do XR não clicavam: as regiões clicáveis eram recriadas a cada redesenho e
+  comparadas por identidade; agora são comparadas por id.
+- Toques mais curtos que um quadro se perdiam: agora ficam enfileirados (`TapLatch`).
+- Hand tracking não rodava porque nenhum modelo vinha no APK: agora o modelo MediaPipe é embutido.
+- Ícones abaixo da linha dos olhos inclinavam para longe do usuário (sinal da rotação invertido).
 
 ## Bloqueios deste ambiente
 - Sem aparelho Android nem emulador (sem KVM): nada foi executado em hardware.

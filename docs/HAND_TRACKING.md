@@ -1,50 +1,46 @@
 # Hand tracking
 
-Pipeline próprio (sem MediaPipe):
+```
+câmera (ARCore CPU image ou Camera2 YUV 640x480; também em VR, só para as mãos)
+ → YUV→RGB em buffers reutilizados, ≤ 480 px de largura (sem alocação por quadro)
+ → MediaPipe Hand Landmarker, LIVE_STREAM, delegate GPU (CPU como fallback, informado)
+   · detector de palma só quando a mão some; depois rastreamento por ROI interno do MediaPipe
+   · só o quadro mais novo é processado; quadros que chegam durante a inferência são descartados
+ → DepthFusion: profundidade da palma pelo ARCore Depth ou pelo tamanho da mão
+ → HandTracker: plausibilidade anatômica, One Euro, predição, perda/recuperação sem salto
+ → gestos (pinça com histerese, apontar, punho, mão aberta)
+ → raio de mão + pinça, Direct Touch, aura, API hx.hands
+```
 
-```
-câmera (ARCore CPU image ou Camera2 YUV 640x480)
- → detector (só quando falta mão, a cada 3 quadros)       [LiteRT: CPU/XNNPACK, GPU ou NNAPI]
- → landmarks 21 pontos na ROI prevista do quadro anterior   [LiteRT]
- → DepthFusion: profundidade da palma (ARCore Depth) ou prior de tamanho da mão
- → coordenadas 3D da câmera → espaço de rastreamento (pose da câmera)
- → HandTracker: plausibilidade anatômica, One Euro por coordenada, predição, perda/recuperação sem salto
- → GestureRecognizer: pinça (histerese), apontar, punho, mão aberta
- → Direct Touch, aura, API hx.hands
-```
+## Modelo
+
+`app/src/main/assets/models/hand_landmarker.task` — MediaPipe Hand Landmarker float16, licença
+Apache-2.0 (origem e model card em `assets/models/README.md`). Armazenado sem compressão no APK
+porque o MediaPipe mapeia o arquivo diretamente. Nada precisa ser importado.
+
+O MediaPipe rotula a lateralidade supondo imagem espelhada (câmera frontal); como a câmera traseira
+não é espelhada, o HyperXR inverte o rótulo.
+
+## GPU
+
+O padrão é a GPU (`InferenceBackend.GPU`). Se o delegate GPU não puder ser criado, o serviço cai
+para CPU e mostra o motivo em Configurações > Hand tracking. O botão de benchmark mede GPU e CPU no
+aparelho (quadro sintético sem mão: mede o detector de palma).
 
 ## Profundidade e 6DoF
 
-- **ARCore Depth**: mediana da profundidade nos 5 pontos da palma (robusta a bordas).
-- **Sem Depth**: distância estimada pelo comprimento 3D da palma do esqueleto em pixels contra uma
-  palma adulta média (9 cm). Marcada como `HAND_SIZE_PRIOR`, com confiança reduzida; o Direct Touch
-  alarga seus limiares nesse caso. Mãos muito pequenas/grandes têm erro sistemático.
-- A posição 6DoF da mão no mundo só existe quando a pose da câmera é conhecida (ARCore). Em 3DoF as
-  mãos ficam relativas à cabeça.
-- Sem profundidade nem prior confiável, `DepthFusion.fuse` retorna falso — nenhuma posição é inventada.
+- **ARCore Depth**: mediana da profundidade nos 5 pontos da palma; a imagem de profundidade é
+  copiada no envio (a inferência é assíncrona).
+- **Sem Depth**: distância pelo comprimento 3D da palma em pixels contra uma palma adulta média
+  (9 cm), marcada `HAND_SIZE_PRIOR` com confiança reduzida.
+- Posição 6DoF da mão no mundo só com pose de câmera conhecida (ARCore); em 3DoF as mãos ficam
+  relativas à cabeça.
 
-## Modelos (não embarcados)
+## Interação
 
-Importe em Configurações > Hand tracking:
-
-- `hand_detector.tflite`: entrada `[1,H,W,3]` (float 0..1 ou uint8); saída no formato
-  `TFLite_Detection_PostProcess`: caixas `[1,N,4]` (ymin,xmin,ymax,xmax normalizados), classes,
-  scores `[1,N]`, contagem `[1]`.
-- `hand_landmark.tflite`: entrada `[1,S,S,3]`; saída 0 `[1,63]` (x,y em pixels da entrada, z relativo),
-  saída 1 presença `[1,1]`, saída 2 lateralidade `[1,1]` (> 0,5 = direita).
-
-Use somente modelos cuja licença permita o seu uso. O botão de benchmark mede o modelo de landmarks
-em CPU, GPU e NNAPI no aparelho e mostra média/percentis; se um backend não carrega, o motivo aparece.
-
-## NNAPI / NPU
-
-A lista de dispositivos NNAPI vem do driver (`ANeuralNetworks_getDevice*`). Ter NNAPI não significa
-ter NPU, nem que todas as operações do modelo serão aceleradas: o delegate pode cair para CPU por
-operação. No Android 15+ a NNAPI está obsoleta; GPU/CPU continuam disponíveis.
-
-## Aura preta
-
-Cada osso vira um billboard cujo shader avalia a distância a uma cápsula; mistura MAX num alvo R8 de
-meia resolução gera a união de todas as cápsulas (sem costuras nas juntas). Um segundo passe converte
-esse campo em borda preta suave + interior preto translúcido, sem esconder o que está atrás.
-Com Joy-Cons conectados a aura some, mas o rastreamento continua alimentando a origem do raio.
+- **Raio de mão + pinça**: raio de um ombro estimado passando pela mão; pinçar clica. É o modo mais
+  confiável à distância, porque não depende de profundidade exata.
+- **Direct Touch**: tocar o painel com a ponta do indicador (limiares alargados quando a
+  profundidade é estimada).
+- **Aura preta**: campo de distância de cápsulas unido por blending MAX em meia resolução e
+  composto como borda escura + interior translúcido; some com Joy-Cons conectados.
