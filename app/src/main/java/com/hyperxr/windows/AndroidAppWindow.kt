@@ -62,6 +62,11 @@ class AndroidAppWindow(
 
     override fun back() = sendKey(KeyEvent.KEYCODE_BACK)
 
+    override fun openUrl(url: String) {
+        val s = shell ?: return
+        io.execute { runCatching { s.openUrl(displayId, url) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { status = it } }
+    }
+
     override fun close() {
         visible = false
         val s = shell

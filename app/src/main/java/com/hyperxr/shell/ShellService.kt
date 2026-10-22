@@ -88,6 +88,13 @@ class ShellService() : IShellService.Stub() {
         return run(listOf("input", "-d", displayId.toString(), "text", safe))
     }
 
+    override fun openUrl(displayId: Int, url: String): String {
+        val uri = runCatching { java.net.URI(url) }.getOrNull()
+        if (uri == null || (uri.scheme != "https" && uri.scheme != "http")) return "somente links http(s)"
+        return run(listOf("am", "start", "--display", displayId.toString(), "-a", "android.intent.action.VIEW", "-d", url))
+            .let { out -> if (out.contains("Error", ignoreCase = true)) out.trim() else "" }
+    }
+
     override fun releaseDisplay(displayId: Int) {
         displays.remove(displayId)?.release()
     }

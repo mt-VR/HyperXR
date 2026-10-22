@@ -38,6 +38,10 @@ data class GraphicsSettings(
     val passthroughFill: Boolean = true,
     /** Stereo (IPD) for virtual content over the mono camera image. Off keeps it aligned with reality. */
     val stereoInMixedReality: Boolean = false,
+    /** VR boundary warning: fade the camera in near real obstacles (needs ARCore Depth). */
+    val vrBoundary: Boolean = true,
+    /** Distance in metres at which the boundary warning starts. */
+    val boundaryDistanceM: Float = 1.0f,
     val theme: String = "aurora",
 )
 

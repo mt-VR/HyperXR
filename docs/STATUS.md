@@ -28,7 +28,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Runtime Broker (descoberta, seleção, árbitro de sessão) | ✅ modelo · 🟡 Android |
 | Monado | 🚫 não embutido (ver ARCHITECTURE.md); detectado e preferido quando instalado |
 | Mãos/controles vindos do runtime OpenXR (XR_EXT_hand_tracking, ações) | ⏳ |
-| Oclusão por profundidade na renderização | ⏳ (Depth é usado só para as mãos) |
+| Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
+| Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |
+| Renderização em MR com o FOV da câmera (mãos no tamanho real), mono por padrão | 🟡 |
 
 ## Launcher
 | Item | Status |
@@ -37,6 +39,10 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | New: ícones 3D, foco, animações, segurar para mover (persistido) | ✅ modelo · 🟡 XR |
 | Janelas espaciais móveis (biblioteca, ajustes, arquivos, galeria, mensagens, ajuda, TV, apps XR, ambientes) | 🟡 |
 | Captura da visão para a Galeria | 🟡 |
+| Navegador em janela espacial (VirtualDisplay + Presentation com WebView real), plana ou curva | 🟡 |
+| Apps Android em janela plana ou curva via Shizuku (display virtual + injeção de toque/tecla/texto) | 🟡 · 🚫 sem Shizuku |
+| Teclado XR (QWERTY, símbolos) para navegador e apps | 🟡 |
+| Arrastar link entre janelas (pinça longa no link, soltar em outra janela ou no vazio) | ✅ lógica · 🟡 aparelho |
 | Área de trabalho remota | ⏳ (exibida como indisponível) |
 | Temas visuais selecionáveis | ⏳ (há um tema; o campo existe nas configurações) |
 
@@ -51,6 +57,10 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Aura preta (campo SDF unido + composição) | 🟡 |
 | Joy-Cons: botões, R/L configuráveis, reconexão, IMU quando o driver expõe | ✅ lógica · 🟡 Android |
 | Fusão mão + orientação do controle com calibração | ✅ |
+| 6DoF dos controles pela mão (IMU opcional corrigido pela mão), raio estabilizado | ✅ lógica · 🟡 aparelho |
+| Tamanho real da mão (calibração por ARCore Depth ou comprimento informado), pinça proporcional | ✅ lógica · 🟡 aparelho |
+| Menu radial por pinça segurada (Voltar, Início, Teclado, Captura) | ✅ lógica · 🟡 aparelho |
+| Microgestos: polegar no indicador rola, toque duplo volta | ✅ lógica · 🟡 aparelho |
 
 ## Conteúdo
 | Item | Status |
@@ -87,7 +97,11 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 - Toques mais curtos que um quadro se perdiam: agora ficam enfileirados (`TapLatch`).
 - Hand tracking não rodava porque nenhum modelo vinha no APK: agora o modelo MediaPipe é embutido.
 - Ícones abaixo da linha dos olhos inclinavam para longe do usuário (sinal da rotação invertido).
+- Mão "minúscula" em MR: o conteúdo era renderizado com o FOV do visor e a câmera com outro; agora
+  usam o mesmo FOV e o mesmo ponto de vista, e a escala da mão vem do tamanho medido/informado.
+- Controles instáveis: o 6DoF agora vem da mão (não do IMU sozinho) e o raio é filtrado.
+- Navegador em branco: a captura por Canvas foi trocada por um display virtual com WebView real.
 
 ## Bloqueios deste ambiente
 - Sem aparelho Android nem emulador (sem KVM): nada foi executado em hardware.
-- Push para o GitHub recusado (403 do GitHub App) durante o desenvolvimento.
+- Push para o GitHub recusado (403 do GitHub App) no início; resolvido após reconectar.

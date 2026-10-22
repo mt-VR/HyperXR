@@ -113,6 +113,48 @@ void main() {
     gl_Position = vec4(aPos.xy, 0.999, 1.0);
 }"""
 
+    /**
+     * Boundary warning ("Guardian"): the camera image over the VR scene, shown where real obstacles
+     * are close. Depth (centimetres in an R8 texture) shares the camera's view-normalized mapping.
+     */
+    const val GUARD_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+uniform mat4 uTexMatrix;
+uniform mat4 uDepthMatrix;
+uniform vec2 uCrop;
+out vec2 vUv;
+out vec2 vDepthUv;
+void main() {
+    vec2 uv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+    uv = 0.5 + (uv - 0.5) * uCrop;
+    vUv = (uTexMatrix * vec4(uv, 0.0, 1.0)).xy;
+    vDepthUv = (uDepthMatrix * vec4(uv, 0.0, 1.0)).xy;
+    gl_Position = vec4(aPos.xy, 0.0, 1.0);
+}"""
+
+    const val GUARD_FS = """#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision mediump float;
+in vec2 vUv;
+in vec2 vDepthUv;
+uniform samplerExternalOES uTex;
+uniform sampler2D uDepth;
+uniform float uWarn;     // metres: fading starts
+uniform float uFull;     // metres: fully visible
+uniform float uGlobal;   // overall fade from the nearest obstacle
+out vec4 fragColor;
+void main() {
+    float cm = texture(uDepth, vDepthUv).r * 255.0;
+    float valid = step(0.5, cm) * step(cm, 254.5);
+    float local = valid * (1.0 - smoothstep(uFull, uWarn, cm / 100.0));
+    float a = max(local, uGlobal * 0.6);
+    if (a < 0.01) discard;
+    vec3 cam = texture(uTex, vUv).rgb;
+    // a faint violet edge where the warning begins, so the boundary reads even in dark rooms
+    vec3 tint = mix(cam, vec3(0.62, 0.55, 1.0), 0.18 * (1.0 - local));
+    fragColor = vec4(tint, a);
+}"""
+
     /** Gradient sky for the procedural studio environment. */
     const val SKY_VS = """#version 300 es
 layout(location=0) in vec3 aPos;

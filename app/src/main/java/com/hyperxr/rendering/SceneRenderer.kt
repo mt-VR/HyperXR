@@ -125,6 +125,7 @@ class SceneRenderer {
     private lateinit var skyProg: Program
     private lateinit var panoProg: Program
     private lateinit var oesFullProg: Program
+    private lateinit var guardProg: Program
     private var fullVao = 0
     /** Fill each eye with the camera image (true) or keep its real angular size (false). */
     var passthroughFill = true
@@ -164,6 +165,7 @@ class SceneRenderer {
         skyProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.SKY_FS, "sky"))
         panoProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_FS, "pano"))
         oesFullProg = Program(Gl.compile(Shaders.OES_FULL_VS, Shaders.OES_FS, "oes-full"))
+        guardProg = Program(Gl.compile(Shaders.GUARD_VS, Shaders.GUARD_FS, "guard"))
         fullVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(fullVao)
         FullscreenTriangle.bind()
@@ -297,6 +299,37 @@ class SceneRenderer {
         GLES30.glUniform1i(oesFullProg.u("uTex"), 0)
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthMask(false)
+        GLES30.glBindVertexArray(fullVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        GLES30.glBindVertexArray(0)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+    }
+
+    /**
+     * Boundary warning over the VR scene: blends the camera in where depth says an obstacle is
+     * closer than [warnM], and everywhere by [global] (0..1) as the nearest obstacle approaches.
+     */
+    fun drawBoundary(eye: EyeView, camera: CameraImageSource, depthTex: Int, depthMatrix: FloatArray, warnM: Float, fullM: Float, global: Float) {
+        val (cropU, cropV) = fillCrop(eye.proj[5] / eye.proj[0], camera)
+        GLES30.glUseProgram(guardProg.id)
+        GLES30.glUniformMatrix4fv(guardProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
+        GLES30.glUniformMatrix4fv(guardProg.u("uDepthMatrix"), 1, false, depthMatrix, 0)
+        GLES30.glUniform2f(guardProg.u("uCrop"), cropU, cropV)
+        GLES30.glUniform1f(guardProg.u("uWarn"), warnM)
+        GLES30.glUniform1f(guardProg.u("uFull"), fullM)
+        GLES30.glUniform1f(guardProg.u("uGlobal"), global)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
+        GLES30.glUniform1i(guardProg.u("uTex"), 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, depthTex)
+        GLES30.glUniform1i(guardProg.u("uDepth"), 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         GLES30.glBindVertexArray(fullVao)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         GLES30.glBindVertexArray(0)

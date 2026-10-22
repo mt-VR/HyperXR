@@ -45,6 +45,20 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 4. Coloque o celular no VR Box. Para clicar: olhe para o botão por ~1 s (anel de progresso no
    retículo), toque na tela/botão do visor, pinçe com a mão apontada para o botão, toque o botão com
    o dedo (Direct Touch) ou use o R do Joy-Con.
+5. Gestos: pinçar e segurar longe de botões abre o **menu radial** (Voltar, Início, Teclado,
+   Captura); deslizar o polegar sobre o indicador **rola**; dois toques do polegar **voltam**;
+   pinça longa num link do navegador **arrasta** o link para outra janela.
+6. Em VR com ARCore Depth, a câmera aparece aos poucos ao se aproximar de obstáculos (**alerta de
+   limite**; Configurações > Gráficos).
+
+### Apps Android em janelas (Shizuku)
+
+1. Instale e inicie o [Shizuku](https://shizuku.rikka.app/) (depuração sem fio ou root).
+2. No XR, abra **Apps Android** e toque em *Conceder permissão*; escolha um app e se a janela é
+   plana ou curva.
+3. O app roda num display virtual criado pelo processo shell do Shizuku; toques, teclas e texto
+   (somente ASCII) são injetados nesse display. Alguns apps bloqueiam displays secundários ou
+   conteúdo protegido (DRM) e aparecem pretos — limitação do Android, não do HyperXR.
 
 ## Documentação
 

@@ -110,6 +110,19 @@ fun GraphicsSection(a: MainActivity) {
         ChoiceRow("Taxa alvo", listOf(60, 72, 90, 120), g.targetFps, { "$it fps" }) { v -> a.update { it.copy(graphics = it.graphics.copy(targetFps = v)) } }
         Note("A taxa real é limitada pela tela (vsync) e pela GPU; veja Diagnóstico para medições.")
     }
+    SectionCard("Limite de segurança (VR)") {
+        val depth = a.app.capabilities.last.arCoreDepth
+        ToggleRow("Alerta de limite", g.vrBoundary, "Em VR, a imagem da câmera aparece aos poucos perto de obstáculos reais") { v ->
+            a.update { it.copy(graphics = it.graphics.copy(vrBoundary = v)) }
+        }
+        SliderRow("Distância do alerta", g.boundaryDistanceM, 0.5f..2.0f, { "%.1f m".format(it) }) { v ->
+            a.update { it.copy(graphics = it.graphics.copy(boundaryDistanceM = v)) }
+        }
+        Note(
+            if (depth.ok) "Usa a ARCore Depth API (alcance útil até ~2,5 m). Também ativa 6DoF e o rastreamento de mãos pela ARCore em VR."
+            else "Requer a ARCore Depth API, que não foi confirmada neste aparelho (${depth.detail}). Sem ela, o alerta fica desligado.",
+        )
+    }
     SectionCard("Lentes do visor (VR Box)") {
         ToggleRow("Correção de distorção da lente", g.lensDistortion) { v -> a.update { it.copy(graphics = it.graphics.copy(lensDistortion = v)) } }
         SliderRow("Coeficiente k1", g.distortionK1, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK1 = v)) } }

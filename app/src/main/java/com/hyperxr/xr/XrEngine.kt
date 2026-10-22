@@ -188,8 +188,23 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             }
             XrMode.VR_SBS -> {
                 // VR shows no camera image, but the camera still feeds hand tracking when allowed.
-                if (settings.handTracking.enabled && app.capabilities.last.cameraPermission && app.capabilities.last.hasBackCamera) startCameraPassthrough()
-                else tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+                val caps = app.capabilities.last
+                val cameraOk = caps.cameraPermission && caps.hasBackCamera
+                // The boundary warning needs depth: ARCore then also provides 6DoF and hand frames.
+                if (cameraOk && settings.graphics.vrBoundary && caps.arCore.ok && !forced3Dof) {
+                    val ar = ArCoreSession(activity)
+                    ar.create(useDepth = true)
+                    if (ar.session != null && ar.depthEnabled) {
+                        arCore = ar; tracker = ar; ar.start()
+                    } else {
+                        ar.close()
+                        Diagnostics.log("VR boundary unavailable: ARCore Depth not supported here")
+                    }
+                }
+                if (arCore == null) {
+                    if (settings.handTracking.enabled && cameraOk) startCameraPassthrough()
+                    else tracker = RotationVectorTracker(activity, displayRotation()).also { it.start() }
+                }
             }
         }
         if (settings.handTracking.enabled && (arCore != null || passthrough != null)) {
@@ -267,6 +282,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         Diagnostics.record(Stage.SIMULATION, System.nanoTime() - sim0)
         if (!ctx.passthroughAvailable && scene.background == Background.PASSTHROUGH) scene.background = Background.ENVIRONMENT
 
+        updateBoundary(dt)
+
         // 4. render
         val r0 = System.nanoTime()
         val camera: CameraImageSource? = arCore ?: passthrough
@@ -316,6 +333,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         renderer.renderBackground(scene, eye, camera, input.head)
         renderer.renderScene(scene, eye)
         renderer.renderPanels(scene, eye, overlayPass = false)
+        if (boundaryActive && camera != null) {
+            val ar = arCore!!
+            renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)
+        }
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         if (settings.handTracking.showAura && joyCons.controllers.isEmpty()) {
             aura.render(handList, eye, target.fbo, target.width, target.height)
@@ -359,6 +380,55 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         Mat4.invertRigid(headMatrix, eye.view)
         Mat4.frustumTan(kotlin.math.tan(xrViews[o + 7]), kotlin.math.tan(xrViews[o + 8]), kotlin.math.tan(xrViews[o + 10]), kotlin.math.tan(xrViews[o + 9]), 0.05f, 200f, eye.proj)
         eye.update()
+    }
+
+    // ---------------------------------------------------------------- VR boundary ("Guardian")
+    private var boundaryTex = 0
+    private var boundaryBytes: ByteArray? = null
+    private var boundaryW = 0
+    private var boundaryH = 0
+    private var boundaryFade = 0f
+    private var boundaryActive = false
+    private val boundaryWarnM get() = settings.graphics.boundaryDistanceM
+    private val boundaryBuf by lazy { java.nio.ByteBuffer.allocateDirect(640 * 480).order(java.nio.ByteOrder.nativeOrder()) }
+
+    /** Uploads the newest depth as an R8 texture and updates the overall fade (VR only). */
+    private fun updateBoundary(dt: Float) {
+        val ar = arCore
+        boundaryActive = false
+        if (ar == null || !settings.graphics.vrBoundary || scene.background == Background.PASSTHROUGH || !ar.hasFrame) return
+        val t0 = System.nanoTime()
+        val d = ar.depthCentimetres(boundaryBytes)
+        if (d != null) {
+            val (bytes, w, h) = d
+            boundaryBytes = bytes
+            if (w * h <= boundaryBuf.capacity()) {
+                if (boundaryTex == 0) {
+                    boundaryTex = com.hyperxr.rendering.Gl.genTexture()
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, boundaryTex)
+                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+                }
+                boundaryBuf.clear(); boundaryBuf.put(bytes, 0, w * h); boundaryBuf.flip()
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, boundaryTex)
+                GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
+                if (w != boundaryW || h != boundaryH) {
+                    GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R8, w, h, 0, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, boundaryBuf)
+                    boundaryW = w; boundaryH = h
+                } else {
+                    GLES30.glTexSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, w, h, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, boundaryBuf)
+                }
+                GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+                val target = com.hyperxr.input.BoundaryMonitor.fade(com.hyperxr.input.BoundaryMonitor.nearest(bytes, w, h), boundaryWarnM, BOUNDARY_FULL_M)
+                // rise fast (safety), fall slowly (no flicker)
+                val rate = if (target > boundaryFade) 8f else 1.5f
+                boundaryFade += (target - boundaryFade) * (rate * dt).coerceAtMost(1f)
+            }
+        }
+        boundaryActive = boundaryTex != 0 && boundaryW > 0
+        Diagnostics.record(Stage.SENSOR_FUSION, System.nanoTime() - t0)
     }
 
     private val camPose = Pose()
@@ -440,6 +510,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
     companion object {
         private val DEPTH_ATTACHMENT = intArrayOf(GLES30.GL_DEPTH_ATTACHMENT)
+        /** Distance at which the boundary warning shows the camera fully. */
+        private const val BOUNDARY_FULL_M = 0.35f
     }
 
     fun onDestroy() {

@@ -59,7 +59,20 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
     var visible = true
     @Volatile var status: String? = null
 
+    /** Set by the launcher: a link was picked up by long-pinching it (url, pointer id). */
+    var onLinkDrag: ((String, Int) -> Unit)? = null
+
     abstract fun injectTouch(action: Int, x: Float, y: Float, downTimeMs: Long, eventTimeMs: Long)
+    /** Opens a dropped link in this window. */
+    abstract fun openUrl(url: String)
+    /** Long press without moving; subclasses may start a drag from here. */
+    protected open fun onLongPress(x: Float, y: Float, pointerId: Int) {}
+
+    /** After a drag starts, the rest of that press is not sent to the content (no accidental click). */
+    @Volatile protected var suppressUntilUp = false
+    private var downX = 0f
+    private var downY = 0f
+    private var longFired = false
     abstract fun typeText(text: String)
     abstract fun sendKey(keyCode: Int)
     abstract fun back()
@@ -67,6 +80,23 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
     open val supportsReload: Boolean get() = false
     open fun reload() {}
     open fun openExternally() {}
+
+    /**
+     * Scrolls the content by [deltaPx] display pixels (positive = further down the page). The default
+     * is a slow drag at the window centre ending with a short hold, so the content does not fling.
+     */
+    open fun scroll(deltaPx: Float) {
+        if (deltaPx == 0f) return
+        val cx = screen.widthPx / 2f
+        val cy = screen.heightPx / 2f
+        val half = (deltaPx / 2).coerceIn(-screen.heightPx * 0.45f, screen.heightPx * 0.45f)
+        val t0 = android.os.SystemClock.uptimeMillis()
+        val steps = 6
+        injectTouch(android.view.MotionEvent.ACTION_DOWN, cx, cy + half, t0, t0)
+        for (k in 1..steps) injectTouch(android.view.MotionEvent.ACTION_MOVE, cx, cy + half - 2 * half * k / steps, t0, t0 + 16L * k)
+        injectTouch(android.view.MotionEvent.ACTION_MOVE, cx, cy - half, t0, t0 + 16L * steps + 120)
+        injectTouch(android.view.MotionEvent.ACTION_UP, cx, cy - half, t0, t0 + 16L * steps + 130)
+    }
 
     private var downTime = 0L
 
@@ -79,9 +109,22 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
             else -> return
         }
         val now = android.os.SystemClock.uptimeMillis()
-        if (action == android.view.MotionEvent.ACTION_DOWN) downTime = now
-        injectTouch(action, (event.u * screen.widthPx).coerceIn(0f, screen.widthPx - 1f), (event.v * screen.heightPx).coerceIn(0f, screen.heightPx - 1f), downTime, now)
+        val x = (event.u * screen.widthPx).coerceIn(0f, screen.widthPx - 1f)
+        val y = (event.v * screen.heightPx).coerceIn(0f, screen.heightPx - 1f)
+        if (action == android.view.MotionEvent.ACTION_DOWN) { downTime = now; downX = x; downY = y; longFired = false; suppressUntilUp = false }
+        if (action == android.view.MotionEvent.ACTION_MOVE && !longFired && now - downTime > LONG_PRESS_MS &&
+            kotlin.math.abs(x - downX) < 14f && kotlin.math.abs(y - downY) < 14f) {
+            longFired = true
+            onLongPress(x, y, event.pointerId)
+        }
+        if (suppressUntilUp) {
+            if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) suppressUntilUp = false
+            return
+        }
+        injectTouch(action, x, y, downTime, now)
     }
+
+    companion object { const val LONG_PRESS_MS = 550L }
 
     /** GL thread. */
     fun submit(scene: FrameScene) {

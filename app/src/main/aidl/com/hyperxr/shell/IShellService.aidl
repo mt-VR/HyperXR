@@ -23,4 +23,7 @@ interface IShellService {
 
     // Diagnostic: uid and Android version as seen by the service.
     String info() = 7;
+
+    // Opens an http(s) URL with ACTION_VIEW on the display; returns "" or the error text.
+    String openUrl(int displayId, String url) = 8;
 }

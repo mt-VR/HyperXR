@@ -89,6 +89,42 @@ class WebWindow(
         }
     }
 
+    /** Scrolls the scrollable element under the window centre (or the page) without touching it. */
+    override fun scroll(deltaPx: Float) {
+        activity.runOnUiThread {
+            web?.evaluateJavascript(
+                "(function(dy){var e=document.elementFromPoint(innerWidth/2,innerHeight/2);" +
+                    "while(e&&e!==document.body){var o=getComputedStyle(e).overflowY;" +
+                    "if((o==='auto'||o==='scroll')&&e.scrollHeight>e.clientHeight){e.scrollBy(0,dy);return;}e=e.parentElement;}" +
+                    "window.scrollBy(0,dy);})(" + deltaPx / (web?.resources?.displayMetrics?.density ?: 1f) + ")", null,
+            )
+        }
+    }
+
+    override fun openUrl(url: String) { activity.runOnUiThread { web?.loadUrl(url) } }
+
+    /** Long pinch on a link picks it up for drag-and-drop to another window. */
+    override fun onLongPress(x: Float, y: Float, pointerId: Int) {
+        activity.runOnUiThread {
+            val w = web ?: return@runOnUiThread
+            w.evaluateJavascript(
+                "(function(x,y){var r=window.devicePixelRatio||1;var e=document.elementFromPoint(x/r,y/r);" +
+                    "var a=e&&e.closest?e.closest('a[href]'):null;return a?a.href:'';})($x,$y)",
+            ) { result ->
+                val href = runCatching { org.json.JSONTokener(result).nextValue() as? String }.getOrNull().orEmpty()
+                if (href.startsWith("http")) {
+                    // cancel the press inside the page so releasing does not also follow the link
+                    suppressUntilUp = true
+                    val now = android.os.SystemClock.uptimeMillis()
+                    val ev = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, x, y, 0)
+                    presentation?.window?.decorView?.dispatchTouchEvent(ev)
+                    ev.recycle()
+                    onLinkDrag?.invoke(href, pointerId)
+                }
+            }
+        }
+    }
+
     override fun back() { activity.runOnUiThread { web?.let { if (it.canGoBack()) it.goBack() } } }
     override val supportsReload get() = true
     override fun reload() { activity.runOnUiThread { web?.reload() } }

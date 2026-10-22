@@ -152,7 +152,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         appWindows.forEach { it.close(); it.screen.release() }
         windowControls.values.forEach { it.release() }
         keyboard?.release()
-        Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex)
+        Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex); Gl.deleteTexture(dragChipTex)
+        radialTex.forEach { Gl.deleteTexture(it) }
     }
 
     override fun onAction(ctx: XrContext, action: ControllerAction, pressed: Boolean, side: JoyConSide?) {
@@ -197,6 +198,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         for ((w, c) in windowControls) { placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene) }
         keyboard?.let { k -> if (k.visible) k.submit(ctx.scene) else { k.release(); keyboard = null } }
         submitPointerVisuals()
+        updateLinkDrag()
+        submitRadialMenus()
     }
 
     private fun visibleIds(mode: LauncherMode): Set<String> =
@@ -305,6 +308,19 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private val handRayVisible = BooleanArray(2)
     private val pinchStrength = FloatArray(2)
     private val dwell = com.hyperxr.input.DwellClick()
+    private val linkDrag = com.hyperxr.input.DragDrop<String>()
+    private val pendingDrags = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, Int>>()
+    private var dragChipTex = 0
+    private var dragChipAspect = 4f
+    private val pointerRays = HashMap<Int, Ray>()
+    private val pointerDown = HashMap<Int, Boolean>()
+    private val radialItems = listOf("Voltar", "Início", "Teclado", "Captura")
+    private val radials = arrayOf(com.hyperxr.input.RadialMenu(radialItems), com.hyperxr.input.RadialMenu(radialItems))
+    private val radialTex = IntArray(4)
+    private val radialAspect = FloatArray(4)
+    private val pinchPoint = Vec3()
+    private val MICRO_SCROLL_SCREENS = 1.5f
+    private val microGestures = arrayOf(com.hyperxr.handtracking.MicroGestures(), com.hyperxr.handtracking.MicroGestures())
     private var gazeHit: Vec3? = null
 
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
@@ -320,6 +336,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
                 c.ray(ray)
                 val primary = c.buttons and (1 or 4 or 128) != 0 // R, ZR, A
                 ctrlPointers[i].update(ray, primary, surfaces, now)
+                recordPointer(1 + i, ray, primary)
                 trackHit(ctrlPointers[i], ray)
                 dragWindows(ctrlPointers[i], ray, primary)
             } else ctrlPointers[i].update(null, false, surfaces, now)
@@ -327,14 +344,31 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         // hands: far rays clicked with a pinch, plus direct touch with the fingertip
         for (i in 0..1) {
             val h = input.hands[i]
-            val raw = if (!anyController) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            // pinch-and-hold away from any target opens the radial menu around this hand
+            val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
+            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active
+            if (!anyController && h.isUsable) {
+                pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+                radials[i].update(pinching, pinchPoint, input.head, overTarget, now)?.let { radialAction(it) }
+            } else radials[i].update(false, pinchPoint, input.head, true, now)
+            val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
+            val raw = if (!anyController && !menuOpen) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
             // pinch is the click; it is read from the (held) state so a lost frame does not release it
             val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
             handRays[i].update(handRay, pinch, surfaces, now)
+            if (handRay != null) recordPointer(5 + i, handRay, pinch) else pointerRays.remove(5 + i)
             handRayVisible[i] = handRay != null
             pinchStrength[i] = if (h.isUsable) h.pinchStrength else 0f
             if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch) }
+            // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
+            if (!anyController && h.isUsable && !menuOpen && handRays[i].captured == null) {
+                when (val e = microGestures[i].update(h, now)) {
+                    is com.hyperxr.handtracking.MicroGestures.Event.Scroll -> scrollTarget(i)?.let { w -> w.scroll(e.delta * MICRO_SCROLL_SCREENS * w.screen.heightPx) }
+                    com.hyperxr.handtracking.MicroGestures.Event.DoubleTap -> radialAction(0)
+                    null -> {}
+                }
+            } else microGestures[i].reset()
             val tip = if (directTouch && !anyController && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
         }
@@ -343,8 +377,104 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         dwell.dwellNs = if (controls.dwellClick) controls.dwellMs * 1_000_000L else 0L
         val dwellDown = dwell.update(gaze.hovered ?: gaze.captured, gaze.hitU, gaze.hitV, now)
         gaze.update(ray, input.tapDown || dwellDown, surfaces, now)
+        recordPointer(0, ray, input.tapDown || dwellDown)
         gazeHit = if (gaze.hitDistance.isNaN()) null else ray.pointAt(gaze.hitDistance - 0.004f)
         dragWindows(gaze, ray, input.tapDown)
+    }
+
+    /** Window the microgesture applies to: the one looked at, else the one this hand points at, else the newest. */
+    private fun scrollTarget(hand: Int): com.hyperxr.windows.SpatialWindow? =
+        (gaze.hovered as? com.hyperxr.windows.SpatialWindow)
+            ?: (handRays[hand].hovered as? com.hyperxr.windows.SpatialWindow)
+            ?: appWindows.lastOrNull { it.visible }
+
+    private fun recordPointer(id: Int, r: Ray, down: Boolean) {
+        val copy = pointerRays.getOrPut(id) { Ray() }
+        copy.origin.set(r.origin); copy.direction.set(r.direction)
+        pointerDown[id] = down
+    }
+
+    /** Link drag-and-drop: follows the pointer that picked the link and drops where it is released. */
+    private fun updateLinkDrag() {
+        pendingDrags.poll()?.let { (url, pid) ->
+            linkDrag.begin(url, pid)
+            Gl.deleteTexture(dragChipTex)
+            val host = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+            val bmp = TextRenderer.render("Link: $host", 40f, Color.WHITE, isBold = true, maxWidth = 900)
+            dragChipAspect = bmp.width.toFloat() / bmp.height
+            dragChipTex = Gl.uploadBitmap(bmp); bmp.recycle()
+        }
+        if (!linkDrag.active) return
+        val pid = linkDrag.pointerId
+        val r = pointerRays[pid]
+        val down = pointerDown[pid] ?: false
+        // the window under the dragging pointer (nearest hit)
+        var target: com.hyperxr.windows.SpatialWindow? = null
+        var best = Float.MAX_VALUE
+        val uv = FloatArray(2)
+        if (r != null) for (w in appWindows) {
+            if (!w.visible) continue
+            val d = com.hyperxr.input.SurfaceMath.raycast(w, r, uv)
+            if (!d.isNaN() && d < best) { best = d; target = w }
+        }
+        if (r == null && pid !in pointerDown) { linkDrag.cancel(); return }
+        val drop = linkDrag.update(pid, down, target)
+        if (drop != null) {
+            val t = drop.target as? com.hyperxr.windows.SpatialWindow
+            if (t != null) t.openUrl(drop.payload)
+            else openWindow(WebWindow(activity, drop.payload, "Navegador", app.settings.current.network.webAppsDesktopMode))
+            return
+        }
+        if (r != null) {
+            val chip = ctx.scene.addPanel()
+            chip.texture = dragChipTex
+            chip.pose.position.set(r.pointAt(if (best < Float.MAX_VALUE) best - 0.03f else 1.0f))
+            faceTowards(chip.pose, ctx.input.head.position)
+            chip.height = 0.035f; chip.width = chip.height * dragChipAspect
+            chip.radius = 0.0175f
+            chip.tint[0] = 0.8f; chip.tint[1] = 0.75f; chip.tint[2] = 1f
+            chip.overlay = true
+            chip.glow = if (target != null) 0.4f else 0f
+        }
+    }
+
+    private fun radialAction(i: Int) {
+        when (i) {
+            0 -> windows.lastOrNull { it.visible && it.closable }?.let { it.visible = false } ?: appWindows.lastOrNull()?.back()
+            1 -> { anchored = false } // re-anchor the launcher in front of the user
+            2 -> appWindows.lastOrNull()?.let { w -> keyboard = KeyboardPanel(w).also { k -> k.placeInFront(ctx.input.head, 0.9f, -0.35f) } }
+                ?: openWindow(InfoPanel("Teclado", "Abra um navegador ou app para digitar.").apply { placeInFront(ctx.input.head) })
+            3 -> capture()
+        }
+    }
+
+    private fun submitRadialMenus() {
+        for (m in radials) {
+            if (m.phase != com.hyperxr.input.RadialMenu.Phase.OPEN) continue
+            for (k in radialItems.indices) {
+                if (radialTex[k] == 0) {
+                    val bmp = TextRenderer.render(radialItems[k], 44f, Color.WHITE, isBold = true)
+                    radialAspect[k] = bmp.width.toFloat() / bmp.height
+                    radialTex[k] = Gl.uploadBitmap(bmp); bmp.recycle()
+                }
+                val (ox, oy) = m.itemOffset(k)
+                val p = ctx.scene.addPanel()
+                p.texture = radialTex[k]
+                p.pose.orientation.set(m.plane.orientation)
+                m.plane.transformPoint(Vec3(ox, oy, 0f), p.pose.position)
+                val sel = m.selected == k
+                p.height = if (sel) 0.034f else 0.026f; p.width = p.height * radialAspect[k]
+                p.radius = p.height / 2
+                p.glow = if (sel) 0.5f else 0f
+                p.alpha = if (sel) 1f else 0.75f
+                p.overlay = true
+            }
+            val c = ctx.scene.addPanel()
+            c.texture = ringTex
+            c.pose.set(m.plane)
+            c.width = 0.05f; c.height = 0.05f; c.radius = 0f
+            c.overlay = true
+        }
     }
 
     private fun trackHit(p: RayPointer, r: Ray) {
@@ -508,6 +638,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val yaw = kotlin.math.atan2(-f.x, -f.z) + Math.toRadians(((appWindows.size % 3) - 1) * 12.0).toFloat()
         c.pose.position.set(head.position.x - sin(yaw) * 1.6f, head.position.y - 0.55f, head.position.z - cos(yaw) * 1.6f)
         Quat.fromAxisAngle(0f, 1f, 0f, yaw, c.pose.orientation)
+        w.onLinkDrag = { url, pid -> pendingDrags += url to pid }
         appWindows += w
         windowControls[w] = c
     }

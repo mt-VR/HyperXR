@@ -58,6 +58,9 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private var recenterPending = true
     private val quadUv = floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
     private val texUv = FloatArray(8)
+    private val imgUv = FloatArray(8)
+    /** Maps view-normalized UVs to the CPU/depth image (depth is aligned with the CPU image). */
+    val depthMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private var texMatrixValid = false
 
     /** Must be called on the GL thread (creates the camera texture). */
@@ -110,6 +113,11 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             texMatrix[0] = texUv[6] - texUv[4]; texMatrix[1] = texUv[7] - texUv[5]
             texMatrix[4] = texUv[0] - texUv[4]; texMatrix[5] = texUv[1] - texUv[5]
             texMatrix[12] = texUv[4]; texMatrix[13] = texUv[5]
+            frame.transformCoordinates2d(Coordinates2d.VIEW_NORMALIZED, quadUv, Coordinates2d.IMAGE_NORMALIZED, imgUv)
+            Matrix.setIdentityM(depthMatrix, 0)
+            depthMatrix[0] = imgUv[6] - imgUv[4]; depthMatrix[1] = imgUv[7] - imgUv[5]
+            depthMatrix[4] = imgUv[0] - imgUv[4]; depthMatrix[5] = imgUv[1] - imgUv[5]
+            depthMatrix[12] = imgUv[4]; depthMatrix[13] = imgUv[5]
             texMatrixValid = true
             val intr = frame.camera.textureIntrinsics
             val f = intr.focalLength
@@ -163,6 +171,32 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         val plane = img.planes[0]
         val d = com.hyperxr.handtracking.DepthImage(plane.buffer.order(ByteOrder.nativeOrder()), img.width, img.height, plane.rowStride, plane.pixelStride, cpuW, cpuH)
         return d to { img.close() }
+    }
+
+    /**
+     * Latest depth as centimetres per byte (0 = no data, 255 = 2.55 m or farther) into [out],
+     * reallocated when the size changes. Returns the buffer and its size, or null without depth.
+     */
+    fun depthCentimetres(out: ByteArray?): Triple<ByteArray, Int, Int>? {
+        if (!depthEnabled) return null
+        val img = try { lastFrame?.acquireDepthImage16Bits() } catch (t: Throwable) { null } ?: return null
+        try {
+            val w = img.width; val h = img.height
+            val dst = if (out != null && out.size == w * h) out else ByteArray(w * h)
+            val plane = img.planes[0]
+            val buf = plane.buffer.order(ByteOrder.nativeOrder())
+            val row = plane.rowStride; val px = plane.pixelStride
+            for (y in 0 until h) {
+                var o = y * row
+                val d = y * w
+                for (x in 0 until w) {
+                    val mm = buf.getShort(o).toInt() and 0xffff
+                    dst[d + x] = if (mm == 0) 0 else (mm / 10).coerceIn(1, 255).toByte()
+                    o += px
+                }
+            }
+            return Triple(dst, w, h)
+        } finally { img.close() }
     }
 
     /** Camera pose in tracking space (needed to place hands detected in the camera image). */
