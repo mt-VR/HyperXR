@@ -27,9 +27,13 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | OpenXR: sessão GLES, swapchains, laço de quadros | 🟡 (código completo; precisa de runtime instalado) |
 | Runtime Broker (descoberta, seleção, árbitro de sessão) | ✅ modelo · 🟡 Android |
 | Monado | 🚫 não embutido (ver ARCHITECTURE.md); detectado e preferido quando instalado |
-| **HyperXR Runtime** (runtime OpenXR próprio, GLES, 3DoF, lente + timewarp, quad layers) | ✅ host (196 verificações, ASan) · 🟡 aparelho · ver OPENXR_RUNTIME.md |
-| Entrada de controles para apps OpenXR no HyperXR Runtime | 🚫 o runtime roda no processo do app |
-| Mãos/controles vindos do runtime OpenXR (XR_EXT_hand_tracking, ações) | ⏳ |
+| **HyperXR Runtime** (runtime OpenXR próprio, GLES, 3DoF, lente + timewarp, quad layers) | ✅ host (260 verificações, ASan) · 🟡 aparelho · ver OPENXR_RUNTIME.md |
+| Apps OpenXR acham o runtime sem o broker da Khronos (HyperXR é o broker do sistema) | 🟡 |
+| Joy-Con/gamepad e toque na tela viram ações OpenXR (perfis Touch e simple), poses presas à cabeça | ✅ host · 🟡 aparelho |
+| Mãos (hand tracking) para apps OpenXR (XR_EXT_hand_tracking) | ⏳ |
+| Importar jogos Quest: análise do APK (motor, loader, VrApi, Platform SDK, Vulkan/GLES, extensões) e veredito | ✅ análise (testes) · 🟡 aparelho |
+| Instalar APK + OBB (Shizuku `pm install`, sem perguntas; sem Shizuku pelo instalador do sistema) | 🟡 |
+| Jogos Quest com VrApi, loader da Meta, só Vulkan ou extensões Meta obrigatórias | 🚫 não rodam (o importador avisa) |
 | Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
 | Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |
 | Renderização em MR com o FOV da câmera (mãos no tamanho real), mono por padrão | 🟡 |
@@ -41,6 +45,13 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | New: ícones 3D, foco, animações, segurar para mover (persistido) | ✅ modelo · 🟡 XR |
 | Janelas espaciais móveis (biblioteca, ajustes, arquivos, galeria, mensagens, ajuda, TV, apps XR, ambientes) | 🟡 |
 | Captura da visão para a Galeria | 🟡 |
+| UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
+| Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |
+| Visualizadores: texto (1 MB, rolagem, fonte), foto (zoom, arrastar, girar), PDF (PdfRenderer), vídeo/áudio (MediaPlayer → textura externa) | 🟡 |
+| Galeria: fotos e vídeos do aparelho (MediaStore) + capturas, abas Tudo/Fotos/Vídeos/360/Capturas | 🟡 |
+| Detecção 360: XMP Photo Sphere, Spherical Video V1/V2 (st3d/sv3d/equi), 2:1 como "provável" | ✅ testes · 🟡 aparelho |
+| Foto/vídeo 360 ao redor do usuário (mono, 3D cima/baixo, 3D lado a lado) | 🟡 · 🚫 projeção cubemap (EAC) |
+| Foto 360 salva como ambiente (Ambientes > instalados, licença "Pessoal") | 🟡 |
 | Navegador GeckoView (motor do Firefox, o mesmo do Wolvic) renderizando direto na textura da janela | 🟡 (arm64; WebView como fallback) |
 | Orientação das janelas pela matriz real do SurfaceTexture (navegador não fica mais invertido) | 🟡 |
 | Navegador: abas, barra de endereço com pesquisa, progresso, favoritos, histórico, modo desktop/celular | 🟡 |

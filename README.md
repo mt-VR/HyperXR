@@ -62,6 +62,29 @@ e, como o Wolvic, desenha a página direto na textura da janela. Tem abas, barra
 cinema para vídeos em tela cheia. O GeckoView vem só para arm64 (cerca de 60 MB no APK); em
 outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 
+### Arquivos e Galeria
+
+- **Arquivos**: gerenciador real do armazenamento (peça *Permitir acesso* uma vez: a tela de
+  permissão aparece no celular). Copiar, recortar, colar, renomear, nova pasta, apagar (com
+  confirmação), ordenar por nome/data/tamanho/tipo. Abre texto, fotos, PDF, vídeo e áudio dentro
+  do XR; instala `.hyperx` e APKs.
+- **Galeria**: fotos e vídeos do celular e as capturas do HyperXR. Fotos e vídeos **360** são
+  detectados pelos metadados (Photo Sphere, Spherical Video) ou pela proporção 2:1 e abrem ao seu
+  redor, inclusive 3D cima/baixo ou lado a lado. Uma foto 360 pode ser **salva como ambiente**.
+
+### Jogos de Quest e apps OpenXR
+
+Abra o APK em **Arquivos**. O HyperXR lê o APK antes de instalar e diz, sem rodeios, se ele pode
+rodar no runtime HyperXR: motor (Unity/Unreal/Godot), loader OpenXR (o da Khronos funciona; o da
+Meta não), VrApi (não roda), Meta Platform SDK (a checagem de licença pode fechar o jogo), Vulkan
+ou OpenGL ES e extensões Meta citadas. Com o Shizuku ativo a instalação é direta e o OBB que estiver
+ao lado do APK é copiado para `Android/obb`; sem ele, o instalador do Android pergunta na tela.
+
+Apps OpenXR acham o runtime HyperXR sozinhos (o HyperXR responde como broker do sistema). Os
+Joy-Cons/gamepad e o toque na tela viram os controles do jogo (perfil Touch); a mira segue o olhar.
+Jogos feitos só para o Quest geralmente exigem recursos que um celular não tem, então espere
+muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tempo.
+
 ### Apps Android em janelas (Shizuku)
 
 1. Instale e inicie o [Shizuku](https://shizuku.rikka.app/) (depuração sem fio ou root).
