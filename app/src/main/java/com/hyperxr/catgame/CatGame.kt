@@ -125,6 +125,10 @@ class CatGame(private val exit: () -> Unit) : XrContent {
     private var endReason = ""
     private var time = 0.0
     private var prevButtons = 0
+    /** The view is turned so the cat starts looking into the room, wherever the tracker's zero is. */
+    private var aligned = false
+    private var startYaw = 0f
+    private var prevHeadYaw = 0f
     private var twoSticks = false
 
     // ------------------------------------------------------------------ rendering
@@ -176,8 +180,19 @@ class CatGame(private val exit: () -> Unit) : XrContent {
         if (pressed && action == ControllerAction.SELECT && phase == Phase.INTRO) phase = Phase.PLAY
     }
 
+    /**
+     * The head tracker's "forward" at start-up is arbitrary (it is wherever the phone pointed when
+     * tracking began), so the cat's yaw is chosen to make the user's current gaze look along the
+     * room's -Z: the game opens facing the kitchen and grandma instead of a wall.
+     */
+    private fun alignView(facing: Float = 0f) {
+        val f = ctx.input.head.orientation.rotate(Vec3(0f, 0f, -1f))
+        val headYaw = atan2(-f.x, -f.z)
+        catYaw = facing - headYaw
+    }
+
     private fun reset() {
-        cat.set(0.4f, 0f, 2.0f); catYaw = 0f; catVel.set(0f, 0f, 0f); catVy = 0f; catHp = 100f
+        cat.set(0.4f, 0f, 2.0f); alignView(startYaw); catVel.set(0f, 0f, 0f); catVy = 0f; catHp = 100f
         held?.let { releaseHeld() }
         gPos.set(-2.6f, 0f, -1.0f); gYaw = 0f; gHp = 100f; gState = GState.WALK; gStateTime = 0f
         choreIndex = 0; stopIndex = 0; choreProgress = 0f
@@ -312,6 +327,12 @@ class CatGame(private val exit: () -> Unit) : XrContent {
     override fun onFrame(ctx: XrContext, dt: Float) {
         val d = dt.coerceIn(0f, 0.05f)
         time += d
+        // wait a few frames for the first real head pose, then face the room
+        if (!aligned && ctx.frameIndex > 5) { aligned = true; alignView(startYaw) }
+        // recentering zeroes the tracker's yaw: turn the cat by the same amount so the view stays put
+        val hy = headYawNow()
+        if (ctx.input.recenterCursor) { ctx.input.recenterCursor = false; catYaw += prevHeadYaw - hy }
+        prevHeadYaw = hy
         val input = readInput()
         when (phase) {
             Phase.INTRO -> if (input.pressed(BTN_A) || input.pressed(BTN_PLUS)) phase = Phase.PLAY
@@ -470,6 +491,8 @@ class CatGame(private val exit: () -> Unit) : XrContent {
         if (swatTime > 0f) swatTime -= dt
         if (input.pressed(BTN_X)) { play(sndMeow, 1f, 0.9f + rnd.nextFloat() * 0.2f, null); lastSeenCat = time; if (gState == GState.WALK || gState == GState.CHORE) { gState = GState.CHASE; gStateTime = 0f; say("Ah, é você, seu peste!", 2.5) } }
     }
+
+    private fun headYawNow(): Float { val f = ctx.input.head.orientation.rotate(Vec3(0f, 0f, -1f)); return atan2(-f.x, -f.z) }
 
     private fun releaseHeld() {
         hold?.let { world.release(it) }
