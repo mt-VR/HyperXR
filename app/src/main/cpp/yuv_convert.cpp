@@ -47,3 +47,41 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_hyperxr_handtracking_YuvNative_co
     AndroidBitmap_unlockPixels(env, bitmap);
     return JNI_TRUE;
 }
+
+// Affine crop + bilinear sampling + RGB float normalization in one pass, straight into the model's
+// input tensor (HyperXR NPU hand tracker). m maps output pixel centres to source coordinates:
+// x = m0*u + m1*v + m2, y = m3*u + m4*v + m5. Outside the frame is black, like the letterbox.
+extern "C" JNIEXPORT jboolean JNICALL Java_com_hyperxr_handtracking_YuvNative_warpToTensor(
+        JNIEnv* env, jclass, jobject bitmap, jfloatArray jm, jint size, jobject out) {
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS || info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
+    float* dst = static_cast<float*>(env->GetDirectBufferAddress(out));
+    if (!dst || env->GetDirectBufferCapacity(out) < static_cast<jlong>(size) * size * 3 * 4) return JNI_FALSE;
+    float m[6];
+    env->GetFloatArrayRegion(jm, 0, 6, m);
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS || !pixels) return JNI_FALSE;
+    const uint8_t* src = static_cast<const uint8_t*>(pixels);
+    const int w = static_cast<int>(info.width), h = static_cast<int>(info.height);
+    const int stride = static_cast<int>(info.stride);
+    const float k = 1.0f / 255.0f;
+    for (int v = 0; v < size; v++) {
+        // source position of this row's first pixel centre, then step per output pixel
+        float x = m[0] * 0.5f + m[1] * (v + 0.5f) + m[2] - 0.5f;
+        float y = m[3] * 0.5f + m[4] * (v + 0.5f) + m[5] - 0.5f;
+        float* o = dst + static_cast<size_t>(v) * size * 3;
+        for (int u = 0; u < size; u++, x += m[0], y += m[3], o += 3) {
+            int x0 = static_cast<int>(x < 0 ? x - 1 : x), y0 = static_cast<int>(y < 0 ? y - 1 : y);
+            if (x0 < 0 || y0 < 0 || x0 >= w - 1 || y0 >= h - 1) { o[0] = o[1] = o[2] = 0.f; continue; }
+            float fx = x - x0, fy = y - y0;
+            const uint8_t* p = src + y0 * stride + x0 * 4;
+            const uint8_t* q = p + stride;
+            float w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+            o[0] = (p[0] * w00 + p[4] * w10 + q[0] * w01 + q[4] * w11) * k;
+            o[1] = (p[1] * w00 + p[5] * w10 + q[1] * w01 + q[5] * w11) * k;
+            o[2] = (p[2] * w00 + p[6] * w10 + q[2] * w01 + q[6] * w11) * k;
+        }
+    }
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return JNI_TRUE;
+}

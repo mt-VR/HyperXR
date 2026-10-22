@@ -71,7 +71,13 @@ class NpuHandEngine(private val context: Context) {
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val matrix = Matrix()
 
-    private val tracked = ArrayList<HandRoi>(2)
+    /** A hand followed from frame to frame: where it was and how fast its crop was moving (px/frame). */
+    private class Track(val roi: HandRoi, val vx: Float, val vy: Float) {
+        /** Where the crop should be this frame: fast hands stay inside it instead of being lost. */
+        fun predicted() = roi.copy(cx = roi.cx + vx, cy = roi.cy + vy)
+    }
+    private val tracked = ArrayList<Track>(2)
+    @Volatile var recovered = 0; private set
     private var frame = 0L
 
     /** Loads both models and builds the interpreters (worker thread; ~1 s the first time). */
@@ -191,8 +197,11 @@ class NpuHandEngine(private val context: Context) {
         val det = detector ?: return emptyList()
         val lm = landmarks ?: return emptyList()
         frame++
-        val rois = ArrayList(tracked)
-        // the second hand is looked for every 3rd frame (~100 ms at 30 fps) so it shows up fast
+        // crops for this frame: each tracked hand where its motion says it is now
+        val rois = ArrayList<HandRoi>(2)
+        val prev = ArrayList<Track?>(2)
+        for (t in tracked) { rois += t.predicted(); prev += t }
+        // the second hand is looked for every 3rd frame (~50-100 ms) so it shows up fast
         if (rois.size < 2 && (rois.isEmpty() || frame % 3 == 0L)) {
             val t0 = System.nanoTime()
             fillPalmInput(bmp)
@@ -203,18 +212,22 @@ class NpuHandEngine(private val context: Context) {
                 if (rois.size >= 2) break
                 val r = HandRoi.fromPalm(p)
                 // a palm inside a hand already tracked is that hand
-                if (rois.none { o -> dist(o.cx, o.cy, r.cx, r.cy) < o.size * 0.35f }) rois += r
+                if (rois.none { o -> dist(o.cx, o.cy, r.cx, r.cy) < o.size * 0.35f }) { rois += r; prev += null }
             }
         }
         tracked.clear()
         val out = ArrayList<RawHand>(2)
         val pts = FloatArray(63)
-        for (roi in rois) {
-            val t0 = System.nanoTime()
-            fillLandmarkInput(bmp, roi)
-            lm.runForMultipleInputsOutputs(arrayOf(lmIn), mapOf(0 to outLm, 1 to outPresence, 2 to outHanded, 3 to outWorld))
-            landmarkMs = (System.nanoTime() - t0) / 1e6f
-            val presence = outPresence[0][0]
+        for ((i, roi0) in rois.withIndex()) {
+            var roi = roi0
+            var presence = landmarksAt(lm, bmp, roi)
+            // a tracked hand that slipped out of its crop (fast motion, motion blur): one more try
+            // with a crop 40% larger before giving it up to the palm detector
+            if (presence < 0.3f && prev[i] != null) {
+                val wide = roi.copy(size = roi.size * 1.4f)
+                val p2 = landmarksAt(lm, bmp, wide)
+                if (p2 >= 0.5f) { roi = wide; presence = p2; recovered++ }
+            }
             if (presence < 0.3f) continue  // not a hand (any more): stop tracking here
             val k = roi.size / HandRoi.INPUT
             val image = FloatArray(63)
@@ -236,27 +249,60 @@ class NpuHandEngine(private val context: Context) {
             if (dup >= 0) { if (out[dup].presence >= presence) continue else { out.removeAt(dup); tracked.removeAt(dup) } }
             val handed = outHanded[0][0]
             out += RawHand(if (handed > 0.5f) "Right" else "Left", if (handed > 0.5f) handed else 1 - handed, presence, image, world, handed)
-            tracked += HandRoi.fromLandmarks(pts)
+            // next crop from these landmarks, with the crop's velocity smoothed over frames
+            val next = HandRoi.fromLandmarks(pts)
+            val p = prev[i]
+            val vx = if (p != null) (p.vx * 0.5f + (next.cx - p.roi.cx) * 0.5f) else 0f
+            val vy = if (p != null) (p.vy * 0.5f + (next.cy - p.roi.cy) * 0.5f) else 0f
+            val cap = next.size * 0.3f  // never jump the crop more than 30% of its size
+            tracked += Track(next, vx.coerceIn(-cap, cap), vy.coerceIn(-cap, cap))
         }
         return out
     }
 
+    /** Runs the landmark model on [roi]; returns the hand-presence score (outputs in the out* arrays). */
+    private fun landmarksAt(lm: Interpreter, bmp: Bitmap, roi: HandRoi): Float {
+        val t0 = System.nanoTime()
+        fillLandmarkInput(bmp, roi)
+        lm.runForMultipleInputsOutputs(arrayOf(lmIn), mapOf(0 to outLm, 1 to outPresence, 2 to outHanded, 3 to outWorld))
+        landmarkMs = (System.nanoTime() - t0) / 1e6f
+        return outPresence[0][0]
+    }
+
     private fun dist(x0: Float, y0: Float, x1: Float, y1: Float) = kotlin.math.hypot(x1 - x0, y1 - y0)
+
+    private val affine = FloatArray(6)
 
     /** Letterboxes the frame into the 192x192 detector input (black bars, aspect kept). */
     private fun fillPalmInput(bmp: Bitmap) {
         val scale = 192f / maxOf(bmp.width, bmp.height)
+        val ox = (192 - bmp.width * scale) / 2; val oy = (192 - bmp.height * scale) / 2
+        if (YuvNative.available) {
+            // output (u, v) -> source ((u - ox) / scale, (v - oy) / scale), in native code
+            affine[0] = 1 / scale; affine[1] = 0f; affine[2] = -ox / scale
+            affine[3] = 0f; affine[4] = 1 / scale; affine[5] = -oy / scale
+            palmIn.rewind()
+            if (YuvNative.warpToTensor(bmp, affine, 192, palmIn)) { palmIn.rewind(); return }
+        }
         matrix.reset()
         matrix.postScale(scale, scale)
-        matrix.postTranslate((192 - bmp.width * scale) / 2, (192 - bmp.height * scale) / 2)
+        matrix.postTranslate(ox, oy)
         val c = Canvas(palmBmp)
         c.drawColor(Color.BLACK)
         c.drawBitmap(bmp, matrix, paint)
         toFloats(palmBmp, 192, palmIn)
     }
 
-    /** The rotated square around the hand, upright, into the 224x224 landmark input. */
+    /**
+     * The rotated square around the hand, upright, into the 224x224 landmark input: one native
+     * pass (crop, rotate, bilinear, normalize) instead of Canvas + getPixels + a Kotlin loop.
+     */
     private fun fillLandmarkInput(bmp: Bitmap, roi: HandRoi) {
+        if (YuvNative.available) {
+            roi.affine(affine)  // the exact mapping the landmarks are mapped back with
+            lmIn.rewind()
+            if (YuvNative.warpToTensor(bmp, affine, 224, lmIn)) { lmIn.rewind(); return }
+        }
         matrix.reset()
         matrix.postTranslate(-roi.cx, -roi.cy)
         matrix.postRotate(-Math.toDegrees(roi.rotation.toDouble()).toFloat())

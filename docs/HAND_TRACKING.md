@@ -165,3 +165,26 @@ A última rejeição aparece no status do teste de mãos, por exemplo "grande de
   - Duas mãos no mesmo quadro sempre recebem lados diferentes.
 - **Visual:** esqueleto fino (ossos de 2 mm, bolinhas de 5 mm), verde na mão direita e azul na
   esquerda. Na pinça, as pontas do polegar e do indicador ficam brancas.
+
+## Otimizações de latência (rodada 3)
+
+- **Recorte nativo (motor NPU):** o quadrado girado da mão (224x224) e o letterbox da palma
+  (192x192) saem direto em floats normalizados, numa passada em C++ com amostragem bilinear
+  (`YuvNative.warpToTensor`). Antes eram Canvas, getPixels e um laço em Kotlin. A transformação é
+  a mesma de `HandRoi.toImage` (`HandRoi.affine`, com teste).
+- **Recorte que antecipa o movimento:** o recorte de cada mão anda junto com a velocidade dela
+  (suavizada, limitada a 30% do tamanho por quadro). Mãos rápidas não saem do recorte.
+- **Segunda chance antes de perder:** se uma mão rastreada some do recorte, o modelo tenta mais
+  uma vez com o recorte 40% maior antes de voltar ao detector de palma, que é mais caro e
+  demorado.
+- **Taxa automática até 60 Hz:** com a configuração em 30 Hz ou mais, os quadros são pegos assim
+  que o motor termina o anterior, até 60 por segundo, ou seja, na taxa da câmera de 60 fps. Os
+  perfis de bateria do SteamVR, abaixo de 30 Hz, ficam como estão.
+- **Previsão pela idade real da imagem:** a idade de cada quadro é medida desde a exposição do
+  sensor, pelo horário da câmera, até o resultado. O filtro de Kalman prevê 75% dessa idade, e o
+  ajuste "previsão" corrige a partir disso (20 ms = neutro). Na tela, a mão ainda é levada até o
+  momento do desenho mais um quadro.
+- **Prioridade de thread e ADPF:** a thread de inferência roda com prioridade de display. No
+  Android 12 ou mais novo, a inferência e a renderização informam o tempo de cada quadro ao
+  PerformanceHintManager, e o sistema sobe o clock da CPU para cumprir o prazo em vez de deixá-la
+  ociosa entre quadros.

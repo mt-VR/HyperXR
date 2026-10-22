@@ -30,7 +30,7 @@ import java.nio.ByteBuffer
  * resolution, and MediaPipe's internal ROI tracking skips palm detection while hands stay visible.
  */
 class HandTrackingService(private val context: Context) {
-    private val thread = HandlerThread("hx-hands").apply { start() }
+    private val thread = HandlerThread("hx-hands", android.os.Process.THREAD_PRIORITY_DISPLAY).apply { start() }
     private val handler = Handler(thread.looper)
 
     private var landmarker: HandLandmarker? = null
@@ -71,6 +71,13 @@ class HandTrackingService(private val context: Context) {
     private val lock = Any()
     private val published = mapOf(Handedness.LEFT to HandState(Handedness.LEFT), Handedness.RIGHT to HandState(Handedness.RIGHT))
     private var minIntervalNs = 33_000_000L
+    /** Whether the rate may rise above the setting when the engine is fast (off for battery profiles). */
+    private var boostRate = true
+    /** Smoothed inference time and camera-exposure-to-result age, measured per frame. */
+    private var inferEwmaNs = 30_000_000L
+    private var ageEwmaNs = 60_000_000L
+    /** User trim on top of the measured latency (the "prediction" setting; 20 ms = neutral). */
+    private var predictionTrimS = 0f
     private var lastSubmitNs = 0L
     private var lastTimestampMs = 0L
 
@@ -112,6 +119,8 @@ class HandTrackingService(private val context: Context) {
         autoCalibrate = s.autoCalibrateHandSize && s.calibratedPalmMm == 0f
         if (autoCalibrate) scaleEstimator.reset()
         minIntervalNs = 1_000_000_000L / inferenceHz.coerceIn(5, 60)
+        boostRate = inferenceHz >= 30
+        predictionTrimS = (s.predictionMs - 20f) / 1000f
         trackers.values.forEach {
             it.setFilterParams(s.filterMinCutoff, s.filterBeta)
             it.pinchRatio = s.pinchClose
@@ -188,6 +197,31 @@ class HandTrackingService(private val context: Context) {
 
     fun stop() { handler.post { landmarker?.close(); landmarker = null; npu?.close(); npu = null; status = "parado" } }
 
+    /**
+     * Frames are taken as fast as the engine finishes them, up to 60 per second, when the setting
+     * allows 30 or more: an NPU that answers in 8 ms tracks at the camera's 60 fps instead of 30.
+     */
+    /**
+     * ADPF (Android 12+): the inference thread tells the system how long each frame took against
+     * the time it has, so the CPU is clocked up to meet it instead of idling between camera frames.
+     */
+    private var hint: Any? = null
+    private var hintTried = false
+    private fun reportWork(ns: Long) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        if (!hintTried) {
+            hintTried = true
+            hint = runCatching {
+                val pm = context.getSystemService(android.os.PerformanceHintManager::class.java)
+                pm?.createHintSession(intArrayOf(android.os.Process.myTid()), intervalNs())
+            }.getOrNull()
+        }
+        (hint as? android.os.PerformanceHintManager.Session)?.let { runCatching { it.reportActualWorkDuration(ns.coerceAtLeast(1)) } }
+    }
+
+    private fun intervalNs(): Long =
+        if (!boostRate) minIntervalNs else minOf(minIntervalNs, maxOf(16_000_000L, inferEwmaNs * 11 / 10))
+
     /** True when a new frame would be used now (lets callers skip acquiring camera images). */
     fun wantsFrame(): Boolean {
         val now = System.nanoTime()
@@ -199,7 +233,7 @@ class HandTrackingService(private val context: Context) {
                 Diagnostics.log("Hand tracking: no result for 1.5 s, restarting MediaPipe")
                 start(backendRequested)
             }
-            return (landmarker != null || npu != null) && !restarting && converting == null && now - lastSubmitNs >= minIntervalNs
+            return (landmarker != null || npu != null) && !restarting && converting == null && now - lastSubmitNs >= intervalNs()
         }
     }
 
@@ -210,6 +244,7 @@ class HandTrackingService(private val context: Context) {
      */
     fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthImage?, rotation180: Boolean = false) {
         if (!wantsFrame()) { image.close(); return }
+        val imageTs = image.timestampSafe  // read before the image is closed
         val slot: Slot
         synchronized(slotLock) {
             // any slot that is not on the GPU (an unsent queued frame is replaced by this newer one)
@@ -224,7 +259,10 @@ class HandTrackingService(private val context: Context) {
         slot.intr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
         slot.pose = cameraPose?.copy()
         slot.depth.capture(depth, rotation180)
-        slot.captureNs = lastSubmitNs
+        // when the light hit the sensor, not when the frame reached us: the camera's timestamp
+        // (REALTIME on nearly every phone) says how old the image already is
+        val sensorAge = SystemClock.elapsedRealtimeNanos() - imageTs
+        slot.captureNs = lastSubmitNs - if (sensorAge in 0..250_000_000L) sensorAge else 0L
         val launchNow: Boolean
         synchronized(slotLock) {
             converting = null
@@ -364,6 +402,14 @@ class HandTrackingService(private val context: Context) {
         }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
+        // the trackers predict across the measured age of the image (exposure -> result), so a
+        // published hand is where the real hand is now, not where it was when photographed
+        inferEwmaNs = (inferEwmaNs * 7 + (t0 - slot.submitNs)) / 8
+        ageEwmaNs = (ageEwmaNs * 7 + (t0 - slot.captureNs)) / 8
+        // 75% of the age: full prediction overshoots when a moving hand stops
+        val predict = (ageEwmaNs / 1e9f * 0.75f + predictionTrimS).coerceIn(0f, 0.06f)
+        reportWork(t0 - slot.submitNs)
+        trackers.values.forEach { it.predictionSeconds = predict }
         if (debug != null) slot.bitmap?.let { runCatching { debug(it, debugLms!!) } }
     }
 
@@ -422,7 +468,8 @@ class HandTrackingService(private val context: Context) {
                 val src = published.getValue(side)
                 copy(src, out)
                 if (src.state != TrackingState.TRACKING || src.timestampNs == 0L) continue
-                val dt = ((now - src.timestampNs) / 1e9f).coerceIn(0f, 0.05f)
+                // forward to now, plus one display frame (when the frame drawn now reaches the eyes)
+                val dt = ((now - src.timestampNs) / 1e9f + DISPLAY_AHEAD_S).coerceIn(0f, 0.06f)
                 val v = velocity.getValue(side)
                 for (j in 0 until HandJoint.COUNT) out.joints[j].addScaled(v[j], dt)
             }
@@ -484,10 +531,14 @@ class HandTrackingService(private val context: Context) {
 
     companion object {
         const val MODEL_ASSET = "models/hand_landmarker.task"
+        const val DISPLAY_AHEAD_S = 0.012f
         /** Full 640x480 frames: hands at arm's length are small, and downscaling cost landmark quality. */
         const val MAX_WIDTH = 640
     }
 }
+
+/** Image timestamp, 0 when the image is already closed or has none. */
+private val Image.timestampSafe: Long get() = try { timestamp } catch (_: Throwable) { 0L }
 
 /** A CPU depth image (ARCore 16-bit millimetres) handed to the hand pipeline by the caller. */
 class DepthImage(val buffer: ByteBuffer, val width: Int, val height: Int, val rowStride: Int, val pixelStride: Int, val sourceWidth: Int, val sourceHeight: Int)
@@ -523,6 +574,9 @@ object YuvNative {
 
     @JvmStatic external fun convert(y: java.nio.ByteBuffer, u: java.nio.ByteBuffer, v: java.nio.ByteBuffer, yRow: Int, yPix: Int,
                                     uvRow: Int, uvPix: Int, step: Int, rotate180: Boolean, bitmap: Bitmap): Boolean
+
+    /** Affine crop + bilinear + RGB/255 floats into a direct buffer (size x size x 3). */
+    @JvmStatic external fun warpToTensor(bitmap: Bitmap, m: FloatArray, size: Int, out: java.nio.ByteBuffer): Boolean
 }
 
 /**

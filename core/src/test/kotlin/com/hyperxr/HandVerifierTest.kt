@@ -113,6 +113,17 @@ class HandVerifierTest {
         assertTrue(roi.cy < p.cy)  // shifted toward the fingers
     }
 
+    @Test fun nativeCropAffineMatchesToImage() {
+        val r = HandRoi(321f, 187f, 260f, -1.1f)
+        val a = FloatArray(6); r.affine(a)
+        val o = FloatArray(2)
+        for ((u, v) in listOf(0f to 0f, 224f to 0f, 37f to 191f, 112f to 112f)) {
+            r.toImage(u, v, o)
+            assertEquals(o[0], a[0] * u + a[1] * v + a[2], 1e-3f)
+            assertEquals(o[1], a[3] * u + a[4] * v + a[5], 1e-3f)
+        }
+    }
+
     @Test fun roiMapsTheCentreOfTheInputToItsCentre() {
         val r = HandRoi(300f, 200f, 224f, 0.7f)
         val o = FloatArray(2)

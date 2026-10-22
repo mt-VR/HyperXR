@@ -26,6 +26,16 @@ data class HandRoi(val cx: Float, val cy: Float, val size: Float, val rotation: 
         out[offset + 1] = cy + k * (s * du + c * dv)
     }
 
+    /**
+     * The same mapping as [toImage] as 6 affine coefficients (x = a0 u + a1 v + a2,
+     * y = a3 u + a4 v + a5), for the native crop that fills the model input.
+     */
+    fun affine(out: FloatArray) {
+        val k = size / INPUT; val c = cos(rotation); val s = sin(rotation); val h = INPUT / 2
+        out[0] = k * c; out[1] = -k * s; out[2] = cx - h * k * c + h * k * s
+        out[3] = k * s; out[4] = k * c; out[5] = cy - h * k * s - h * k * c
+    }
+
     companion object {
         const val INPUT = 224f
 

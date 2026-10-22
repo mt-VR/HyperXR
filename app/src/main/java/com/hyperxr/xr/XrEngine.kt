@@ -405,6 +405,7 @@ class XrEngine(
         Diagnostics.record(Stage.RENDER_CPU, System.nanoTime() - r0)
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
         frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        reportFrameWork(System.nanoTime() - frameStart)
     }
 
     /** Reads the left half of the composited screen (what the left eye sees) into a bitmap. */
@@ -469,6 +470,21 @@ class XrEngine(
         compositor.eyeTanH = th; compositor.eyeTanV = tv
         Mat4.frustumTan(-th, th, -tv, tv, 0.05f, 200f, eye.proj)
         eye.update()
+    }
+
+    /** ADPF (Android 12+): the render thread reports each frame's CPU time against the refresh period. */
+    private var renderHint: Any? = null
+    private var renderHintTried = false
+    private fun reportFrameWork(ns: Long) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        if (!renderHintTried) {
+            renderHintTried = true
+            renderHint = runCatching {
+                activity.getSystemService(android.os.PerformanceHintManager::class.java)
+                    ?.createHintSession(intArrayOf(android.os.Process.myTid()), refreshPeriodNs)
+            }.getOrNull()
+        }
+        (renderHint as? android.os.PerformanceHintManager.Session)?.let { runCatching { it.reportActualWorkDuration(ns.coerceAtLeast(1)) } }
     }
 
     /**
