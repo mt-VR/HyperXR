@@ -25,13 +25,27 @@ import kotlin.math.tan
 /** SteamVR on the phone: the HyperXR engine tracks and displays, the PC renders. */
 class SteamVrActivity : ImmersiveActivity() {
     private var content: SteamVrContent? = null
+    private val plan by lazy { SteamVrPlanner.plan(this, SteamVrPlanner.profile(this)) }
 
     override fun createContent(): XrContent {
+        com.hyperxr.mixedreality.ArCoreSession.lightweight = true
         val ip = intent.getStringExtra(EXTRA_PC_IP) ?: prefs(this).getString("pc_ip", "") ?: ""
-        return SteamVrContent(ip).also { content = it }
+        return SteamVrContent(ip, plan).also { content = it }
     }
 
+    /**
+     * Only what streaming needs: no boundary depth, no ARCore depth for the hands, no hand
+     * drawing (the PC draws the controllers), hand tracking at the profile's rate. ARCore still
+     * gives 6DoF and the camera still feeds the hands that drive the Joy-Cons.
+     */
+    override fun adjustSettings(s: com.hyperxr.settings.HyperSettings) = s.copy(
+        graphics = s.graphics.copy(vrBoundary = false),
+        performance = s.performance.copy(handInferenceHz = plan.handHz, sustainedPerformanceMode = true),
+        handTracking = s.handTracking.copy(useArCoreDepth = false, handVisual = com.hyperxr.settings.HandVisual.NONE, directTouch = false),
+    )
+
     override fun onDestroy() {
+        com.hyperxr.mixedreality.ArCoreSession.lightweight = false
         content?.close()
         super.onDestroy()
     }
@@ -42,7 +56,7 @@ class SteamVrActivity : ImmersiveActivity() {
     }
 }
 
-class SteamVrContent(private val pcIp: String) : XrContent, EyeOverride {
+class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles.Plan) : XrContent, EyeOverride, com.hyperxr.xr.ScreenOverride {
     private lateinit var ctx: XrContext
     private var client: SteamVrClient? = null
     private var surfaceTexture: SurfaceTexture? = null
@@ -89,19 +103,16 @@ class SteamVrContent(private val pcIp: String) : XrContent, EyeOverride {
         }
     }
 
-    /** The phone's display as SteamVR should render it: half the landscape screen per eye. */
+    /** The stream as the profile planned it, with this viewer's field of view. */
     private fun hello(ctx: XrContext): HxvrProtocol.Hello {
-        val dm = ctx.activity.resources.displayMetrics
-        val w = maxOf(dm.widthPixels, dm.heightPixels); val h = minOf(dm.widthPixels, dm.heightPixels)
-        val eyeW = (w / 2 + 8) / 16 * 16
-        val eyeH = (h + 8) / 16 * 16
         val g = ctx.settings.graphics
         val tv = tan(Math.toRadians(g.fovDegrees / 2.0)).toFloat()
-        val th = tv * eyeW / eyeH
-        @Suppress("DEPRECATION")
-        val hz = ctx.activity.windowManager.defaultDisplay.refreshRate
-        val refresh = if (hz >= 89f) 90 else if (hz >= 71f) 72 else 60
-        return HxvrProtocol.Hello(eyeW, eyeH, refresh, th, th, tv, tv, g.ipdMm / 1000f, android.os.Build.MODEL)
+        // same shape as the phone's eye viewport, so the stream covers exactly what is shown
+        val dm = ctx.activity.resources.displayMetrics
+        val aspect = (maxOf(dm.widthPixels, dm.heightPixels) / 2f) / minOf(dm.widthPixels, dm.heightPixels)
+        val th = tv * aspect
+        return HxvrProtocol.Hello(plan.eyeWidth, plan.eyeHeight, plan.refreshHz, th, th, tv, tv, g.ipdMm / 1000f,
+            android.os.Build.MODEL, codecs = plan.codecs, maxMbps = plan.maxMbps)
     }
 
     override fun onFrame(ctx: XrContext, dt: Float) {
@@ -198,6 +209,55 @@ class SteamVrContent(private val pcIp: String) : XrContent, EyeOverride {
         return cfg.eyeWidth > 0
     }
 
+    /**
+     * Weak-phone path: the whole screen in one pass per eye, reprojection and lens correction
+     * together, straight from the decoded video. No eye render targets and no composite pass:
+     * each screen pixel is read once (three times with chromatic correction).
+     */
+    override fun drawScreen(eyes: Array<EyeView>, screenW: Int, screenH: Int, xdpi: Float, g: com.hyperxr.settings.GraphicsSettings): Boolean {
+        val c = client ?: return false
+        if (!hasFrame || c.config == null) return false
+        if (directProg == 0) {
+            directProg = Gl.compile(VS, DIRECT_FS, "steamvr-direct")
+            for (n in listOf("uTex", "uTexMatrix", "uRot", "uSrc", "uEye", "uLensCenter", "uScale", "uK", "uChroma")) du[n] = GLES30.glGetUniformLocation(directProg, n)
+        }
+        playSpace.apply(ctx.input.head.position, ctx.input.head.orientation, tmpPos, curHead)
+        frameQuat.conjugate(rel).mul(curHead, rel)
+        rotationMatrix(rel, rot)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(0, 0, screenW, screenH)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glUseProgram(directProg)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTex)
+        GLES30.glUniform1i(du.getValue("uTex"), 0)
+        GLES30.glUniformMatrix4fv(du.getValue("uTexMatrix"), 1, false, texMatrix, 0)
+        GLES30.glUniformMatrix3fv(du.getValue("uRot"), 1, false, rot, 0)
+        GLES30.glUniform2f(du.getValue("uSrc"), display.tanLeft, display.tanUp)
+        if (g.lensDistortion) GLES30.glUniform2f(du.getValue("uK"), g.distortionK1, g.distortionK2) else GLES30.glUniform2f(du.getValue("uK"), 0f, 0f)
+        GLES30.glUniform1f(du.getValue("uChroma"), if (plan.chroma && g.lensDistortion) 0.006f else 0f)
+        GLES30.glBindVertexArray(vao)
+        val halfW = screenW / 2
+        val lensOffsetPx = (g.lensSeparationMm / 2f) * (xdpi / 25.4f)
+        for (e in 0..1) {
+            GLES30.glViewport(e * halfW, 0, halfW, screenH)
+            val center = if (!g.lensDistortion) 0.5f else ((if (e == 0) halfW - lensOffsetPx else lensOffsetPx) / halfW).coerceIn(0.2f, 0.8f)
+            GLES30.glUniform2f(du.getValue("uLensCenter"), center, 0.5f)
+            GLES30.glUniform2f(du.getValue("uScale"), 2f / eyes[e].proj[0], 2f / eyes[e].proj[5])
+            GLES30.glUniform1f(du.getValue("uEye"), e.toFloat())
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        }
+        GLES30.glBindVertexArray(0)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        return true
+    }
+
+    private var directProg = 0
+    private val du = HashMap<String, Int>()
+
     /** Column-major 3x3 rotation matrix of [q]. */
     private fun rotationMatrix(q: Quat, m: FloatArray) {
         val x = q.x; val y = q.y; val z = q.z; val w = q.w
@@ -237,6 +297,8 @@ class SteamVrContent(private val pcIp: String) : XrContent, EyeOverride {
             c.paragraph(state, 32f, XrTheme.text, bold = true)
             c.paragraph("IP deste celular (digite no HyperXR PC): " + (localIp() ?: "sem Wi-Fi"), 26f, XrTheme.accent2)
             c.paragraph("PC: " + pcIp.ifBlank { "o PC é que vai se conectar" }, 26f)
+            c.paragraph("Perfil ${plan.profile.label}: ${plan.eyeWidth * 2}x${plan.eyeHeight} a ${plan.refreshHz} Hz, " +
+                (if (plan.codecs and SteamVrProfiles.CODEC_HEVC != 0) "HEVC" else "H.264") + ", até ${plan.maxMbps} Mb/s", 22f)
             c.paragraph("Joy-Con Home recentraliza. Sem Joy-Con, as mãos viram os controles: pinça = gatilho, fechar a mão = grip.", 22f)
         }
     }
@@ -271,6 +333,41 @@ void main() {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
     vec2 frame = vec2(uEye * 0.5 + uv.x * 0.5, uv.y);
     fragColor = vec4(texture(uTex, (uTexMatrix * vec4(frame, 0.0, 1.0)).xy).rgb, 1.0);
+}"""
+
+        /** Reprojection + lens pre-distortion (+ optional chromatic correction) in one pass. */
+        private const val DIRECT_FS = """#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision highp float;
+in vec2 vUv;
+uniform samplerExternalOES uTex;
+uniform mat4 uTexMatrix;
+uniform mat3 uRot;
+uniform vec2 uSrc;
+uniform float uEye;
+uniform vec2 uLensCenter;
+uniform vec2 uScale;
+uniform vec2 uK;
+uniform float uChroma;
+out vec4 fragColor;
+vec2 warp(vec2 t, float s) { float r2 = dot(t, t); return t * (1.0 + uK.x * r2 + uK.y * r2 * r2) * s; }
+// screen tangent -> uv in the frame the PC rendered (z < 0 when outside it)
+vec3 look(vec2 tn) {
+    vec3 d = uRot * normalize(vec3(tn, -1.0));
+    if (d.z > -0.01) return vec3(0.0, 0.0, -1.0);
+    vec2 uv = (d.xy / -d.z / uSrc) * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec3(0.0, 0.0, -1.0);
+    return vec3(uv, 1.0);
+}
+vec3 fetch(vec2 uv) { return texture(uTex, (uTexMatrix * vec4(uEye * 0.5 + uv.x * 0.5, uv.y, 0.0, 1.0)).xy).rgb; }
+void main() {
+    vec2 t = (vUv - uLensCenter) * uScale;
+    vec3 g = look(warp(t, 1.0));
+    if (g.z < 0.0) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    if (uChroma <= 0.0) { fragColor = vec4(fetch(g.xy), 1.0); return; }
+    vec3 r = look(warp(t, 1.0 - uChroma));
+    vec3 b = look(warp(t, 1.0 + uChroma));
+    fragColor = vec4(fetch(r.z < 0.0 ? g.xy : r.xy).r, fetch(g.xy).g, fetch(b.z < 0.0 ? g.xy : b.xy).b, 1.0);
 }"""
     }
 }

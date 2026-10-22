@@ -21,7 +21,11 @@ class VideoEncoder {
 public:
     using Output = std::function<void(const uint8_t* data, size_t size, bool keyFrame, uint64_t tag)>;
 
-    bool Init(ID3D11Device* device, int width, int height, int fps, int kbps, Output out, std::string& error);
+    /** [hevc] picks H.265 (half the bitrate for the same picture), else H.264. */
+    bool Init(ID3D11Device* device, int width, int height, int fps, int kbps, bool hevc, Output out, std::string& error);
+    /** Changes the target bitrate while running (adaptive bitrate). */
+    void SetBitrate(int kbps);
+    bool Hevc() const { return hevc_; }
     /** Converts [rgba] (a texture of this device, width x height) and queues it; [tag] comes back with the output. */
     void Submit(ID3D11Texture2D* rgba, uint64_t tag);
     void RequestKeyFrame() { keyRequested_ = true; }
@@ -58,6 +62,7 @@ private:
     IMFDXGIDeviceManager* manager_ = nullptr;
     UINT resetToken_ = 0;
     bool hardware_ = false;
+    bool hevc_ = false;
     bool providesSamples_ = false;
     DWORD outputSize_ = 0;
     std::string name_;

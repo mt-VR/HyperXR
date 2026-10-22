@@ -40,6 +40,40 @@ pelo ARCore), as mãos e os Joy-Cons.
 - **Reprojeção:** o celular mostra o último quadro corrigido pela rotação da cabeça desde que o PC
   o renderizou. Virar a cabeça continua suave mesmo com a latência do Wi-Fi.
 
+## Desempenho em celulares simples
+
+O card SteamVR da tela inicial tem quatro perfis: Automático, Leve, Equilibrado e Qualidade. O
+Automático escolhe pelo celular:
+
+- **Leve:** até 4 GB de RAM ou chips como Exynos 7904/850/9611, Helio G/P e Snapdragon 4xx/6xx.
+- **Equilibrado:** até 6 GB.
+- **Qualidade:** acima disso.
+
+Para manter fluido num celular fraco:
+
+- **Resolução:** cabe no decodificador de hardware do celular. O HyperXR pergunta ao próprio
+  decodificador e reduz em passos de 10% até ele aceitar, mantendo o formato da tela. No Leve, o
+  limite é 1920x1080 a 60 Hz.
+- **HEVC:** se o celular decodifica HEVC, o PC manda HEVC, que tem a mesma qualidade com cerca de
+  metade do bitrate. Sem codificador HEVC na placa de vídeo, o PC volta para H.264 e avisa o
+  celular.
+- **Bitrate adaptativo no PC:** se o envio pelo Wi-Fi começa a travar, o bitrate cai 15% na
+  hora. Com a rede folgada, ele sobe 5% a cada 2 s, até o limite do perfil (25 Mb/s no Leve) e do
+  programa do PC.
+- **Uma passada só na GPU do celular:** reprojeção e correção da lente saem direto do vídeo
+  decodificado para a tela, sem as texturas de cada olho. No Leve, a correção cromática fica
+  desligada (1 leitura por pixel em vez de 3).
+- **Decodificador:**
+  - modo de baixa latência do Android e dos fabricantes (Qualcomm, Exynos e MediaTek);
+  - só decodificador de hardware;
+  - se chegam dois quadros juntos, o mais antigo é descartado.
+- **Celular sem trabalho extra:**
+  - sem detecção de planos no ARCore;
+  - menor imagem de câmera a 30 fps;
+  - sem profundidade nem limite de área (boundary);
+  - mãos sem desenho e a 12 Hz no Leve (20 no Equilibrado, 30 no Qualidade);
+  - modo de desempenho sustentado ligado.
+
 ## Limitações conhecidas
 
 - **Nada disso foi testado com SteamVR de verdade.** O driver e o programa foram compilados no

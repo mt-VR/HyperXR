@@ -49,12 +49,12 @@ struct Status {
     std::string phone = "aguardando o celular";
     std::string encoder = "-";
     std::string error;
-    double fps = 0, mbps = 0;
+    double fps = 0, mbps = 0, targetMbps = 0;
     void Write() {
         std::lock_guard<std::mutex> l(m);
         FILE* f = _wfopen(hxvr::StatusPath().c_str(), L"w");
         if (!f) return;
-        fprintf(f, "phone=%s\nencoder=%s\nfps=%.0f\nmbps=%.1f\nerror=%s\n", phone.c_str(), encoder.c_str(), fps, mbps, error.c_str());
+        fprintf(f, "phone=%s\nencoder=%s\nfps=%.0f\nmbps=%.1f\ntarget=%.0f\nerror=%s\n", phone.c_str(), encoder.c_str(), fps, mbps, targetMbps, error.c_str());
         fclose(f);
     }
 };
@@ -373,11 +373,18 @@ public:
             if (FAILED(device_->CreateTexture2D(&cd, nullptr, &copy_))) { copy_ = nullptr; return; }
             copyW_ = d.Width; copyH_ = d.Height;
             StartEncoder(int(d.Width), int(d.Height));
+        } else if (restartEncoder_.exchange(false)) {
+            StartEncoder(int(copyW_), int(copyH_));
+        } else if (announce_.exchange(false) && encoder_) {
+            link_->Send(hxvr::MakeConfig(uint16_t(cfg_.eyeWidth), uint16_t(cfg_.eyeHeight), uint16_t(cfg_.refreshHz), uint32_t(kbps_),
+                                         encoder_->Hevc() ? hxvr::CODEC_HEVC : hxvr::CODEC_H264, false));
+            encoder_->RequestKeyFrame();
         }
         context_->CopyResource(copy_, src);
         context_->End(query_);
         context_->Flush();
         presentPending_ = true;
+        if (keyFrame_.exchange(false) && encoder_) encoder_->RequestKeyFrame();
         if (encoder_ && link_->Connected()) encoder_->Submit(copy_, RenderedPoseTag());
         frames_++;
     }
@@ -419,6 +426,22 @@ public:
     }
 
     void RequestKeyFrame() { if (encoder_) encoder_->RequestKeyFrame(); }
+    /** From the network thread: the encoder makes the next frame a key frame. */
+    void RequestKeyFrameAsync() { keyFrame_ = true; }
+
+    /** What the phone decodes and the most it wants: applied by restarting the encoder. */
+    void SetStream(uint8_t codecs, int maxMbps) {
+        bool hevc = (codecs & hxvr::CODEC_HEVC) != 0;
+        int maxKbps = maxMbps > 0 ? maxMbps * 1000 : 1000000;
+        if (hevc != wantHevc_.load() || maxKbps != maxKbps_.load()) {
+            wantHevc_ = hevc; maxKbps_ = maxKbps;
+            restartEncoder_ = true;
+        } else {
+            // same stream: the phone (re)connected and needs the codec and a key frame (sent on
+            // SteamVR's present thread, which owns the encoder)
+            announce_ = true;
+        }
+    }
     uint32_t Id() const { return id_; }
 
 private:
@@ -468,22 +491,51 @@ private:
     }
 
     void StartEncoder(int w, int h) {
-        if (encoder_) { encoder_->Shutdown(); delete encoder_; }
-        encoder_ = new VideoEncoder();
+        if (encoder_) { encoder_->Shutdown(); delete encoder_; encoder_ = nullptr; }
         std::string err;
         auto out = [this](const uint8_t* data, size_t n, bool key, uint64_t tag) {
             const PoseSample& s = tagged_[tag % kTagRing];
             bytes_ += n;
+            double t0 = NowSeconds();
             link_->Send(hxvr::MakeVideo(frameId_++, s.timeNs, s.q, key, data, n));
+            AdaptBitrate(NowSeconds() - t0);
         };
-        if (!encoder_->Init(device_, w, h, cfg_.refreshHz, cfg_.bitrateMbps * 1000, out, err)) {
-            SetError("codificador: " + err);
-            delete encoder_; encoder_ = nullptr;
-            return;
+        // HEVC halves the bitrate for the same picture: use it when the phone decodes it
+        bool hevc = wantHevc_.load();
+        kbps_ = std::min(cfg_.bitrateMbps * 1000, maxKbps_.load());
+        for (int attempt = 0; attempt < 2 && !encoder_; attempt++) {
+            auto* e = new VideoEncoder();
+            if (e->Init(device_, w, h, cfg_.refreshHz, kbps_, hevc, out, err)) { encoder_ = e; break; }
+            delete e;
+            if (!hevc) break;
+            hevc = false;  // no HEVC encoder on this GPU: H.264
         }
+        if (!encoder_) { SetError("codificador: " + err); return; }
         encoder_->RequestKeyFrame();
+        link_->Send(hxvr::MakeConfig(uint16_t(cfg_.eyeWidth), uint16_t(cfg_.eyeHeight), uint16_t(cfg_.refreshHz), uint32_t(kbps_),
+                                     hevc ? hxvr::CODEC_HEVC : hxvr::CODEC_H264, false));
         std::lock_guard<std::mutex> l(g_status.m);
-        g_status.encoder = encoder_->Name() + (encoder_->Hardware() ? " (GPU)" : " (software, lento)");
+        g_status.encoder = encoder_->Name() + (hevc ? " HEVC" : " H.264") + (encoder_->Hardware() ? " (GPU)" : " (software, lento)");
+    }
+
+    /**
+     * Adaptive bitrate: a send that blocks means Wi-Fi cannot keep up, so the bitrate drops 15%
+     * at once; when sends are quick for 2 s it climbs back 5% at a time up to the limit.
+     */
+    void AdaptBitrate(double sendSeconds) {
+        double frame = 1.0 / cfg_.refreshHz;
+        sendAvg_ = sendAvg_ * 0.9 + sendSeconds * 0.1;
+        double now = NowSeconds();
+        if (sendAvg_ > frame * 0.5 && now - lastRateChange_ > 0.5) {
+            kbps_ = std::max(4000, int(kbps_ * 0.85));
+            lastRateChange_ = now;
+        } else if (sendAvg_ < frame * 0.15 && now - lastRateChange_ > 2.0) {
+            int cap = std::min(cfg_.bitrateMbps * 1000, maxKbps_.load());
+            if (kbps_ >= cap) return;
+            kbps_ = std::min(cap, int(kbps_ * 1.05) + 100);
+            lastRateChange_ = now;
+        } else return;
+        if (encoder_) encoder_->SetBitrate(kbps_);
     }
 
     void SetError(const std::string& e) {
@@ -511,6 +563,7 @@ private:
                     std::lock_guard<std::mutex> l(g_status.m);
                     g_status.fps = double(f - lastFrames) / (now - lastStats);
                     g_status.mbps = double(b - lastBytes) * 8 / 1e6 / (now - lastStats);
+                    g_status.targetMbps = kbps_ / 1000.0;
                 }
                 g_status.Write();
                 lastFrames = f; lastBytes = b; lastStats = now;
@@ -539,6 +592,10 @@ private:
     UINT copyW_ = 0, copyH_ = 0;
     VideoEncoder* encoder_ = nullptr;
     bool presentPending_ = false;
+    std::atomic<bool> wantHevc_{false}, restartEncoder_{false}, announce_{false}, keyFrame_{false};
+    std::atomic<int> maxKbps_{1000000};
+    int kbps_ = 40000;
+    double sendAvg_ = 0, lastRateChange_ = 0;
 
     std::atomic<bool> running_{true};
     std::thread vsyncThread_;
@@ -572,7 +629,7 @@ public:
             left_->Update(t.controllers[0]);
             right_->Update(t.controllers[1]);
         };
-        link_.onKeyFrameRequest = [this] { hmd_->RequestKeyFrame(); };
+        link_.onKeyFrameRequest = [this] { hmd_->RequestKeyFrameAsync(); };
         link_.Start(cfg_.phoneIp);
         g_status.Write();
         Log("HyperXR driver started (phone %s, eye %dx%d @ %d Hz)\n", cfg_.phoneIp.c_str(), cfg_.eyeWidth, cfg_.eyeHeight, cfg_.refreshHz);
@@ -611,9 +668,8 @@ private:
         bool changed = h.eyeWidth != cfg_.eyeWidth || h.eyeHeight != cfg_.eyeHeight || h.refreshHz != cfg_.refreshHz ||
                        std::fabs(h.tanLeft - cfg_.tanLeft) > 0.01f || std::fabs(h.tanRight - cfg_.tanRight) > 0.01f ||
                        std::fabs(h.tanUp - cfg_.tanUp) > 0.01f || std::fabs(h.tanDown - cfg_.tanDown) > 0.01f;
-        link_.Send(hxvr::MakeConfig(uint16_t(cfg_.eyeWidth), uint16_t(cfg_.eyeHeight), uint16_t(cfg_.refreshHz), uint32_t(cfg_.bitrateMbps * 1000), changed));
-        hmd_->RequestKeyFrame();
-        if (!changed) return;
+        if (!changed) { hmd_->SetStream(h.codecs, h.maxMbps); return; }
+        link_.Send(hxvr::MakeConfig(uint16_t(h.eyeWidth), uint16_t(h.eyeHeight), uint16_t(h.refreshHz), uint32_t(cfg_.bitrateMbps * 1000), hxvr::CODEC_H264, true));
         cfg_.eyeWidth = h.eyeWidth; cfg_.eyeHeight = h.eyeHeight; cfg_.refreshHz = h.refreshHz;
         cfg_.tanLeft = h.tanLeft; cfg_.tanRight = h.tanRight; cfg_.tanUp = h.tanUp; cfg_.tanDown = h.tanDown; cfg_.ipd = h.ipd;
         hxvr::Config saved; saved.Load();  // keep the IP and bitrate the app may have changed

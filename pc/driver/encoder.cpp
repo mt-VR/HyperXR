@@ -33,7 +33,8 @@ void SetBool(ICodecAPI* api, const GUID& key, bool value) {
 }
 }  // namespace
 
-bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, int kbps, Output out, std::string& error) {
+bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, int kbps, bool hevc, Output out, std::string& error) {
+    hevc_ = hevc;
     device_ = device; device_->AddRef();
     device_->GetImmediateContext(&context_);
     width_ = width & ~1; height_ = height & ~1; fps_ = fps; out_ = std::move(out);
@@ -43,7 +44,7 @@ bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, in
     std::string hwError;
     if (!InitMft(true, hwError)) {
         std::string swError;
-        if (!InitMft(false, swError)) { error = "nenhum codificador H.264 (GPU: " + hwError + "; software: " + swError + ")"; return false; }
+        if (!InitMft(false, swError)) { error = std::string("nenhum codificador ") + (hevc_ ? "HEVC" : "H.264") + " (GPU: " + hwError + "; software: " + swError + ")"; return false; }
     }
     // bitrate and latency settings
     SetU32(codecApi_, CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
@@ -51,6 +52,7 @@ bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, in
     SetBool(codecApi_, CODECAPI_AVLowLatencyMode, true);
     SetU32(codecApi_, CODECAPI_AVEncMPVDefaultBPictureCount, 0);
     SetU32(codecApi_, CODECAPI_AVEncMPVGOPSize, ULONG(fps * 2));  // a key frame every 2 s heals lost data
+    SetU32(codecApi_, CODECAPI_AVEncCommonQualityVsSpeed, 0);      // fastest preset: latency over quality
     mft_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
@@ -93,7 +95,7 @@ bool VideoEncoder::InitConverter(std::string& error) {
 
 bool VideoEncoder::InitMft(bool hardware, std::string& error) {
     MFT_REGISTER_TYPE_INFO inInfo = {MFMediaType_Video, MFVideoFormat_NV12};
-    MFT_REGISTER_TYPE_INFO outInfo = {MFMediaType_Video, MFVideoFormat_H264};
+    MFT_REGISTER_TYPE_INFO outInfo = {MFMediaType_Video, hevc_ ? MFVideoFormat_HEVC : MFVideoFormat_H264};
     IMFActivate** acts = nullptr; UINT32 count = 0;
     UINT32 flags = (hardware ? MFT_ENUM_FLAG_HARDWARE : MFT_ENUM_FLAG_SYNCMFT) | MFT_ENUM_FLAG_SORTANDFILTER;
     HRESULT hr = MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, flags, &inInfo, &outInfo, &acts, &count);
@@ -118,13 +120,13 @@ bool VideoEncoder::InitMft(bool hardware, std::string& error) {
         }
         IMFMediaType* ot = nullptr; MFCreateMediaType(&ot);
         ot->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        ot->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+        ot->SetGUID(MF_MT_SUBTYPE, hevc_ ? MFVideoFormat_HEVC : MFVideoFormat_H264);
         ot->SetUINT32(MF_MT_AVG_BITRATE, 20000000);
         MFSetAttributeSize(ot, MF_MT_FRAME_SIZE, width_, height_);
         MFSetAttributeRatio(ot, MF_MT_FRAME_RATE, fps_, 1);
         MFSetAttributeRatio(ot, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
         ot->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-        ot->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main);
+        ot->SetUINT32(MF_MT_MPEG2_PROFILE, hevc_ ? UINT32(eAVEncH265VProfile_Main_420_8) : UINT32(eAVEncH264VProfile_Main));
         hr = t->SetOutputType(0, ot, 0);
         ot->Release();
         if (FAILED(hr)) { error = "tipo de saída " + Hex(hr); t->Release(); continue; }
@@ -156,6 +158,10 @@ bool VideoEncoder::InitMft(bool hardware, std::string& error) {
         if (FAILED(device_->CreateTexture2D(&d, nullptr, &staging_))) { error = "leitura NV12"; return false; }
     }
     return true;
+}
+
+void VideoEncoder::SetBitrate(int kbps) {
+    SetU32(codecApi_, CODECAPI_AVEncCommonMeanBitRate, ULONG(kbps) * 1000);
 }
 
 void VideoEncoder::Submit(ID3D11Texture2D* rgba, uint64_t tag) {

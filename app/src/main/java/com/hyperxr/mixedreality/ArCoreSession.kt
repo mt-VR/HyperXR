@@ -64,18 +64,28 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private var texMatrixValid = false
 
     /** Must be called on the GL thread (creates the camera texture). */
+    companion object {
+        /** Streaming (SteamVR) needs only the pose and the hand image: no planes, smallest camera image. */
+        @Volatile var lightweight = false
+    }
+
     fun create(useDepth: Boolean): Capability {
         return try {
             val s = Session(activity)
             val config = Config(s).apply {
                 updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                 focusMode = Config.FocusMode.FIXED
-                planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                planeFindingMode = if (lightweight) Config.PlaneFindingMode.DISABLED else Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 lightEstimationMode = Config.LightEstimationMode.DISABLED
             }
             val depthSupported = s.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
             if (useDepth && depthSupported) config.depthMode = Config.DepthMode.AUTOMATIC
             depthEnabled = useDepth && depthSupported
+            if (lightweight) runCatching {
+                // smallest CPU image at 30 fps: enough for 6DoF and the hand model, least work
+                val filter = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30))
+                s.getSupportedCameraConfigs(filter).minByOrNull { it.imageSize.width * it.imageSize.height }?.let { s.cameraConfig = it }
+            }
             s.configure(config)
             textureId = Gl.externalTexture()
             s.setCameraTextureName(textureId)

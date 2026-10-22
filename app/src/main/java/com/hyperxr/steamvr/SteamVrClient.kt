@@ -147,28 +147,40 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
     private fun onConfig(c: HxvrProtocol.Config) {
         config = c
         state = if (c.restartPending) "O SteamVR está reiniciando para a tela deste celular…" else "Recebendo o SteamVR"
+        if (c.restartPending) return
         val size = c.eyeWidth * 2 to c.eyeHeight
-        if (decoder == null || decoderSize != size) startDecoder(size.first, size.second)
+        if (decoder == null || decoderSize != size || decoderCodec != c.codec) startDecoder(size.first, size.second, c.codec)
     }
 
     // ---------------------------------------------------------------- video
-    private fun startDecoder(w: Int, h: Int) {
+    private var decoderCodec = -1
+
+    private fun startDecoder(w: Int, h: Int, codec: Int) {
         releaseDecoder()
+        val mime = SteamVrPlanner.mime(if (codec == SteamVrProfiles.CODEC_HEVC) codec else SteamVrProfiles.CODEC_H264)
         try {
-            val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
+            val fmt = MediaFormat.createVideoFormat(mime, w, h).apply {
                 if (android.os.Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
+                // vendor low-latency switches (ignored where unknown): Qualcomm, Samsung Exynos, MediaTek, Kirin
+                setInteger("vendor.qti-ext-dec-low-latency.enable", 1)
+                setInteger("vendor.qti-ext-dec-picture-order.enable", 1)
+                setInteger("vendor.rtc-ext-dec-low-latency.enable", 1)
+                setInteger("vendor.low-latency.enable", 1)
+                setInteger("vdec-lowlatency", 1)
             }
-            val d = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val name = SteamVrPlanner.decoder(mime, w, h, 60)
+            val d = if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(mime)
             d.configure(fmt, surface, null, 0)
             d.start()
-            decoder = d; decoderSize = w to h
-            Thread({ drainLoop(d) }, "hxvr-decode").start()
+            decoder = d; decoderSize = w to h; decoderCodec = codec
+            waitingKey = true
+            Thread({ drainLoop(d) }, "hxvr-decode").apply { priority = Thread.MAX_PRIORITY }.start()
             requestKeyFrame()
         } catch (t: Throwable) {
             Diagnostics.log("SteamVR decoder: $t")
-            state = "Este celular não decodifica ${w}x$h em H.264"
+            state = "Este celular não decodifica ${w}x$h (${if (codec == SteamVrProfiles.CODEC_HEVC) "HEVC" else "H.264"}); use o perfil Leve"
         }
     }
 
@@ -186,7 +198,7 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
         if (waitingKey && !v.keyFrame) return
         waitingKey = false
         headers[v.frameId] = v
-        if (headers.size > 120) headers.keys.filter { it < v.frameId - 60 }.forEach { headers.remove(it) }
+        if (headers.size > 120) headers.keys.removeAll { it < v.frameId - 60 }
         try {
             val i = d.dequeueInputBuffer(8_000)
             if (i < 0) { waitingKey = true; requestKeyFrame(); return }
@@ -202,12 +214,24 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
         }
     }
 
+    /**
+     * Shows only the newest decoded frame: when two are ready (Wi-Fi burst), the older one is
+     * dropped instead of adding a frame of latency.
+     */
     private fun drainLoop(d: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         try {
             while (running && decoder === d) {
-                val o = d.dequeueOutputBuffer(info, 20_000)
-                if (o >= 0) { d.releaseOutputBuffer(o, true); framesDecoded++ }
+                var o = d.dequeueOutputBuffer(info, 20_000)
+                if (o < 0) continue
+                while (true) {
+                    val next = d.dequeueOutputBuffer(info, 0)
+                    if (next < 0) break
+                    d.releaseOutputBuffer(o, false)
+                    o = next
+                }
+                d.releaseOutputBuffer(o, true)
+                framesDecoded++
             }
         } catch (_: Throwable) {}
     }

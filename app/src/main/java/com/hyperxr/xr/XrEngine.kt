@@ -97,6 +97,15 @@ class XrContext(
     lateinit var share: com.hyperxr.share.ScreenShare
 }
 
+/**
+ * Content that fills the whole phone screen itself, lens correction included, in one pass (SteamVR
+ * streaming on weak phones): the engine then skips the per-eye targets and the composite. The
+ * eyes are set up (pose and frustum) before the call. Return false to render normally.
+ */
+interface ScreenOverride {
+    fun drawScreen(eyes: Array<EyeView>, screenW: Int, screenH: Int, xdpi: Float, g: com.hyperxr.settings.GraphicsSettings): Boolean
+}
+
 /** Content that draws an eye itself (SteamVR streaming): return false to render the scene normally. */
 interface EyeOverride {
     fun renderEye(eye: EyeView, target: RenderTarget): Boolean
@@ -117,9 +126,14 @@ interface XrContent {
  * Frame: camera/AR update -> head pose -> hands/controllers -> content -> per-eye render
  * (background, scene, panels, hand aura) -> lens distortion composite or OpenXR submit.
  */
-class XrEngine(private val activity: Activity, private val content: XrContent) : GLSurfaceView.Renderer {
+class XrEngine(
+    private val activity: Activity,
+    private val content: XrContent,
+    /** Lets an activity run with adjusted settings without saving them (SteamVR performance profiles). */
+    tweak: (com.hyperxr.settings.HyperSettings) -> com.hyperxr.settings.HyperSettings = { it },
+) : GLSurfaceView.Renderer {
     private val app = HyperXRApp.instance
-    private var settings = app.settings.current
+    private var settings = tweak(app.settings.current)
     val decision: XrModeDecision = XrModeResolver.resolve(app.capabilities.last.takeIf { it.androidSdk > 0 } ?: app.capabilities.probe(app.runtimeBroker), settings.xrMode)
 
     private val renderer = SceneRenderer()
@@ -356,12 +370,12 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             } else {
             val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
             val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
-            for (eye in 0..1) {
-                eyes[eye].index = eye
-                setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2)
-                renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
+            for (eye in 0..1) { eyes[eye].index = eye; setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2) }
+            val direct = (content as? ScreenOverride)?.drawScreen(eyes, width, height, activity.resources.displayMetrics.xdpi, settings.graphics) == true
+            if (!direct) {
+                for (eye in 0..1) renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
+                compositor.composite(settings.graphics)
             }
-            compositor.composite(settings.graphics)
             }
         }
         if (capture != null) {

@@ -23,6 +23,9 @@ abstract class ImmersiveActivity : Activity() {
 
     protected abstract fun createContent(): XrContent?
 
+    /** Settings this session runs with (not saved); SteamVR lightens them for weak phones. */
+    protected open fun adjustSettings(s: com.hyperxr.settings.HyperSettings): com.hyperxr.settings.HyperSettings = s
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +33,7 @@ abstract class ImmersiveActivity : Activity() {
         requestHighestRefreshRate()
         root = FrameLayout(this)
         val content = createContent() ?: run { finish(); return }
-        engine = XrEngine(this, content)
+        engine = XrEngine(this, content) { adjustSettings(it) }
         engine.onCreate()
         glView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(3)

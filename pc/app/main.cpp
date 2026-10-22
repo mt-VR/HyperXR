@@ -170,7 +170,7 @@ void RefreshStatus() {
         a += wcslen(k) + 1;
         return s.substr(a, s.find(L'\n', a) - a);
     };
-    std::wstring t = L"Celular: " + val(L"phone") + L"\r\nCodificador: " + val(L"encoder") + L"\r\nQuadros: " + val(L"fps") + L" por segundo   Vídeo: " + val(L"mbps") + L" Mb/s";
+    std::wstring t = L"Celular: " + val(L"phone") + L"\r\nCodificador: " + val(L"encoder") + L"\r\nQuadros: " + val(L"fps") + L" por segundo   Vídeo: " + val(L"mbps") + L" Mb/s (alvo " + val(L"target") + L")";
     std::wstring err = val(L"error");
     if (!err.empty()) t += L"\r\nProblema: " + err;
     SetStatus(t);

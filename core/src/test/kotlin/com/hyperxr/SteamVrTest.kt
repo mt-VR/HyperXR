@@ -104,3 +104,34 @@ class SteamVrTest {
         assertEquals(-1f, p.z, 1e-4f); assertEquals(0f, p.x, 1e-4f)
     }
 }
+
+class SteamVrProfilesTest {
+    private val hevc1080: (Int, Int, Int, Int) -> Boolean = { _, w, h, fps -> w <= 1920 && h <= 1088 && fps <= 60 }
+
+    /** Galaxy A30-class phone: 2340x1080, 60 Hz, 3 GB, Exynos 7904, 1080p60 decoder. */
+    @org.junit.Test fun weakPhoneGetsLight1080pHevc() {
+        val p = com.hyperxr.steamvr.SteamVrProfiles.plan(com.hyperxr.steamvr.SteamVrProfiles.Profile.AUTO, 1080, 2340, 60f, 3000, "exynos7904", hevc1080)
+        org.junit.Assert.assertEquals(com.hyperxr.steamvr.SteamVrProfiles.Profile.LIGHT, p.profile)
+        org.junit.Assert.assertTrue(p.eyeWidth * 2 <= 1920 && p.eyeHeight <= 1080)
+        org.junit.Assert.assertEquals(0, p.eyeWidth % 16)
+        org.junit.Assert.assertEquals(60, p.refreshHz)
+        org.junit.Assert.assertTrue(p.codecs and com.hyperxr.steamvr.SteamVrProfiles.CODEC_HEVC != 0)
+        org.junit.Assert.assertFalse(p.chroma)
+        // the stream keeps the screen's shape so nothing is stretched
+        org.junit.Assert.assertEquals(2340f / 1080f, p.eyeWidth * 2f / p.eyeHeight, 0.03f)
+    }
+
+    @org.junit.Test fun shrinksUntilTheDecoderAccepts() {
+        val p = com.hyperxr.steamvr.SteamVrProfiles.plan(com.hyperxr.steamvr.SteamVrProfiles.Profile.QUALITY, 1440, 3200, 120f, 12000, "sm8550") { c, w, _, _ -> c == com.hyperxr.steamvr.SteamVrProfiles.CODEC_H264 && w <= 2048 }
+        org.junit.Assert.assertTrue(p.eyeWidth * 2 <= 2048)
+        org.junit.Assert.assertEquals(com.hyperxr.steamvr.SteamVrProfiles.CODEC_H264, p.codecs)
+        org.junit.Assert.assertEquals(90, p.refreshHz)
+    }
+
+    @org.junit.Test fun helloV2CarriesCodecsAndBitrate() {
+        val h = com.hyperxr.steamvr.HxvrProtocol.Hello(944, 880, 60, 1f, 1f, 1f, 1f, 0.063f, "SM-A305", codecs = 3, maxMbps = 25)
+        val b = java.nio.ByteBuffer.wrap(com.hyperxr.steamvr.HxvrProtocol.hello(h)).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.int; b.get()
+        org.junit.Assert.assertEquals(h, com.hyperxr.steamvr.HxvrProtocol.parseHello(b.slice()))
+    }
+}

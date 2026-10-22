@@ -11,7 +11,8 @@ namespace hxvr {
 
 constexpr uint16_t kPort = 9944;
 constexpr uint32_t kMagic = 0x52565848;  // "HXVR"
-constexpr uint16_t kVersion = 1;
+constexpr uint16_t kVersion = 2;
+enum Codec : uint8_t { CODEC_H264 = 1, CODEC_HEVC = 2 };
 
 enum MsgType : uint8_t { HELLO = 1, CONFIG = 2, VIDEO = 3, HAPTIC = 4, IDR_REQUEST = 5, TRACKING = 10 };
 
@@ -26,6 +27,8 @@ struct Hello {
     uint16_t version = 0, eyeWidth = 0, eyeHeight = 0, refreshHz = 0;
     float tanLeft = 1, tanRight = 1, tanUp = 1, tanDown = 1, ipd = 0.063f;
     std::string name;
+    uint8_t codecs = CODEC_H264;  // version 2: decoders the phone has at this size
+    uint16_t maxMbps = 0;         // version 2: the most the phone wants streamed (0 = no limit)
 };
 
 struct Controller {
@@ -76,6 +79,9 @@ inline bool ParseHello(const uint8_t* p, size_t n, Hello& h) {
           r.get(h.tanRight) && r.get(h.tanUp) && r.get(h.tanDown) && r.get(h.ipd) && r.get(len))) return false;
     if (r.remaining() < len) return false;
     h.name.assign(reinterpret_cast<const char*>(r.cursor()), len);
+    Reader tail(r.cursor() + len, r.remaining() - len);
+    if (!tail.get(h.codecs) || h.codecs == 0) h.codecs = CODEC_H264;
+    tail.get(h.maxMbps);
     return true;
 }
 
@@ -93,9 +99,9 @@ inline bool ParseTracking(const uint8_t* p, size_t n, Tracking& t) {
     return true;
 }
 
-inline std::vector<uint8_t> MakeConfig(uint16_t w, uint16_t h, uint16_t hz, uint32_t kbps, bool restartPending) {
+inline std::vector<uint8_t> MakeConfig(uint16_t w, uint16_t h, uint16_t hz, uint32_t kbps, uint8_t codec, bool restartPending) {
     Writer wr(CONFIG);
-    wr.put(w).put(h).put(hz).put(kbps).put<uint8_t>(0).put<uint8_t>(restartPending ? 1 : 0);
+    wr.put(w).put(h).put(hz).put(kbps).put<uint8_t>(codec).put<uint8_t>(restartPending ? 1 : 0);
     return wr.finish();
 }
 

@@ -13,7 +13,7 @@ import java.nio.ByteOrder
 object HxvrProtocol {
     const val PORT = 9944
     const val MAGIC = 0x52565848  // "HXVR"
-    const val VERSION = 1
+    const val VERSION = 2
 
     const val HELLO: Byte = 1
     const val CONFIG: Byte = 2
@@ -39,7 +39,9 @@ object HxvrProtocol {
     const val CTRL_POSE_VALID = 4
 
     data class Hello(val eyeWidth: Int, val eyeHeight: Int, val refreshHz: Int, val tanLeft: Float, val tanRight: Float,
-                     val tanUp: Float, val tanDown: Float, val ipd: Float, val name: String, val version: Int = VERSION)
+                     val tanUp: Float, val tanDown: Float, val ipd: Float, val name: String, val version: Int = VERSION,
+                     /** Decoders the phone has at this size (SteamVrProfiles.CODEC_*), and the most it wants streamed. */
+                     val codecs: Int = 1, val maxMbps: Int = 0)
 
     data class Config(val eyeWidth: Int, val eyeHeight: Int, val refreshHz: Int, val bitrateKbps: Int, val codec: Int, val restartPending: Boolean)
 
@@ -71,11 +73,12 @@ object HxvrProtocol {
 
     fun hello(h: Hello): ByteArray {
         val name = h.name.toByteArray(Charsets.UTF_8).take(255).toByteArray()
-        val n = 4 + 2 + 2 + 2 + 2 + 4 * 5 + 1 + name.size
+        val n = 4 + 2 + 2 + 2 + 2 + 4 * 5 + 1 + name.size + 1 + 2
         return buf(n).head(HELLO, n).apply {
             putInt(MAGIC); putShort(h.version.toShort()); putShort(h.eyeWidth.toShort()); putShort(h.eyeHeight.toShort()); putShort(h.refreshHz.toShort())
             putFloat(h.tanLeft); putFloat(h.tanRight); putFloat(h.tanUp); putFloat(h.tanDown); putFloat(h.ipd)
             put(name.size.toByte()); put(name)
+            put(h.codecs.toByte()); putShort(h.maxMbps.toShort())
         }.array()
     }
 
@@ -112,7 +115,10 @@ object HxvrProtocol {
         val l = p.float; val r = p.float; val u = p.float; val d = p.float; val ipd = p.float
         val len = p.get().toInt() and 0xff
         val name = ByteArray(minOf(len, p.remaining())).also { p.get(it) }
-        return Hello(w, h, hz, l, r, u, d, ipd, String(name, Charsets.UTF_8), version)
+        // version 2 adds the decoders and the bitrate cap after the name
+        val codecs = if (p.remaining() >= 3) p.get().toInt() and 0xff else 1
+        val maxMbps = if (p.remaining() >= 2) p.short.toInt() and 0xffff else 0
+        return Hello(w, h, hz, l, r, u, d, ipd, String(name, Charsets.UTF_8), version, codecs, maxMbps)
     }
 
     fun parseTracking(p: ByteBuffer): Tracking? {
