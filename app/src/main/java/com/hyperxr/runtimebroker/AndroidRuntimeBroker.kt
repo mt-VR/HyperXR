@@ -65,6 +65,11 @@ class AndroidRuntimeBroker(private val context: Context) {
 
     fun brokerInstalled(): Boolean = BROKER_AUTHORITIES.any { context.packageManager.resolveContentProvider(it, 0) != null }
 
+    /** Which package holds each broker authority (null = free), to explain install conflicts. */
+    fun brokerOwners(): Map<String, String?> = BROKER_AUTHORITIES.associateWith { auth ->
+        try { context.packageManager.resolveContentProvider(auth, 0)?.packageName } catch (_: Throwable) { null }
+    }
+
     companion object {
         const val RUNTIME_SERVICE = "org.khronos.openxr.OpenXRRuntimeService"
         val BROKER_AUTHORITIES = listOf("org.khronos.openxr.runtime_broker", "org.khronos.openxr.system_runtime_broker")

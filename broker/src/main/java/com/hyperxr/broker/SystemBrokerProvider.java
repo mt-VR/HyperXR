@@ -14,9 +14,9 @@ import java.util.List;
 /**
  * Answers the OpenXR loader's "which runtime is active?" query with the HyperXR runtime.
  *
- * The Khronos Android loader asks the installable broker (org.khronos.openxr.runtime_broker, the
- * Khronos "OpenXR Runtime Broker" app) first and this system broker second, so a broker the user
- * installed keeps priority. Contract (BrokerContract in OpenXR-SDK-Source android_utilities.cpp):
+ * The Khronos Android loader asks the installable broker (org.khronos.openxr.runtime_broker) first
+ * and the system broker second. This app takes the installable broker's authority: some phones
+ * already declare the system one (installing a second copy fails), and the first one asked wins. Contract (BrokerContract in OpenXR-SDK-Source android_utilities.cpp):
  *  - content://authority/openxr/major/abi/abi/runtimes/active/0
  *      -> _id, package_name, native_lib_dir, so_filename, has_functions
  *  - content://authority/openxr/major/abi/abi/runtimes/package/functions/0

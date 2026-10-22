@@ -22,10 +22,12 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
   (`org.khronos.openxr.runtime_broker`, app *OpenXR Runtime Broker*) e depois ao broker do sistema
   (`org.khronos.openxr.system_runtime_broker`). Celulares não têm nenhum dos dois, então o HyperXR
   traz um APK complementar e opcional, **HyperXR OpenXR Broker** (módulo `broker/`), que responde
-  como broker do sistema apontando para `libhyperxr_openxr.so` do app HyperXR. Ele é separado porque
-  o Android recusa instalar um APK cujo provider já existe no aparelho ("conflito com pacote
-  existente"): se o broker complementar não instalar, o aparelho já tem um broker — escolha
-  "HyperXR Runtime" nele (o HyperXR se anuncia pelo serviço `org.khronos.openxr.OpenXRRuntimeService`).
+  como broker instalável (o primeiro que o loader consulta) apontando para `libhyperxr_openxr.so`
+  do app HyperXR. Ele é separado porque o Android recusa instalar um APK cujo provider já existe
+  no aparelho ("conflito com pacote existente"); alguns celulares já declaram o broker do sistema,
+  por isso o complementar usa o instalável. Ele só conflita com o app *OpenXR Runtime Broker* da
+  Khronos: com esse instalado, escolha "HyperXR Runtime" nele. Configurações > Runtime mostra qual
+  pacote ocupa cada broker (o HyperXR se anuncia pelo serviço `org.khronos.openxr.OpenXRRuntimeService`).
 - **Controles**: no OpenXR os controles pertencem ao runtime. A janela do runtime registra as teclas
   e eixos de gamepad/Joy-Con e o toque na tela (o botão do VR Box) e os entrega às ações do app pelos
   perfis `oculus/touch_controller` (e variantes Meta) ou `khr/simple_controller`, o que o app tiver

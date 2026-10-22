@@ -130,7 +130,7 @@ fun RuntimeSection(a: MainActivity) {
     var probe by remember { mutableStateOf<RuntimeProbe?>(broker.lastProbe) }
     var probing by remember { mutableStateOf(false) }
     SectionCard("HyperXR Runtime (OpenXR próprio)", "Runtime OpenXR do próprio HyperXR: apps OpenXR rodam no VR Box com 3DoF, lente corrigida e timewarp.") {
-        Note("Para apps OpenXR acharem este runtime instale o APK complementar \"HyperXR OpenXR Broker\" (pequeno, separado para não impedir a instalação do HyperXR em aparelhos que já têm um broker). Se o \"OpenXR Runtime Broker\" da Khronos estiver instalado, ele tem prioridade: escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
+        Note("Para apps OpenXR acharem este runtime instale o APK complementar \"HyperXR OpenXR Broker\": ele ocupa o lugar do broker instalável, que o loader consulta antes do broker do sistema. Se o \"OpenXR Runtime Broker\" da Khronos estiver instalado, ele tem prioridade: escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
         Note("Controles: Joy-Cons/gamepad e o toque na tela (botão do VR Box) viram as ações do app pelos perfis Touch e simple; os controles acompanham a cabeça (sem 6DoF). Suporta sessões OpenGL ES, camadas de projeção e quad, espaços VIEW/LOCAL/STAGE/LOCAL_FLOOR. Sem Vulkan.")
         Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.openxr.RuntimeTestActivity::class.java)) }) {
             Text("Testar o runtime HyperXR no visor (15 s)")
@@ -138,6 +138,9 @@ fun RuntimeSection(a: MainActivity) {
     }
     SectionCard("Runtime Broker do HyperXR", "Descobre runtimes OpenXR, mostra capacidades reais e evita sessões concorrentes. Não substitui o loader nem o broker da Khronos.") {
         KeyValue("Broker Khronos", if (brokerInstalled) "instalado" else "não encontrado (o loader usa o runtime do sistema, se houver)")
+        remember(a.refresh) { broker.brokerOwners() }.forEach { (auth, owner) ->
+            KeyValue(if (auth.contains("system")) "Broker do sistema" else "Broker instalável", owner ?: "livre")
+        }
         if (runtimes.isEmpty()) Note("Nenhum runtime OpenXR instalado. Para usar o Monado instale o APK do runtime e selecione-o no broker.", HxColors.warn)
         runtimes.forEach { r ->
             KeyValue(r.label, "${r.packageName} • ${r.source.name}${if (r.isMonado) " • Monado" else ""}${r.versionName?.let { " • v$it" } ?: ""}")
