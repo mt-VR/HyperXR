@@ -120,15 +120,15 @@ object QuestApk {
         fun wont(r: String) { verdict = Verdict.WONT_RUN; reasons += r }
         if (abi == null && abis.isNotEmpty()) wont("Bibliotecas só para ${abis.joinToString()}; este celular não as carrega")
         when (xrApi) {
-            XrApi.VRAPI -> wont("Usa a VrApi da Meta (SDK Mobile antigo), que só existe no sistema do Quest")
+            XrApi.VRAPI -> wont("Usa a VrApi da Meta (SDK Mobile antigo), que só existe no sistema do Quest; precisa do adaptador VrApi → OpenXR, que não vem no HyperXR")
             XrApi.NONE -> reasons += "Não usa OpenXR: abre como app Android comum (tela plana)"
             XrApi.CARDBOARD -> reasons += "App Cardboard: roda com o próprio renderizador estéreo"
             XrApi.OPENXR -> Unit
         }
         if (xrApi == XrApi.OPENXR) when (loader) {
             LoaderKind.KHRONOS_BROKER -> reasons += "Loader OpenXR padrão Khronos: encontra o runtime HyperXR pelo broker"
-            LoaderKind.META_FORWARD -> wont("Loader OpenXR da Meta que só procura o runtime do Quest")
-            LoaderKind.UNKNOWN -> reasons += "Loader OpenXR de origem desconhecida: pode não procurar runtimes fora do Quest"
+            LoaderKind.META_FORWARD -> wont("Loader OpenXR da Meta que só procura o runtime do Quest (\"Corrigir e instalar\" troca pelo loader da Khronos)")
+            LoaderKind.UNKNOWN -> reasons += "Loader OpenXR de origem desconhecida: \"Corrigir e instalar\" troca pelo loader da Khronos"
             LoaderKind.NONE -> reasons += "Sem loader OpenXR embutido (espera o do sistema)"
         }
         if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperXR aceita OpenGL ES")

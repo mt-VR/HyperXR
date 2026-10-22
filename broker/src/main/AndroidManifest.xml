@@ -18,6 +18,7 @@
             android:name=".SystemBrokerProvider"
             android:authorities="org.khronos.openxr.runtime_broker"
             android:exported="true"
+            android:grantUriPermissions="true"
             tools:ignore="ExportedContentProvider" />
     </application>
 </manifest>

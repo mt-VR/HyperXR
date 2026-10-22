@@ -28,8 +28,56 @@ object BinaryXml {
         0x01010003 to "name", 0x01010024 to "value", 0x01010025 to "resource", 0x0101028e to "required",
         0x01010281 to "glEsVersion", 0x0101020c to "minSdkVersion", 0x01010270 to "targetSdkVersion",
         0x0101021b to "versionCode", 0x0101021c to "versionName", 0x01010001 to "label", 0x01010002 to "icon",
-        0x01010010 to "exported", 0x0101000f to "debuggable", 0x0101057a to "extractNativeLibs",
+        0x01010010 to "exported", 0x0101000f to "debuggable", 0x010104ea to "extractNativeLibs",
+        0x01010591 to "isSplitRequired", 0x0101064e to "requiredSplitTypes",
     )
+
+    /** One attribute's typed value inside the file, for in-place edits ([dataOffset] = 32-bit data). */
+    class Slot(val element: String, val name: String, val rawString: String?, val dataType: Int, val data: Int, val dataOffset: Int, val elementIndex: Int)
+
+    /** Every attribute of every element, in document order (names recovered like [parse]). */
+    fun slots(bytes: ByteArray): List<Slot> {
+        val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        require(bytes.size >= 8 && (b.getShort(0).toInt() and 0xffff) == RES_XML) { "Não é um XML binário do Android" }
+        var strings: List<String> = emptyList()
+        var resIds = IntArray(0)
+        val out = ArrayList<Slot>()
+        var element = 0
+        var pos = b.getShort(2).toInt() and 0xffff
+        while (pos + 8 <= bytes.size) {
+            val type = b.getShort(pos).toInt() and 0xffff
+            val headerSize = b.getShort(pos + 2).toInt() and 0xffff
+            val size = b.getInt(pos + 4)
+            require(size >= 8 && pos + size <= bytes.size) { "Bloco corrompido em $pos" }
+            when (type) {
+                RES_STRING_POOL -> strings = readStringPool(b, pos)
+                RES_XML_RESOURCE_MAP -> resIds = IntArray((size - headerSize) / 4) { b.getInt(pos + headerSize + it * 4) }
+                RES_XML_START_ELEMENT -> {
+                    val ext = pos + headerSize
+                    val name = str(strings, b.getInt(ext + 4))
+                    val attrStart = b.getShort(ext + 8).toInt() and 0xffff
+                    val attrSize = b.getShort(ext + 10).toInt() and 0xffff
+                    val count = b.getShort(ext + 12).toInt() and 0xffff
+                    for (i in 0 until count) {
+                        val a = ext + attrStart + i * attrSize
+                        val nameIdx = b.getInt(a + 4)
+                        var an = str(strings, nameIdx)
+                        if (nameIdx in resIds.indices) ATTR_IDS[resIds[nameIdx]]?.let { an = it }
+                        val raw = b.getInt(a + 8)
+                        out += Slot(name, an, if (raw >= 0) str(strings, raw) else null, b.get(a + 15).toInt() and 0xff, b.getInt(a + 16), a + 16, element)
+                    }
+                    element++
+                }
+            }
+            pos += size
+        }
+        return out
+    }
+
+    const val TYPE_STRING = 0x03
+    const val TYPE_INT_DEC = 0x10
+    const val TYPE_INT_HEX = 0x11
+    const val TYPE_INT_BOOLEAN = 0x12
 
     fun parse(bytes: ByteArray): XmlElement {
         val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)

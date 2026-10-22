@@ -168,6 +168,7 @@
             android:name=".openxr.RuntimeConfigProvider"
             android:authorities="com.hyperxr.runtime"
             android:exported="true"
+            android:grantUriPermissions="true"
             tools:ignore="ExportedContentProvider" />
 
         <activity

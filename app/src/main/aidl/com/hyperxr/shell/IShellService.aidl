@@ -36,4 +36,7 @@ interface IShellService {
 
     // Copies [obb] to /sdcard/Android/obb/<pkg>/<name> (shell may write there); "" or the error.
     String copyObb(in ParcelFileDescriptor obb, String pkg, String name) = 11;
+
+    // `pm uninstall <pkg>` (an original signed with another key blocks installing the patched one).
+    String uninstall(String pkg) = 12;
 }

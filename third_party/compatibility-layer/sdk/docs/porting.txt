@@ -1,0 +1,44 @@
+Перенос игры на Compatibility-Layer
+=======================
+
+1. Проверьте сборку:
+
+     python3 sdk/tools/compatibility_layer_port.py игра.apk --check
+
+   Инструмент скажет, что нужно изменить, и остановится, если игра не подходит.
+
+2. Подготовьте APK:
+
+     python3 sdk/tools/compatibility_layer_port.py игра.apk -o игра-compatibility_layer.apk
+
+   Что он делает:
+     * targetSdk опускается до 29. Начиная с 30 Android скрывает от приложения чужие
+       провайдеры, и игра не находит Compatibility-Layer Runtime Broker. Именно из-за этого
+       непропатченная игра показывает чёрный экран.
+     * Снимается обязательность фич гарнитур (oculus.*, android.hardware.vr.*, picovr,
+       wave.feature) — иначе установщик отвечает «приложение несовместимо».
+     * Снимается флаг обязательных дополнительных APK у сборок из Google Play.
+     * libcompatibility_layer_loader.so заменяется на сборку Compatibility-Layer (--loader задаёт свой файл).
+     * APK выравнивается под страницы 16 КБ и подписывается (--keystore задаёт свой ключ).
+
+3. Установите результат и запускайте игру из Compatibility-Layer: он включает трекинг рук и
+   выбирает Compatibility-Layer-приложение.
+
+Чего инструмент не делает
+-------------------------
+* Не добавляет в манифест новые элементы: правятся только уже существующие значения.
+  Своей игре пропишите <queries> сразу, см. docs/manifest.txt.
+* Не обходит проверки покупки и не подменяет закрытый рантайм Meta. Сборки с
+  libvrapi.so или libOVRPlatformLoader.so отклоняются.
+* Не переделывает управление. Игра должна работать с профилем контроллеров Oculus Touch:
+  Compatibility-Layer выдаёт себя за него. Кнопки приходят с жестов рук или с Joy-Con.
+* Не трогает 32-битные сборки: нужен arm64-v8a.
+
+Если после переноса чёрный экран
+--------------------------------
+  adb logcat | grep -iE "compatibility-layer|monado"
+
+  «Failed to find provider info for org.khronos.compatibility_layer.runtime_broker» — манифест не
+  пропатчен или игру пересобрали заново.
+  «Could access neither the installable nor system runtime broker» — не установлен
+  Compatibility-Layer Runtime Broker либо в нём не выбран Monado.

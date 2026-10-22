@@ -31,6 +31,9 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
     @Volatile private var status: String? = null
     @Volatile private var busy = false
     @Volatile private var installed = false
+    /** What the HyperXR patch would change (null while analysing or for non-XR APKs). */
+    @Volatile private var plan: com.hyperxr.xrapps.PatchReport? = null
+    @Volatile private var mismatch = false
 
     init {
         val ext = FileKinds.extension(apk.name)
@@ -40,6 +43,7 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
                 val r = QuestApk.inspect(apk, Build.SUPPORTED_ABIS.toList())
                 obbs = QuestApk.findObbs(apk, r.packageName)
                 installed = isInstalled(r.packageName)
+                if (r.xrApi != XrApi.NONE || r.questApp) plan = runCatching { com.hyperxr.compat.CompatLayer.plan(app, apk) }.getOrNull()
                 report = r
             } catch (t: Throwable) { error = "Não foi possível ler o APK: ${t.message}" }
             dirty = true
@@ -74,23 +78,64 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
         for (reason in r.reasons.take(6)) c.paragraph("• $reason", 24f, XrTheme.text)
         if (obbs.isNotEmpty()) c.paragraph("OBB encontrado: ${obbs.joinToString { it.name }} (${FileKinds.formatSize(obbs.sumOf { it.length() })})", 24f, XrTheme.textDim)
         else if (r.questApp) c.paragraph("Nenhum OBB ao lado do APK (muitos jogos de Quest não usam).", 24f, XrTheme.textDim)
+        plan?.let { p ->
+            if (p.changes.isNotEmpty()) c.paragraph("Patch HyperXR: " + p.changes.joinToString("; "), 22f, XrTheme.accent2)
+            for (w in p.warnings) c.paragraph("! $w", 22f, Color.rgb(214, 160, 40))
+            for (b in p.blockers) c.paragraph("✕ $b", 22f, XrTheme.danger)
+        }
         status?.let { c.paragraph(it, 26f, XrTheme.accent2) }
         // actions
         val gap = 10f
         val y = c.h - 100f
         val shizuku = ShellBridge.state(app) == ShizukuState.READY
-        val label = (if (installed) "Reinstalar" else "Instalar") + (if (obbs.isNotEmpty()) " + OBB" else "") + if (shizuku) " (Shizuku)" else ""
-        c.button("install", label, c.pad, y, 420f, 80f, accent = true, enabled = !busy) { install(r, shizuku) }
-        if (installed && r.launchActivity != null) c.button("open", "Abrir", c.pad + 420f + gap, y, 200f, 80f, enabled = !busy) { launch(r) }
+        var x2 = c.pad
+        val p = plan
+        if (p != null && p.blockers.isEmpty() && p.changes.isNotEmpty()) {
+            c.button("patch", "Corrigir e instalar" + if (shizuku) " (Shizuku)" else "", x2, y, 440f, 80f, accent = true, enabled = !busy) { patchAndInstall(r, shizuku) }
+            x2 += 440f + gap
+        }
+        val label = (if (installed) "Reinstalar original" else "Instalar original") + (if (obbs.isNotEmpty()) " + OBB" else "")
+        c.button("install", label, x2, y, 360f, 80f, accent = p == null || p.changes.isEmpty(), enabled = !busy) { install(r, shizuku, apk) }
+        x2 += 360f + gap
+        if (mismatch) {
+            c.button("uninstall", "Desinstalar o atual", x2, y, 300f, 80f, enabled = !busy) { uninstallOriginal(r, shizuku) }
+            x2 += 300f + gap
+        }
+        if (installed && r.launchActivity != null) c.button("open", "Abrir", x2, y, 160f, 80f, enabled = !busy) { launch(r) }
     }
 
     private fun launch(r: ApkReport) = host.activity.runOnUiThread {
         try {
-            host.activity.startActivity(Intent(Intent.ACTION_MAIN).setClassName(r.packageName, r.launchActivity!!).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            com.hyperxr.compat.CompatLayer.launchGame(host.activity, r.packageName, r.launchActivity!!)
         } catch (t: Throwable) { status = "Não abriu: ${t.message}"; dirty = true }
     }
 
-    private fun install(r: ApkReport, shizuku: Boolean) {
+    /** Patches for the HyperXR runtime, signs with this phone's key and installs. */
+    private fun patchAndInstall(r: ApkReport, shizuku: Boolean) {
+        busy = true; dirty = true
+        mediaIo.execute {
+            val (rep, file) = try {
+                com.hyperxr.compat.CompatLayer.patchAndSign(app, apk) { status = it; dirty = true }
+            } catch (t: Throwable) { finish(r, "Falha no patch: ${t.message}"); return@execute }
+            if (file == null) { finish(r, rep.blockers.joinToString(" • ")); return@execute }
+            host.onGl { install(r, shizuku, file) }
+        }
+    }
+
+    private fun uninstallOriginal(r: ApkReport, shizuku: Boolean) {
+        if (shizuku) ShellBridge.withService(app) { svc ->
+            mediaIo.execute {
+                val err = svc?.uninstall(r.packageName) ?: "Shizuku não respondeu"
+                mismatch = false
+                finish(r, if (err.isEmpty()) "Original removido: instale de novo" else "Falha: $err")
+            }
+        } else host.activity.runOnUiThread {
+            host.activity.startActivity(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:${r.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            mismatch = false; status = "Confirme a remoção na tela do celular e instale de novo"; dirty = true
+        }
+    }
+
+    private fun install(r: ApkReport, shizuku: Boolean, apk: File) {
         busy = true; status = "Instalando..."; dirty = true
         if (shizuku) ShellBridge.withService(app) { svc ->
             mediaIo.execute {
@@ -106,15 +151,21 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
                             val e2 = ParcelFileDescriptor.open(o, ParcelFileDescriptor.MODE_READ_ONLY).use { svc.copyObb(it, r.packageName, name) }
                             msgs += if (e2.isEmpty()) "OBB copiado" else "OBB falhou: $e2"
                         }
-                    } else msgs += "Falha: $err"
+                    } else {
+                        // the installed copy is signed with another key (e.g. original vs patched)
+                        if (err.contains("UPDATE_INCOMPATIBLE") || err.contains("signatures do not match", true)) {
+                            mismatch = true
+                            msgs += "A versão instalada tem outra assinatura: desinstale-a primeiro (os dados do jogo serão apagados)"
+                        } else msgs += "Falha: $err"
+                    }
                 }
                 finish(r, msgs.joinToString(" • "))
             }
-        } else installWithSystem(r)
+        } else installWithSystem(r, apk)
     }
 
     /** No Shizuku: the system installer asks the user (on the phone screen), OBBs copied directly when Android allows. */
-    private fun installWithSystem(r: ApkReport) {
+    private fun installWithSystem(r: ApkReport, apk: File) {
         val act = host.activity
         if (!act.packageManager.canRequestPackageInstalls()) {
             act.runOnUiThread { act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${act.packageName}"))) }
@@ -136,7 +187,8 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
                     val uri = androidx.core.content.FileProvider.getUriForFile(act, "${act.packageName}.files", apk)
                     act.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
-                    msgs.add(0, "Confirme a instalação na tela do celular")
+                    msgs.add(0, "Confirme a instalação na tela do celular" + if (installed) " (se falhar, a versão instalada tem outra assinatura: desinstale-a)" else "")
+                    if (installed) mismatch = true
                 } catch (t: Throwable) { msgs.add(0, "Instalador do sistema indisponível: ${t.message}") }
                 finish(r, msgs.joinToString(" • "))
             }

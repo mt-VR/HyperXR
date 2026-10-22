@@ -1,0 +1,92 @@
+Переходник Gear VR -> Compatibility-Layer
+=============================
+
+Игры Gear VR рисуют через VrApi (libvrapi.so) из Oculus Mobile SDK. Этот libvrapi.so —
+только загрузчик: он ищет системный драйвер Oculus (com.oculus.systemdriver), который был
+лишь на телефонах Samsung, и без него игра не стартует. Переходник собирает свой
+libvrapi.so с теми же экспортами, что у оригинала, и выполняет вызовы через Compatibility-Layer на
+рантайме Compatibility-Layer (Monado). Проверки «это Samsung» в нём нет, vrapi_Initialize проходит
+на любом телефоне с CompatibilityLayer.
+
+Устройство
+----------
+src/xr_backend.{h,cpp}   Compatibility-Layer: instance, сессия на EGL-контексте игры, кадры, свопчейны,
+                         голова и глаза, контроллеры, перевод времени CLOCK_MONOTONIC <-> XrTime.
+src/vrapi_system.cpp     vrapi_Initialize/Shutdown, свойства и статусы системы, трекинг-пространства,
+                         Guardian, производительность, заглушки Vulkan и прочих экспортов.
+src/vrapi_frame.cpp      vrapi_EnterVrMode/LeaveVrMode, GetPredictedDisplayTime, GetPredictedTracking(2),
+                         WaitFrame/BeginFrame, SubmitFrame2 и старый SubmitFrame, PollEvent.
+src/vrapi_swapchain.cpp  vrapi_CreateTextureSwapChain(…4): GL-текстуры игры; при отправке кадра
+                         выбранная картинка копируется (glBlitFramebuffer) в свопчейн CompatibilityLayer.
+src/vrapi_input.cpp      контроллеры: в режиме Gear VR правый контроллер Compatibility-Layer = Gear VR Controller
+                         (курок, тачпад = стик + A, назад = B); в режиме Quest — два Touch.
+
+Экспорты сверены с оригинальным libvrapi.so 1.50 (arm64): все 104 символа на месте.
+
+Какое устройство видит игра, задаётся на телефоне:
+  adb shell setprop debug.compatibility_layer.vrapi.product gearvr   (по умолчанию, Galaxy S8 + Gear VR)
+  adb shell setprop debug.compatibility_layer.vrapi.product go
+  adb shell setprop debug.compatibility_layer.vrapi.product quest
+Логи: adb logcat -s Compatibility-Layer-VrApi Compatibility-Layer-GearVR
+
+Сборка
+------
+  cmake -S gearvr-shim -B gearvr-shim/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/<версия>/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26
+  cmake --build gearvr-shim/build
+Для 32-битных игр то же с -B gearvr-shim/build32 -DANDROID_ABI=armeabi-v7a.
+Результат: gearvr-shim/build/assets/libvrapi.so и libvrapi32.so (оттуда их берёт приложение Compatibility-Layer).
+
+Перенос игры:
+  python3 sdk/tools/compatibility_layer_port.py игра.apk
+Инструмент заменит lib/arm64-v8a/libvrapi.so переходником, добавит libcompatibility_layer_loader.so,
+поправит манифест и подпишет APK.
+
+Заголовки VrApi
+---------------
+Копия VrApi из Oculus Mobile SDK 1.50 лежит в third_party/VrApi (Include, Libs, Projects).
+Папка в .gitignore и в репозиторий не попадает: SDK распространяется по лицензии Oculus,
+выкладывать его нельзя. Без неё сборка остановится; другой путь: -DVRAPI_ROOT=<sdk>/VrApi.
+
+Не проверено и не готово
+------------------------
+* На телефоне с настоящей игрой переходник ещё не запускался. Собирается без предупреждений,
+  но цвет, тайминги кадров и поведение Unity/Unreal нужно проверять на устройстве.
+* 32-битные игры (armeabi-v7a, armeabi) собираются отдельной копией переходника
+  (libvrapi32.so) с официальным 32-битным Compatibility-Layer loader Khronos 1.1.63
+  (app/src/main/assets/libcompatibility_layer_loader32.so). На устройстве 32-битный режим не проверен.
+* Только OpenGL ES. Vulkan-игры vrapi_Initialize отклоняет.
+* Из слоёв рисуется только проекционный (Projection2 и слои старого SubmitFrame).
+  Cylinder, Cube, Equirect, LoadingIcon, FishEye пропускаются: пропадут экраны загрузки,
+  оверлеи OVROverlay, 360-фоны.
+* Видеосвопчейны на Android Surface (vrapi_CreateAndroidSurfaceSwapChain) не поддерживаются:
+  плееры 360-видео не покажут картинку.
+* Структуры взяты из VrApi 1.50. Игры на очень старых SDK (2015–2016) могли собираться
+  с другой раскладкой структур и могут падать.
+* Тачпад и кнопка «назад» на самом шлеме Gear VR приходили в игру как события Android
+  (клавиши и касания), а не через VrApi. Их переходник не даёт.
+* Отслеживания рук через vrapi_GetHandPose нет (руки Compatibility-Layer приходят как контроллеры),
+  вибрации нет, пол и Guardian не отслеживаются (пол считается на 1.6 м ниже глаз).
+* Если в GL-драйвере нет GL_EXT_sRGB_write_control, 8-битные кадры могут выглядеть
+  светлее, чем на Gear VR.
+
+Чего переходник делать не будет
+-------------------------------
+Обходить проверку покупки Oculus Platform (libovrplatformloader.so). Такие игры
+Compatibility-Layer всё равно готовит и ставит, но библиотеку проверки не меняет: если игра без
+покупки не работает, она не запустится; если проверка ни на что не влияет, играть можно.
+
+Драйвер без патча (com.oculus.systemdriver)
+------------------------------------------
+libvrapi.so внутри игры — только загрузчик: vrapi_Initialize открывает пакет
+com.oculus.systemdriver, вызывает DriverLoader.load64 / load64Ext (в 32-битных играх load32 /
+load32Ext) с (Context игры, Context драйвера, 5 int[, long]) и получает адрес функции
+«функция по имени». Ею загрузчик по именам (vrapi_Initialize, vrapi_SubmitFrame2, … — те же, что
+экспорты) заполняет свою таблицу; подпись пакета не проверяется.
+Цель compatibility_layer_vrapi собирает тот же VrApi + src/vrapi_driver.cpp (get_proc и JNI procAddress),
+vrapi-driver/build_driver_apk.py упаковывает его с загрузчиком Compatibility-Layer (arm64 и arm) в
+Compatibility-Layer VrApi Driver → vrapi-driver/compatibility-layer-vrapi-driver.apk.
+Игры с targetSdk 30+ не видят чужие пакеты: Compatibility-Layer запускает их через GameLauncher рантайма,
+тот — через GameLauncher драйвера, и игра получает URI обоих пакетов, что делает их видимыми.
+Проверено с оригинальным загрузчиком 1.1.50 из SDK: arm64 и armeabi-v7a — vrapi_Initialize = 0.

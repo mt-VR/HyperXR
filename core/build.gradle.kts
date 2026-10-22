@@ -15,6 +15,8 @@ kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 dependencies {
     api(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
+    // the app signs patched APKs with apksig; the tests check the result verifies
+    testImplementation("com.android.tools.build:apksig:8.13.2")
 }
 
 /** `./gradlew :core:hyperx --args="inspect file.hyperx"` runs the SDK command line tool. */

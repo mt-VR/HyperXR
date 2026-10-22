@@ -61,7 +61,7 @@ android {
     // Compressed native libs: GeckoView's libxul alone is ~150 MB uncompressed.
     packaging { jniLibs { useLegacyPackaging = true } }
     // MediaPipe memory-maps the model from the APK: it must be stored uncompressed.
-    androidResources { noCompress += "task" }
+    androidResources { noCompress += listOf("task", "so") }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/hyperx-assets"))
     testOptions { unitTests.isReturnDefaultValues = true }
@@ -83,6 +83,24 @@ val packHyperx = tasks.register<JavaExec>("packHyperx") {
 }
 tasks.named("preBuild") { dependsOn(packHyperx) }
 
+/**
+ * Library the on-device patcher puts into OpenXR / Quest games: the Khronos OpenXR loader, from
+ * the same Maven artifact HyperXR links, for 64- and 32-bit ARM. (The VrApi adapter is not
+ * bundled: only its sources are in third_party/compatibility-layer, see README there.)
+ */
+val compatAar: Configuration by configurations.creating
+dependencies { compatAar("org.khronos.openxr:openxr_loader_for_android:${libs.versions.openxrLoader.get()}@aar") }
+val compatAssets = tasks.register<Sync>("compatAssets") {
+    group = "hyperxr"
+    from(compatAar.elements.map { files -> files.map { zipTree(it) } }) {
+        include("jni/arm64-v8a/libopenxr_loader.so", "jni/armeabi-v7a/libopenxr_loader.so")
+        eachFile { path = "compat/" + path.removePrefix("jni/") }
+    }
+    includeEmptyDirs = false
+    into(layout.buildDirectory.dir("generated/compat-assets"))
+}
+android.sourceSets["main"].assets.srcDir(compatAssets)
+
 dependencies {
     implementation(project(":core"))
     implementation(platform(libs.compose.bom))
@@ -98,6 +116,8 @@ dependencies {
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
     implementation(libs.openxr.loader)
+    // signs games patched on the phone (APK Signature Scheme v1-v3)
+    implementation("com.android.tools.build:apksig:8.13.2")
     implementation(libs.webkit)
     // Browser engine (arm64 only; other ABIs fall back to the system WebView at runtime).
     implementation(libs.geckoview)

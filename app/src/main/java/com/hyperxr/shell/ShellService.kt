@@ -173,6 +173,12 @@ class ShellService() : IShellService.Stub() {
         } catch (t: Throwable) { "Error: ${t.message}".also { lastError = it } }
     }
 
+    override fun uninstall(pkg: String): String {
+        if (!pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$"))) return "pacote inválido"
+        val out = run(listOf("pm", "uninstall", pkg)).trim()
+        return if (out.contains("Success")) "" else out.also { lastError = it }
+    }
+
     override fun releaseDisplay(displayId: Int) {
         displays.remove(displayId)?.release()
     }

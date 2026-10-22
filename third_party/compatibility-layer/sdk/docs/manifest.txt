@@ -1,0 +1,46 @@
+Манифест своей игры
+===================
+
+Чтобы игра сразу работала на Compatibility-Layer и её не пришлось патчить, в AndroidManifest.xml нужно:
+
+  <uses-permission android:name="org.khronos.compatibility_layer.permission.COMPATIBILITY_LAYER" />
+  <uses-permission android:name="org.khronos.compatibility_layer.permission.COMPATIBILITY_LAYER_SYSTEM" />
+
+  <queries>
+      <provider android:authorities="org.khronos.compatibility_layer.runtime_broker;org.khronos.compatibility_layer.system_runtime_broker" />
+      <intent>
+          <action android:name="org.khronos.compatibility_layer.CompatibilityLayerRuntimeService" />
+      </intent>
+      <intent>
+          <action android:name="org.khronos.compatibility_layer.CompatibilityLayerApiLayerService" />
+      </intent>
+  </queries>
+
+Без блока <queries> Android, начиная с targetSdk 30, скрывает брокер, игра не находит
+рантайм и показывает чёрный экран.
+
+Чужой сборке (например, из Quest) всё это дописывает сам Compatibility-Layer при патче игры:
+разрешения COMPATIBILITY-LAYER и COMPATIBILITY_LAYER_SYSTEM, блок <queries> с брокером, INTERNET для потока
+трекинга и категорию IMMERSIVE_HMD на экране запуска. Своей игре пропишите их сразу —
+патчить её тогда не придётся.
+
+Главная активность должна быть видна как VR-приложение:
+
+  <category android:name="org.khronos.compatibility_layer.intent.category.IMMERSIVE_HMD" />
+
+Фичи гарнитур помечайте необязательными, иначе APK не установится на телефон:
+
+  <uses-feature android:name="android.hardware.vr.headtracking" android:required="false" />
+
+Собирайте под arm64-v8a. 32-битные сборки Compatibility-Layer не запускает.
+
+Управление: Compatibility-Layer выдаёт себя за контроллеры Oculus Touch, так что используйте
+профиль /interaction_profiles/oculus/touch_controller. Стика нет: его значения всегда
+нулевые, кроме жеста «оба кулака». Сырые данные рук — см. docs/protocol.txt.
+
+Свой трекинг рук: если игра сама отслеживает руки камерой, объявите это в <application>,
+и Compatibility-Layer при запуске игры не включит свой трекинг, а отдаст ей камеру:
+
+  <meta-data android:name="com.compatibility_layer.OWN_HAND_TRACKING" android:value="true" />
+
+Руки в Compatibility-Layer (контроллеры Touch) тогда не приходят — игра берёт их из своего трекинга.

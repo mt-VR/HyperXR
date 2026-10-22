@@ -72,6 +72,11 @@ class XrAppDiscovery(private val context: Context) {
     }
 
     fun launch(app: InstalledXrApp): Result<Unit> = runCatching {
+        // OpenXR / Quest games get the visibility grants that let them see the broker and runtime
+        if (app.entry.category == AppCategory.OPENXR) {
+            com.hyperxr.compat.CompatLayer.launchGame(context, app.packageName, app.activity)
+            return@runCatching
+        }
         val intent = Intent(Intent.ACTION_MAIN)
             .setClassName(app.packageName, app.activity)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

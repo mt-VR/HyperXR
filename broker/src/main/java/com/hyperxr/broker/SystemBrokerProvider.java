@@ -37,7 +37,7 @@ public final class SystemBrokerProvider extends ContentProvider {
             String libDir = runtimeLibDir();
             // only OpenXR 1.x, and only the ABI the runtime was installed for (a 32-bit game
             // cannot load a 64-bit library)
-            if (libDir != null && seg.get(1).equals("1") && seg.get(3).equals(abiOf(libDir)) && new File(libDir, SO_NAME).isFile()) {
+            if (libDir != null && seg.get(1).equals("1") && sameAbi(seg.get(3), abiOf(libDir)) && new File(libDir, SO_NAME).isFile()) {
                 c.addRow(new Object[] {0, RUNTIME_PACKAGE, libDir, SO_NAME, 0});
             }
             return c;
@@ -53,6 +53,12 @@ public final class SystemBrokerProvider extends ContentProvider {
         } catch (Exception e) {
             return null; // HyperXR not installed
         }
+    }
+
+    /** The Khronos loader names 32-bit ARM "armeabi-v7a" or "armeabi-v7l" depending on its version. */
+    private static boolean sameAbi(String asked, String installed) {
+        if (asked.startsWith("armeabi") && installed.startsWith("armeabi")) return true;
+        return asked.equals(installed);
     }
 
     /** The package manager installs native libraries to .../lib/(arm64|arm|x86_64|x86). */

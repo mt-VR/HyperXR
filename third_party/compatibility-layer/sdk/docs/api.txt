@@ -1,0 +1,34 @@
+Compatibility-Layer Developer API
+=====================
+
+Compatibility-Layer-приложение строится под Compatibility-Layer, а не под Quest. Основной графический API — Compatibility-Layer;
+дополнительный Compatibility-Layer Input API сообщает сырые жесты и Joy-Con.
+
+1. Compatibility-Layer
+   Используйте стандартный Android Compatibility-Layer loader и профили Oculus Touch/Khronos Simple Controller.
+   Compatibility-Layer Runtime предоставляет голову, левую/правую руку, позы, trigger, squeeze, A/X, B/Y,
+   menu и стики. В манифест скопируйте обязательные элементы из manifest.txt.
+
+2. Compatibility-Layer Input API
+   Транспорт: UDP 127.0.0.1:42425, ASCII, версия пакета PH5, до 60 обновлений/с.
+   Готовые клиенты: src/main/kotlin/com/compatibility-layer/sdk/CompatibilityLayerInput.kt для Kotlin/Java и
+   runtime/compatibility_layer_input.h для C/C++. Полная схема находится в protocol.txt.
+
+   В PH6 каждая рука также содержит thumbCurl/indexCurl/middleCurl/ringCurl/pinkyCurl
+   (в C: thumb_curl/index_curl/middle_curl/ring_curl/pinky_curl), значения 0..1. Это позволяет
+   приложению строить собственную позу пальцев без выбора одного фиксированного жеста.
+
+3. Жизненный цикл
+   Пользователь запускает игру из CompatibilityLayer. Compatibility-Layer включает камеру и поток API до старта Activity.
+   Игра открывает порт 42425 неблокирующе, всегда берёт последний пакет и продолжает работать через
+   Compatibility-Layer, если дополнительный поток временно недоступен.
+
+4. Совместимость
+   Собирайте arm64-v8a, не требуйте конкретную модель гарнитуры, не встраивайте проверку магазина
+   Quest/Pico. Проверяйте 3DoF и 6DoF по флагу COMPATIBILITY_LAYER_FLAG_SIX_DOF и давайте пользователю играть
+   в обоих режимах.
+
+5. Публикация
+   Выпустите APK или .pxr и JSON магазина с name, url, icon, description и size. Compatibility-Layer скачает,
+   подготовит и передаст APK системному установщику. Android требует установку пакета; запуск APK
+   как файла внутри другого приложения без контейнера невозможен.
