@@ -130,8 +130,8 @@ fun RuntimeSection(a: MainActivity) {
     var probe by remember { mutableStateOf<RuntimeProbe?>(broker.lastProbe) }
     var probing by remember { mutableStateOf(false) }
     SectionCard("HyperXR Runtime (OpenXR próprio)", "Runtime OpenXR do próprio HyperXR: apps OpenXR rodam no VR Box com 3DoF, lente corrigida e timewarp.") {
-        Note("Para apps OpenXR usarem este runtime, instale o \"OpenXR Runtime Broker\" da Khronos e escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
-        Note("Suporta: sessões OpenGL ES, camadas de projeção e quad, espaços VIEW/LOCAL/STAGE/LOCAL_FLOOR, ações (sem controles: o runtime roda dentro do app e não recebe os Joy-Cons). Sem Vulkan nem 6DoF.")
+        Note("Apps OpenXR encontram este runtime sozinhos: o HyperXR responde como broker do sistema. Se o \"OpenXR Runtime Broker\" da Khronos estiver instalado, ele tem prioridade: escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
+        Note("Controles: Joy-Cons/gamepad e o toque na tela (botão do VR Box) viram as ações do app pelos perfis Touch e simple; os controles acompanham a cabeça (sem 6DoF). Suporta sessões OpenGL ES, camadas de projeção e quad, espaços VIEW/LOCAL/STAGE/LOCAL_FLOOR. Sem Vulkan.")
         Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.openxr.RuntimeTestActivity::class.java)) }) {
             Text("Testar o runtime HyperXR no visor (15 s)")
         }

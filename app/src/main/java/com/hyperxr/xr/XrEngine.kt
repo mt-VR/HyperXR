@@ -188,7 +188,13 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             }
             XrMode.MIXED_REALITY_CAMERA -> startCameraPassthrough()
             XrMode.OPENXR_RUNTIME -> {
-                if (settings.runtime.allowOpenXrSession) {
+                // The loader would pick HyperXR's own runtime when no other is active (HyperXR is the
+                // system broker): rendering HyperXR through itself gains nothing, so the built-in
+                // renderer is used instead.
+                val active = app.runtimeBroker.discover().firstOrNull { it.source == com.hyperxr.runtimebroker.RuntimeSource.BROKER_ACTIVE }
+                val selfOnly = active == null || active.packageName == activity.packageName
+                if (selfOnly) Diagnostics.log("OpenXR mode: no external runtime active; using the built-in renderer")
+                if (settings.runtime.allowOpenXrSession && !selfOnly) {
                     val err = arrayOfNulls<String>(1)
                     openXrSession = OpenXrNative.nativeCreateSession(activity, err)
                     if (openXrSession == 0L) Diagnostics.log("OpenXR session failed: ${err[0]}; using VR SBS")

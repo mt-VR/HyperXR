@@ -87,6 +87,22 @@ struct HxConfig {
     int lensDistortion;  // 0/1
 };
 
+/**
+ * Controller input as the runtime sees it inside the app: a gamepad / Joy-Cons (Android input
+ * events captured by the runtime's window) and the screen touch (the VR Box button).
+ */
+enum : uint32_t {
+    HX_BTN_A = 1u << 0, HX_BTN_B = 1u << 1, HX_BTN_X = 1u << 2, HX_BTN_Y = 1u << 3,
+    HX_BTN_MENU = 1u << 4, HX_BTN_SYSTEM = 1u << 5, HX_BTN_THUMB_L = 1u << 6, HX_BTN_THUMB_R = 1u << 7,
+};
+struct HxInput {
+    uint32_t buttons;     // HX_BTN_*
+    float stick[2][2];    // [left/right][x, y], y up
+    float trigger[2];
+    float squeeze[2];
+    int touch;            // screen touched
+};
+
 struct HxSwapchainGfx;  // platform swapchain data
 struct HxSessionGfx;    // platform compositor data
 
@@ -121,6 +137,8 @@ void trackerStop();
 /** Head pose in stage space (floor at y = 0) predicted for [timeNs]; returns false when untracked. */
 bool headPose(int64_t timeNs, const HxConfig& cfg, XrPosef* out);
 void recenter();
+/** Latest controller input (zeros when nothing is connected). */
+void readInput(HxInput* out);
 
 // Graphics. All return XrResult; the host build only supports headless sessions.
 XrResult gfxCreateSession(const void* binding, HxSessionGfx** out);

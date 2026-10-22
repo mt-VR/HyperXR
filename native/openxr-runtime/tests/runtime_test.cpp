@@ -10,6 +10,7 @@
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
+extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch);
 
 static int gFailures = 0;
 static int gChecks = 0;
@@ -402,7 +403,7 @@ static void testActions(XrInstance inst, XrSystemId sys) {
 
     XrInteractionProfileState ips{XR_TYPE_INTERACTION_PROFILE_STATE};
     CHECK_RESULT(xrGetCurrentInteractionProfile(s, right, &ips), XR_SUCCESS);
-    CHECK(ips.interactionProfile == XR_NULL_PATH);
+    CHECK(ips.interactionProfile == profile);  // the only profile the app suggested
 
     XrActionSpaceCreateInfo asci{XR_TYPE_ACTION_SPACE_CREATE_INFO};
     asci.action = select;
@@ -413,6 +414,139 @@ static void testActions(XrInstance inst, XrSystemId sys) {
     CHECK_RESULT(xrCreateActionSpace(s, &asci, &sp), XR_SUCCESS);
 
     CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+}
+
+/** Gamepad/touch input reaching the app's actions through the Touch controller profile. */
+static void testActionInput(XrInstance inst, XrSystemId sys) {
+    LOAD(inst, xrCreateActionSet); LOAD(inst, xrCreateAction); LOAD(inst, xrStringToPath);
+    LOAD(inst, xrSuggestInteractionProfileBindings); LOAD(inst, xrAttachSessionActionSets); LOAD(inst, xrSyncActions);
+    LOAD(inst, xrGetActionStateBoolean); LOAD(inst, xrGetActionStateFloat); LOAD(inst, xrGetActionStateVector2f);
+    LOAD(inst, xrGetActionStatePose); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrBeginSession);
+    LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame); LOAD(inst, xrGetCurrentInteractionProfile);
+    LOAD(inst, xrCreateActionSpace); LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrLocateSpace); LOAD(inst, xrDestroyActionSet);
+    LOAD(inst, xrEnumerateBoundSourcesForAction);
+
+    XrActionSetCreateInfo sci{XR_TYPE_ACTION_SET_CREATE_INFO};
+    strcpy(sci.actionSetName, "game"); strcpy(sci.localizedActionSetName, "Game");
+    XrActionSet set;
+    CHECK_RESULT(xrCreateActionSet(inst, &sci, &set), XR_SUCCESS);
+    XrPath hands[2], touch, simple;
+    xrStringToPath(inst, "/user/hand/left", &hands[0]);
+    xrStringToPath(inst, "/user/hand/right", &hands[1]);
+    xrStringToPath(inst, "/interaction_profiles/oculus/touch_controller", &touch);
+    xrStringToPath(inst, "/interaction_profiles/khr/simple_controller", &simple);
+    auto make = [&](const char* name, XrActionType t) {
+        XrActionCreateInfo aci{XR_TYPE_ACTION_CREATE_INFO};
+        strcpy(aci.actionName, name); strcpy(aci.localizedActionName, name);
+        aci.actionType = t; aci.countSubactionPaths = 2; aci.subactionPaths = hands;
+        XrAction a = XR_NULL_HANDLE;
+        CHECK_RESULT(xrCreateAction(set, &aci, &a), XR_SUCCESS);
+        return a;
+    };
+    XrAction fire = make("fire", XR_ACTION_TYPE_FLOAT_INPUT);
+    XrAction jump = make("jump", XR_ACTION_TYPE_BOOLEAN_INPUT);
+    XrAction move = make("move", XR_ACTION_TYPE_VECTOR2F_INPUT);
+    XrAction aim = make("aim", XR_ACTION_TYPE_POSE_INPUT);
+    auto path = [&](const char* p) { XrPath x; xrStringToPath(inst, p, &x); return x; };
+    XrActionSuggestedBinding tb[] = {
+        {fire, path("/user/hand/right/input/trigger/value")}, {fire, path("/user/hand/left/input/trigger/value")},
+        {jump, path("/user/hand/right/input/a/click")}, {move, path("/user/hand/left/input/thumbstick")},
+        {aim, path("/user/hand/right/input/aim/pose")}, {aim, path("/user/hand/left/input/aim/pose")},
+    };
+    XrInteractionProfileSuggestedBinding ipsb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    ipsb.interactionProfile = touch; ipsb.countSuggestedBindings = 6; ipsb.suggestedBindings = tb;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+    XrActionSuggestedBinding sbind[] = {{jump, path("/user/hand/right/input/select/click")}};
+    ipsb.interactionProfile = simple; ipsb.countSuggestedBindings = 1; ipsb.suggestedBindings = sbind;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    ai.countActionSets = 1; ai.actionSets = &set;
+    CHECK_RESULT(xrAttachSessionActionSets(s, &ai), XR_SUCCESS);
+    XrInteractionProfileState ips{XR_TYPE_INTERACTION_PROFILE_STATE};
+    CHECK_RESULT(xrGetCurrentInteractionProfile(s, hands[1], &ips), XR_SUCCESS);
+    CHECK(ips.interactionProfile == touch);  // Touch preferred over simple
+
+    // run until focused
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    for (int i = 0; i < 3; i++) {
+        xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr);
+        ei.displayTime = fs.predictedDisplayTime; xrEndFrame(s, &ei);
+    }
+    XrActiveActionSet active{set, XR_NULL_PATH};
+    XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};
+    si.countActiveActionSets = 1; si.activeActionSets = &active;
+
+    hxTestSetInput(0, 0.5f, -1.0f, 0, 0, 0.25f, 0.0f, 0);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+    XrActionStateFloat f{XR_TYPE_ACTION_STATE_FLOAT};
+    gi.action = fire;
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(f.isActive && NEAR(f.currentState, 0.25, 1e-6));  // any hand: the largest value
+    gi.subactionPath = hands[1];
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(f.isActive && f.currentState == 0);
+    XrActionStateVector2f v{XR_TYPE_ACTION_STATE_VECTOR2F};
+    gi.action = move; gi.subactionPath = hands[0];
+    CHECK_RESULT(xrGetActionStateVector2f(s, &gi, &v), XR_SUCCESS);
+    CHECK(v.isActive && NEAR(v.currentState.x, 0.5, 1e-6) && NEAR(v.currentState.y, -1.0, 1e-6));
+    gi.subactionPath = hands[1];  // nothing bound on the right stick
+    CHECK_RESULT(xrGetActionStateVector2f(s, &gi, &v), XR_SUCCESS);
+    CHECK(!v.isActive);
+
+    // A pressed, then the screen touch pulls the right trigger
+    XrActionStateBoolean b{XR_TYPE_ACTION_STATE_BOOLEAN};
+    gi.action = jump; gi.subactionPath = XR_NULL_PATH;
+    CHECK_RESULT(xrGetActionStateBoolean(s, &gi, &b), XR_SUCCESS);
+    CHECK(b.isActive && !b.currentState && !b.changedSinceLastSync);
+    hxTestSetInput(1u /*A*/, 0, 0, 0, 0, 0, 0, 1);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    CHECK_RESULT(xrGetActionStateBoolean(s, &gi, &b), XR_SUCCESS);
+    CHECK(b.currentState && b.changedSinceLastSync && b.lastChangeTime > 0);
+    gi.action = fire; gi.subactionPath = hands[1];
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(NEAR(f.currentState, 1.0, 1e-6) && f.changedSinceLastSync);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(!f.changedSinceLastSync);
+
+    uint32_t nsrc = 0;
+    XrBoundSourcesForActionEnumerateInfo bsi{XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO};
+    bsi.action = fire;
+    CHECK_RESULT(xrEnumerateBoundSourcesForAction(s, &bsi, 0, &nsrc, nullptr), XR_SUCCESS);
+    CHECK(nsrc == 2);
+
+    // the aim pose rides with the head, right hand to the right and below the eyes
+    XrActionStatePose ps{XR_TYPE_ACTION_STATE_POSE};
+    gi.action = aim; gi.subactionPath = hands[1];
+    CHECK_RESULT(xrGetActionStatePose(s, &gi, &ps), XR_SUCCESS);
+    CHECK(ps.isActive);
+    XrActionSpaceCreateInfo asci{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    asci.action = aim; asci.subactionPath = hands[1]; asci.poseInActionSpace.orientation.w = 1;
+    XrSpace aimSpace, view;
+    CHECK_RESULT(xrCreateActionSpace(s, &asci, &aimSpace), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW; rci.poseInReferenceSpace.orientation.w = 1;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &view), XR_SUCCESS);
+    hxTestSetHead(0, 0, 0, 1, 1);
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    CHECK_RESULT(xrLocateSpace(aimSpace, view, fs.predictedDisplayTime, &loc), XR_SUCCESS);
+    CHECK((loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) && (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT));
+    CHECK(loc.pose.position.x > 0.1f && loc.pose.position.y < -0.2f && loc.pose.position.z < -0.2f);
+
+    hxTestSetInput(0, 0, 0, 0, 0, 0, 0, 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyActionSet(set), XR_SUCCESS);
 }
 
 int main() {
@@ -433,6 +567,7 @@ int main() {
     testSession(inst, sys);
     testSpacesAndViews(inst, sys);
     testActions(inst, sys);
+    testActionInput(inst, sys);
     LOAD(inst, xrDestroyInstance);
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
     printf("%d checks, %d failures\n", gChecks, gFailures);

@@ -7,6 +7,14 @@
 namespace {
 XrQuaternionf gHead = {0, 0, 0, 1};
 bool gTracked = true;
+HxInput gInput = {};
+}
+
+extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch) {
+    gInput.buttons = buttons;
+    gInput.stick[0][0] = lx; gInput.stick[0][1] = ly; gInput.stick[1][0] = rx; gInput.stick[1][1] = ry;
+    gInput.trigger[0] = lt; gInput.trigger[1] = rt;
+    gInput.touch = touch;
 }
 
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked) {
@@ -34,6 +42,7 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
     return true;
 }
 void recenter() {}
+void readInput(HxInput* out) { *out = gInput; }
 XrResult gfxCreateSession(const void*, HxSessionGfx**) { return XR_ERROR_GRAPHICS_DEVICE_INVALID; }
 void gfxDestroySession(HxSessionGfx*) {}
 XrResult gfxEnumerateFormats(int64_t*, uint32_t, uint32_t* count) { *count = 0; return XR_SUCCESS; }

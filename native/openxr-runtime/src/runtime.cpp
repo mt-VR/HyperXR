@@ -1,9 +1,9 @@
 // HyperXR OpenXR runtime: instance, system, session, spaces, swapchains, frame loop and actions.
 //
 // Scope (honest): a single 3DoF head-mounted system (phone in a VR Box viewer), stereo views,
-// OpenGL ES graphics or headless sessions, projection + quad layers. Actions are fully validated
-// but report no input sources (isActive = false): the runtime runs inside the app's process and
-// cannot see controllers that the app itself does not receive.
+// OpenGL ES graphics or headless sessions, projection + quad layers. Input: a gamepad / Joy-Cons
+// and the screen touch, captured by the runtime's window inside the app, drive the app's actions
+// through the Touch or simple controller profile; controller poses follow the head (no 6DoF).
 #include "hx_runtime.h"
 
 #include <openxr/openxr_loader_negotiation.h>
@@ -33,6 +33,7 @@ constexpr int MAX_PATHS = 512;
 constexpr int MAX_PATH_LEN = XR_MAX_PATH_LENGTH;
 constexpr int MAX_IMAGES = 3;
 constexpr int MAX_LAYERS = 16;
+constexpr int MAX_BINDINGS = 512;
 
 struct Instance;
 struct Session;
@@ -52,9 +53,13 @@ struct Instance {
     Session* session;
     int actionSets;  // live action sets
     HxConfig cfg;
+    struct Binding { XrPath profile; void* action; XrPath path; } bindings[MAX_BINDINGS];
+    int bindingCount;
 };
 
 struct ActionSet;
+/** Value of an action for one slot: left hand, right hand, or any (no subaction path). */
+struct ActionValue { float v[2]; bool active; bool changed; XrTime lastChange; };
 struct Action {
     uint32_t magic;
     ActionSet* set;
@@ -62,6 +67,7 @@ struct Action {
     char name[XR_MAX_ACTION_NAME_SIZE];
     XrPath subactions[8];
     uint32_t subactionCount;
+    ActionValue state[3];
 };
 
 struct ActionSet {
@@ -96,6 +102,8 @@ struct Session {
     XrPosef lastHead;
     int liveSwapchains;
     int liveSpaces;
+    XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
+    HxInput input;           // snapshot taken by xrSyncActions
 };
 
 struct Space {
@@ -103,6 +111,7 @@ struct Space {
     Session* session;
     XrReferenceSpaceType type;  // 0 for action spaces
     Action* action;
+    XrPath subaction;
     XrPosef offset;             // pose in the reference / action space
 };
 
@@ -170,6 +179,16 @@ void* takeChild(void* owner, uint32_t magic) {
     return nullptr;
 }
 
+/** Calls [fn] for every live child of [owner] with [magic]. */
+template <typename F> void forEachChild(void* owner, uint32_t magic, F fn) {
+    void* found[MAX_HANDLES];
+    int n = 0;
+    pthread_mutex_lock(&gHandleLock);
+    for (auto& e : gHandles) if (e.ptr && e.owner == owner && e.magic == magic) found[n++] = e.ptr;
+    pthread_mutex_unlock(&gHandleLock);
+    for (int i = 0; i < n; i++) fn(found[i]);
+}
+
 template <typename T> T* alloc(uint32_t magic, void* owner = nullptr) {
     T* p = static_cast<T*>(calloc(1, sizeof(T)));
     if (!p) return nullptr;
@@ -196,6 +215,20 @@ Space* asSpace(XrSpace h) { return asObj<Space>(reinterpret_cast<uint64_t>(h), M
 Swapchain* asSwapchain(XrSwapchain h) { return asObj<Swapchain>(reinterpret_cast<uint64_t>(h), MAGIC_SWAPCHAIN); }
 ActionSet* asActionSet(XrActionSet h) { return asObj<ActionSet>(reinterpret_cast<uint64_t>(h), MAGIC_ACTIONSET); }
 Action* asAction(XrAction h) { return asObj<Action>(reinterpret_cast<uint64_t>(h), MAGIC_ACTION); }
+
+bool actionAttachedTo(Session* s, Action* a) {
+    for (uint32_t i = 0; i < s->attachedCount; i++) if (s->attachedSets[i] == a->set) return true;
+    return false;
+}
+
+/** Forgets suggested bindings of a destroyed action (its memory may be reused by a new one). */
+void dropBindings(Instance* inst, const void* action) {
+    pthread_mutex_lock(&inst->lock);
+    int kept = 0;
+    for (int i = 0; i < inst->bindingCount; i++) if (inst->bindings[i].action != action) inst->bindings[kept++] = inst->bindings[i];
+    inst->bindingCount = kept;
+    pthread_mutex_unlock(&inst->lock);
+}
 
 void copyStr(char* dst, size_t cap, const char* src) {
     size_t n = strlen(src);
@@ -281,6 +314,149 @@ bool validName(const char* s, size_t cap) {
     return true;
 }
 
+
+// ------------------------------------------------------------------ input sources
+// Profiles the app may have suggested bindings for, in order of preference. Every one is driven
+// by the same physical input (gamepad / Joy-Cons + screen touch).
+const char* const kProfiles[] = {
+    "/interaction_profiles/oculus/touch_controller",
+    "/interaction_profiles/meta/touch_controller_plus",
+    "/interaction_profiles/meta/touch_pro_controller",
+    "/interaction_profiles/facebook/touch_controller_pro",
+    "/interaction_profiles/khr/simple_controller",
+};
+
+bool profileSupported(const char* p) {
+    for (const char* k : kProfiles) if (strcmp(k, p) == 0) return true;
+    return false;
+}
+
+enum SrcKind { SRC_NONE, SRC_BOOL, SRC_FLOAT, SRC_VEC2, SRC_POSE, SRC_HAPTIC };
+
+/** Hand of a /user/hand/... path: 0 left, 1 right, -1 other. */
+int handOf(const char* p, const char** rest) {
+    if (strncmp(p, "/user/hand/left", 15) == 0 && (p[15] == 0 || p[15] == '/')) { if (rest) *rest = p + 15; return 0; }
+    if (strncmp(p, "/user/hand/right", 16) == 0 && (p[16] == 0 || p[16] == '/')) { if (rest) *rest = p + 16; return 1; }
+    return -1;
+}
+
+/**
+ * Reads one input source path (e.g. /user/hand/right/input/trigger/value) from [in]. Returns its
+ * kind (SRC_NONE when this hardware has no such source) and value in v[0] (v[1] for vectors).
+ */
+SrcKind evalSource(const char* path, bool simple, const HxInput& in, int* handOut, float v[2]) {
+    const char* rest = nullptr;
+    int h = handOf(path, &rest);
+    *handOut = h;
+    v[0] = v[1] = 0;
+    if (h < 0) return SRC_NONE;
+    if (strcmp(rest, "/output/haptic") == 0) return SRC_HAPTIC;
+    if (strncmp(rest, "/input/", 7) != 0) return SRC_NONE;
+    char id[64]; const char* comp = "";
+    const char* q = rest + 7;
+    const char* slash = strchr(q, '/');
+    size_t n = slash ? static_cast<size_t>(slash - q) : strlen(q);
+    if (n >= sizeof(id)) return SRC_NONE;
+    memcpy(id, q, n); id[n] = 0;
+    if (slash) comp = slash + 1;
+    auto btn = [&](uint32_t bit) { v[0] = (in.buttons & bit) ? 1.f : 0.f; return SRC_BOOL; };
+    // the screen touch (VR Box button) acts as the right trigger / select
+    float trig = in.trigger[h];
+    if (h == 1 && in.touch && trig < 1.f) trig = 1.f;
+    if (strcmp(id, "grip") == 0 || strcmp(id, "aim") == 0) return strcmp(comp, "pose") == 0 ? SRC_POSE : SRC_NONE;
+    if (simple) {
+        if (strcmp(id, "select") == 0 && strcmp(comp, "click") == 0) { v[0] = trig > 0.5f ? 1.f : 0.f; return SRC_BOOL; }
+        if (strcmp(id, "menu") == 0 && strcmp(comp, "click") == 0) return btn(HX_BTN_MENU);
+        return SRC_NONE;
+    }
+    if (strcmp(id, "trigger") == 0) {
+        if (!*comp || strcmp(comp, "value") == 0) { v[0] = trig; return SRC_FLOAT; }
+        if (strcmp(comp, "click") == 0) { v[0] = trig > 0.5f ? 1.f : 0.f; return SRC_BOOL; }
+        if (strcmp(comp, "touch") == 0 || strcmp(comp, "proximity") == 0) { v[0] = trig > 0.05f ? 1.f : 0.f; return SRC_BOOL; }
+        return SRC_NONE;
+    }
+    if (strcmp(id, "squeeze") == 0) {
+        if (!*comp || strcmp(comp, "value") == 0) { v[0] = in.squeeze[h]; return SRC_FLOAT; }
+        if (strcmp(comp, "click") == 0) { v[0] = in.squeeze[h] > 0.5f ? 1.f : 0.f; return SRC_BOOL; }
+        return SRC_NONE;
+    }
+    if (strcmp(id, "thumbstick") == 0) {
+        float x = in.stick[h][0], y = in.stick[h][1];
+        if (!*comp) { v[0] = x; v[1] = y; return SRC_VEC2; }
+        if (strcmp(comp, "x") == 0) { v[0] = x; return SRC_FLOAT; }
+        if (strcmp(comp, "y") == 0) { v[0] = y; return SRC_FLOAT; }
+        uint32_t thumb = h == 0 ? HX_BTN_THUMB_L : HX_BTN_THUMB_R;
+        if (strcmp(comp, "click") == 0) return btn(thumb);
+        if (strcmp(comp, "touch") == 0) { v[0] = ((in.buttons & thumb) || x * x + y * y > 0.01f) ? 1.f : 0.f; return SRC_BOOL; }
+        return SRC_NONE;
+    }
+    if (strcmp(comp, "click") != 0 && strcmp(comp, "touch") != 0) return SRC_NONE;
+    if (h == 1 && strcmp(id, "a") == 0) return btn(HX_BTN_A);
+    if (h == 1 && strcmp(id, "b") == 0) return btn(HX_BTN_B);
+    if (h == 0 && strcmp(id, "x") == 0) return btn(HX_BTN_X);
+    if (h == 0 && strcmp(id, "y") == 0) return btn(HX_BTN_Y);
+    if (h == 0 && strcmp(id, "menu") == 0 && strcmp(comp, "click") == 0) return btn(HX_BTN_MENU);
+    if (h == 1 && strcmp(id, "system") == 0 && strcmp(comp, "click") == 0) return btn(HX_BTN_SYSTEM);
+    if (strcmp(id, "thumbrest") == 0 && strcmp(comp, "touch") == 0) { v[0] = 0; return SRC_BOOL; }
+    return SRC_NONE;
+}
+
+bool isSimpleProfile(Instance* inst, XrPath profile) {
+    const char* p = pathString(inst, profile);
+    return p && strcmp(p, "/interaction_profiles/khr/simple_controller") == 0;
+}
+
+/** Evaluates [a] for slot 0 (left), 1 (right) or 2 (any hand) under the session's profile. */
+ActionValue evalAction(Session* s, Action* a, int slot) {
+    ActionValue r{};
+    Instance* inst = s->instance;
+    if (s->profile == XR_NULL_PATH) return r;
+    bool simple = isSimpleProfile(inst, s->profile);
+    float best = -1;
+    for (int i = 0; i < inst->bindingCount; i++) {
+        const auto& b = inst->bindings[i];
+        if (b.profile != s->profile || b.action != a) continue;
+        const char* path = pathString(inst, b.path);
+        if (!path) continue;
+        int hand; float v[2];
+        SrcKind k = evalSource(path, simple, s->input, &hand, v);
+        if (k == SRC_NONE || (slot < 2 && hand != slot)) continue;
+        bool compatible = (a->type == XR_ACTION_TYPE_BOOLEAN_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
+                          (a->type == XR_ACTION_TYPE_FLOAT_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
+                          (a->type == XR_ACTION_TYPE_VECTOR2F_INPUT && k == SRC_VEC2) ||
+                          (a->type == XR_ACTION_TYPE_POSE_INPUT && k == SRC_POSE) ||
+                          (a->type == XR_ACTION_TYPE_VIBRATION_OUTPUT && k == SRC_HAPTIC);
+        if (!compatible) continue;
+        r.active = true;
+        // combine several sources: boolean OR, largest magnitude for float and vector
+        if (a->type == XR_ACTION_TYPE_BOOLEAN_INPUT) { if (v[0] > 0.5f) r.v[0] = 1.f; }
+        else if (a->type == XR_ACTION_TYPE_FLOAT_INPUT) { if (fabsf(v[0]) > best) { best = fabsf(v[0]); r.v[0] = v[0]; } }
+        else if (a->type == XR_ACTION_TYPE_VECTOR2F_INPUT) { float m = v[0] * v[0] + v[1] * v[1]; if (m > best) { best = m; r.v[0] = v[0]; r.v[1] = v[1]; } }
+    }
+    return r;
+}
+
+/** Slot for a subaction path: 0 left, 1 right, 2 none, 3 a path this runtime never drives. */
+int slotOf(Instance* inst, XrPath sub) {
+    if (sub == XR_NULL_PATH) return 2;
+    const char* p = pathString(inst, sub);
+    if (!p) return 3;
+    if (strcmp(p, "/user/hand/left") == 0) return 0;
+    if (strcmp(p, "/user/hand/right") == 0) return 1;
+    return 3;
+}
+
+/** Controller pose in stage space: no controller tracking exists, so each hand rides with the head. */
+bool controllerPose(Session* s, int hand, XrTime time, XrPosef* out) {
+    XrPosef head;
+    if (!hxp::headPose(time, s->instance->cfg, &head)) return false;
+    XrQuaternionf yaw = hx::yawOnly(head.orientation);
+    XrVector3f off = {hand == 0 ? -0.17f : 0.17f, -0.32f, -0.30f};
+    out->position = hx::vadd(head.position, hx::qrot(yaw, off));
+    out->orientation = head.orientation;  // aim follows the gaze: point by looking
+    return true;
+}
+
 // ------------------------------------------------------------------ poses
 /** Pose of a space in stage space at [time]. */
 bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
@@ -303,10 +479,23 @@ bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
             *out = hx::compose(head, sp->offset);
             return true;
         }
-        default:
-            // action spaces: no input source is ever active in this runtime
+        default: {
+            // action spaces: the hand of the space's subaction path, or the first hand bound
+            Session* s = sp->session;
+            Action* a = sp->action;
             *tracked = false;
-            return false;
+            if (!a || !isLive(a, MAGIC_ACTION) || s->profile == XR_NULL_PATH) return false;
+            int slot = slotOf(inst, sp->subaction);
+            if (slot == 3) return false;
+            int hand = -1;
+            for (int h = 0; h < 2 && hand < 0; h++) if ((slot == 2 || slot == h) && evalAction(s, a, h).active) hand = h;
+            if (hand < 0) return false;
+            XrPosef c;
+            if (!controllerPose(s, hand, time, &c)) return false;
+            *out = hx::compose(c, sp->offset);
+            *tracked = true;
+            return true;
+        }
     }
 }
 
@@ -755,6 +944,7 @@ XrResult XRAPI_CALL CreateActionSpace(XrSession h, const XrActionSpaceCreateInfo
     sp->session = s;
     sp->type = static_cast<XrReferenceSpaceType>(0);
     sp->action = a;
+    sp->subaction = ci->subactionPath;
     sp->offset = ci->poseInActionSpace;
     s->liveSpaces++;
     *out = reinterpret_cast<XrSpace>(sp);
@@ -780,8 +970,10 @@ XrResult locate(Space* sp, Space* base, XrTime time, XrSpaceLocation* loc) {
     if (vel) vel->velocityFlags = 0;
     if (!okA || !okB) { loc->locationFlags = 0; loc->pose = hx::identity(); return XR_SUCCESS; }
     loc->pose = hx::compose(hx::inverse(b), a);
-    // orientation is tracked; position comes from a neck model, so it is valid but not tracked
-    bool viewInvolved = sp->type == XR_REFERENCE_SPACE_TYPE_VIEW || base->type == XR_REFERENCE_SPACE_TYPE_VIEW;
+    // orientation is tracked; position comes from a neck model (and controllers ride with the
+    // head), so it is valid but not tracked
+    bool viewInvolved = sp->type == XR_REFERENCE_SPACE_TYPE_VIEW || base->type == XR_REFERENCE_SPACE_TYPE_VIEW ||
+                        sp->action != nullptr || base->action != nullptr;
     loc->locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
                          XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | (viewInvolved ? 0 : XR_SPACE_LOCATION_POSITION_TRACKED_BIT);
     return XR_SUCCESS;
@@ -1128,7 +1320,7 @@ XrResult XRAPI_CALL DestroyActionSet(XrActionSet h) {
     if (!set) return XR_ERROR_HANDLE_INVALID;
     set->instance->actionSets--;
     // actions belong to their set and are destroyed with it
-    while (void* a = takeChild(set, MAGIC_ACTION)) { static_cast<Action*>(a)->magic = 0; free(a); }
+    while (void* a = takeChild(set, MAGIC_ACTION)) { dropBindings(set->instance, a); static_cast<Action*>(a)->magic = 0; free(a); }
     release(set);
     return XR_SUCCESS;
 }
@@ -1164,6 +1356,7 @@ XrResult XRAPI_CALL CreateAction(XrActionSet h, const XrActionCreateInfo* ci, Xr
 XrResult XRAPI_CALL DestroyAction(XrAction h) {
     Action* a = asAction(h);
     if (!a) return XR_ERROR_HANDLE_INVALID;
+    dropBindings(a->set->instance, a);
     release(a);
     return XR_SUCCESS;
 }
@@ -1183,7 +1376,16 @@ XrResult XRAPI_CALL SuggestInteractionProfileBindings(XrInstance h, const XrInte
         const char* binding = pathString(inst, b->suggestedBindings[i].binding);
         if (!binding || strncmp(binding, "/user/", 6) != 0) return XR_ERROR_PATH_UNSUPPORTED;
     }
-    // Accepted, but this viewer has no input device behind any profile (documented limitation).
+    // Profiles this runtime drives keep their bindings; a new suggestion replaces the old one.
+    if (!profileSupported(profile)) return XR_SUCCESS;
+    pthread_mutex_lock(&inst->lock);
+    int kept = 0;
+    for (int i = 0; i < inst->bindingCount; i++)
+        if (inst->bindings[i].profile != b->interactionProfile) inst->bindings[kept++] = inst->bindings[i];
+    inst->bindingCount = kept;
+    for (uint32_t i = 0; i < b->countSuggestedBindings && inst->bindingCount < MAX_BINDINGS; i++)
+        inst->bindings[inst->bindingCount++] = {b->interactionProfile, asAction(b->suggestedBindings[i].action), b->suggestedBindings[i].binding};
+    pthread_mutex_unlock(&inst->lock);
     return XR_SUCCESS;
 }
 
@@ -1200,6 +1402,19 @@ XrResult XRAPI_CALL AttachSessionActionSets(XrSession h, const XrSessionActionSe
         s->attachedSets[s->attachedCount++] = set;
     }
     s->actionsAttached = true;
+    // the most preferred profile the app has bindings for (for actions of the attached sets)
+    Instance* inst = s->instance;
+    s->profile = XR_NULL_PATH;
+    for (const char* name : kProfiles) {
+        XrPath p;
+        if (XR_FAILED(stringToPath(inst, name, &p))) continue;
+        for (int i = 0; i < inst->bindingCount && s->profile == XR_NULL_PATH; i++) {
+            const auto& bd = inst->bindings[i];
+            if (bd.profile != p || !isLive(bd.action, MAGIC_ACTION)) continue;
+            if (actionAttachedTo(s, static_cast<Action*>(bd.action))) s->profile = p;
+        }
+        if (s->profile != XR_NULL_PATH) break;
+    }
     XrEventDataInteractionProfileChanged ev{XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED};
     ev.session = h;
     pushEvent(s->instance, &ev, sizeof(ev));
@@ -1213,14 +1428,11 @@ XrResult XRAPI_CALL GetCurrentInteractionProfile(XrSession h, XrPath topLevel, X
     if (!s->actionsAttached) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
     const char* p = pathString(s->instance, topLevel);
     if (!p || strncmp(p, "/user/", 6) != 0) return XR_ERROR_PATH_UNSUPPORTED;
-    st->interactionProfile = XR_NULL_PATH;
+    st->interactionProfile = handOf(p, nullptr) >= 0 && strchr(p + 11, '/') == nullptr ? s->profile : XR_NULL_PATH;
     return XR_SUCCESS;
 }
 
-bool actionAttached(Session* s, Action* a) {
-    for (uint32_t i = 0; i < s->attachedCount; i++) if (s->attachedSets[i] == a->set) return true;
-    return false;
-}
+bool actionAttached(Session* s, Action* a) { return actionAttachedTo(s, a); }
 
 template <typename State> XrResult actionState(XrSession h, const XrActionStateGetInfo* info, State* st, XrStructureType stType, XrActionType want) {
     Session* s = asSession(h);
@@ -1235,23 +1447,44 @@ template <typename State> XrResult actionState(XrSession h, const XrActionStateG
         for (uint32_t i = 0; i < a->subactionCount; i++) if (a->subactions[i] == info->subactionPath) found = true;
         if (!found) return XR_ERROR_PATH_UNSUPPORTED;
     }
-    st->isActive = XR_FALSE;
+    int slot = slotOf(s->instance, info->subactionPath);
+    const ActionValue& v = slot < 3 ? a->state[slot] : ActionValue{};
+    st->isActive = v.active ? XR_TRUE : XR_FALSE;
     return XR_SUCCESS;
+}
+
+/** The synced value behind a successful actionState() call. */
+const ActionValue& synced(XrSession h, const XrActionStateGetInfo* info) {
+    static const ActionValue none{};
+    Session* s = asSession(h);
+    Action* a = asAction(info->action);
+    int slot = slotOf(s->instance, info->subactionPath);
+    return slot < 3 ? a->state[slot] : none;
 }
 
 XrResult XRAPI_CALL GetActionStateBoolean(XrSession h, const XrActionStateGetInfo* i, XrActionStateBoolean* st) {
     XrResult r = actionState(h, i, st, XR_TYPE_ACTION_STATE_BOOLEAN, XR_ACTION_TYPE_BOOLEAN_INPUT);
-    if (XR_SUCCEEDED(r)) { st->currentState = XR_FALSE; st->changedSinceLastSync = XR_FALSE; st->lastChangeTime = 0; }
+    if (XR_SUCCEEDED(r)) {
+        const ActionValue& v = synced(h, i);
+        st->currentState = v.active && v.v[0] > 0.5f; st->changedSinceLastSync = v.active && v.changed; st->lastChangeTime = v.lastChange;
+    }
     return r;
 }
 XrResult XRAPI_CALL GetActionStateFloat(XrSession h, const XrActionStateGetInfo* i, XrActionStateFloat* st) {
     XrResult r = actionState(h, i, st, XR_TYPE_ACTION_STATE_FLOAT, XR_ACTION_TYPE_FLOAT_INPUT);
-    if (XR_SUCCEEDED(r)) { st->currentState = 0; st->changedSinceLastSync = XR_FALSE; st->lastChangeTime = 0; }
+    if (XR_SUCCEEDED(r)) {
+        const ActionValue& v = synced(h, i);
+        st->currentState = v.active ? v.v[0] : 0; st->changedSinceLastSync = v.active && v.changed; st->lastChangeTime = v.lastChange;
+    }
     return r;
 }
 XrResult XRAPI_CALL GetActionStateVector2f(XrSession h, const XrActionStateGetInfo* i, XrActionStateVector2f* st) {
     XrResult r = actionState(h, i, st, XR_TYPE_ACTION_STATE_VECTOR2F, XR_ACTION_TYPE_VECTOR2F_INPUT);
-    if (XR_SUCCEEDED(r)) { st->currentState = {0, 0}; st->changedSinceLastSync = XR_FALSE; st->lastChangeTime = 0; }
+    if (XR_SUCCEEDED(r)) {
+        const ActionValue& v = synced(h, i);
+        st->currentState = v.active ? XrVector2f{v.v[0], v.v[1]} : XrVector2f{0, 0};
+        st->changedSinceLastSync = v.active && v.changed; st->lastChangeTime = v.lastChange;
+    }
     return r;
 }
 XrResult XRAPI_CALL GetActionStatePose(XrSession h, const XrActionStateGetInfo* i, XrActionStatePose* st) {
@@ -1269,19 +1502,52 @@ XrResult XRAPI_CALL SyncActions(XrSession h, const XrActionsSyncInfo* info) {
         for (uint32_t k = 0; k < s->attachedCount; k++) if (s->attachedSets[k] == set) attached = true;
         if (!attached) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
     }
-    if (s->state != XR_SESSION_STATE_FOCUSED) return XR_SESSION_NOT_FOCUSED;
+    bool focused = s->state == XR_SESSION_STATE_FOCUSED;
+    if (focused) hxp::readInput(&s->input);
+    XrTime now = hxp::nowNs();
+    // every attached action is updated; those outside the active sets (or unfocused) go inactive
+    for (uint32_t k = 0; k < s->attachedCount; k++) {
+        ActionSet* set = s->attachedSets[k];
+        bool activeSet = false;
+        for (uint32_t i = 0; i < info->countActiveActionSets; i++) if (asActionSet(info->activeActionSets[i].actionSet) == set) activeSet = true;
+        forEachChild(set, MAGIC_ACTION, [&](void* p) {
+            Action* a = static_cast<Action*>(p);
+            for (int slot = 0; slot < 3; slot++) {
+                ActionValue nv = (focused && activeSet) ? evalAction(s, a, slot) : ActionValue{};
+                ActionValue& old = a->state[slot];
+                bool changed = nv.active && old.active && (nv.v[0] != old.v[0] || nv.v[1] != old.v[1]);
+                nv.changed = changed;
+                nv.lastChange = changed ? now : (nv.active && !old.active ? now : old.lastChange);
+                old = nv;
+            }
+        });
+    }
+    if (!focused) return XR_SESSION_NOT_FOCUSED;
     return XR_SUCCESS;
 }
 
-XrResult XRAPI_CALL EnumerateBoundSourcesForAction(XrSession h, const XrBoundSourcesForActionEnumerateInfo* info, uint32_t capacity, uint32_t* count, XrPath*) {
+XrResult XRAPI_CALL EnumerateBoundSourcesForAction(XrSession h, const XrBoundSourcesForActionEnumerateInfo* info, uint32_t capacity, uint32_t* count, XrPath* paths) {
     Session* s = asSession(h);
     if (!s) return XR_ERROR_HANDLE_INVALID;
     if (!info || !count || info->type != XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO) return XR_ERROR_VALIDATION_FAILURE;
     Action* a = asAction(info->action);
     if (!a) return XR_ERROR_HANDLE_INVALID;
     if (!actionAttached(s, a)) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
-    (void)capacity;
-    *count = 0;
+    XrPath found[32];
+    uint32_t n = 0;
+    Instance* inst = s->instance;
+    bool simple = isSimpleProfile(inst, s->profile);
+    for (int i = 0; i < inst->bindingCount && n < 32; i++) {
+        const auto& b = inst->bindings[i];
+        if (s->profile == XR_NULL_PATH || b.profile != s->profile || b.action != a) continue;
+        int hand; float v[2];
+        const char* path = pathString(inst, b.path);
+        if (path && evalSource(path, simple, s->input, &hand, v) != SRC_NONE) found[n++] = b.path;
+    }
+    *count = n;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < n || !paths) return XR_ERROR_SIZE_INSUFFICIENT;
+    for (uint32_t i = 0; i < n; i++) paths[i] = found[i];
     return XR_SUCCESS;
 }
 
@@ -1290,8 +1556,11 @@ XrResult XRAPI_CALL GetInputSourceLocalizedName(XrSession h, const XrInputSource
     if (!s) return XR_ERROR_HANDLE_INVALID;
     if (!info || info->type != XR_TYPE_INPUT_SOURCE_LOCALIZED_NAME_GET_INFO) return XR_ERROR_VALIDATION_FAILURE;
     if (!s->actionsAttached) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
-    if (!pathString(s->instance, info->sourcePath)) return XR_ERROR_PATH_INVALID;
-    return outString("", capacity, count, buffer);
+    const char* p = pathString(s->instance, info->sourcePath);
+    if (!p) return XR_ERROR_PATH_INVALID;
+    int hand = handOf(p, nullptr);
+    const char* name = hand == 0 ? "Controle esquerdo (Joy-Con/gamepad)" : hand == 1 ? "Controle direito (Joy-Con/gamepad)" : "Entrada";
+    return outString(name, capacity, count, buffer);
 }
 
 XrResult XRAPI_CALL ApplyHapticFeedback(XrSession h, const XrHapticActionInfo* info, const XrHapticBaseHeader* fb) {

@@ -95,6 +95,8 @@ jclass loadOurClass(JNIEnv* e, const char* dottedName) {
 }
 
 jclass gSurfaceClass = nullptr;
+// Direct buffer filled by RuntimeSurface's input capture (layout documented there).
+volatile const uint8_t* gInputBuf = nullptr;
 
 // ------------------------------------------------------------------ head tracking
 pthread_mutex_t gTrackLock = PTHREAD_MUTEX_INITIALIZER;
@@ -463,6 +465,20 @@ void trackerStop() {
     if (gSensorLooper) { ALooper_release(gSensorLooper); gSensorLooper = nullptr; }
 }
 
+void readInput(HxInput* out) {
+    memset(out, 0, sizeof(*out));
+    const volatile uint8_t* b = gInputBuf;
+    if (!b) return;
+    auto i32 = [b](int off) { int32_t v; memcpy(&v, const_cast<const uint8_t*>(b) + off, 4); return v; };
+    auto f32 = [b](int off) { float v; memcpy(&v, const_cast<const uint8_t*>(b) + off, 4); return v; };
+    out->buttons = static_cast<uint32_t>(i32(0));
+    out->stick[0][0] = f32(4); out->stick[0][1] = f32(8);
+    out->stick[1][0] = f32(12); out->stick[1][1] = f32(16);
+    out->trigger[0] = f32(20); out->trigger[1] = f32(24);
+    out->squeeze[0] = f32(28); out->squeeze[1] = f32(32);
+    out->touch = i32(36);
+}
+
 void recenter() { pthread_mutex_lock(&gTrackLock); gRecenter = true; pthread_mutex_unlock(&gTrackLock); }
 
 bool headPose(int64_t timeNs, const HxConfig& cfg, XrPosef* out) {
@@ -518,6 +534,13 @@ XrResult gfxCreateSession(const void* binding, HxSessionGfx** out) {
         jmethodID create = e->GetStaticMethodID(gSurfaceClass, "create", "(Landroid/app/Activity;)Lcom/hyperxr/openxr/RuntimeSurface;");
         jobject helper = create ? e->CallStaticObjectMethod(gSurfaceClass, create, gContext) : nullptr;
         if (!clearException(e) && helper) g->surfaceHelper = e->NewGlobalRef(helper);
+        jmethodID ib = e->GetStaticMethodID(gSurfaceClass, "inputBuffer", "()Ljava/nio/ByteBuffer;");
+        jobject buf = ib ? e->CallStaticObjectMethod(gSurfaceClass, ib) : nullptr;
+        if (!clearException(e) && buf) {
+            // the buffer is a static field of the class: it lives as long as the process
+            gInputBuf = static_cast<const uint8_t*>(e->GetDirectBufferAddress(buf));
+            e->DeleteLocalRef(buf);
+        } else clearException(e);
     }
     if (!g->surfaceHelper) LOGW("no activity/overlay: frames are accepted but not shown");
     *out = g;
