@@ -84,6 +84,8 @@ class HandTrackingService(private val context: Context) {
     private var converting: Slot? = null
     private var processing: Slot? = null
     private var inflightSinceNs = 0L
+    private var backendRequested = InferenceBackend.GPU
+    private var restarting = false
     private var lastAnalysed: Slot? = null
 
     private val scaleEstimator = HandScaleEstimator()
@@ -108,6 +110,7 @@ class HandTrackingService(private val context: Context) {
 
     /** Creates the landmarker on the worker thread. Returns false only if the model asset is missing. */
     fun start(backend: InferenceBackend): Boolean {
+        backendRequested = backend
         val hasModel = try { context.assets.openFd(MODEL_ASSET).close(); true } catch (t: Throwable) { false }
         if (!hasModel) { status = "Modelo $MODEL_ASSET ausente do APK"; return false }
         handler.post {
@@ -126,6 +129,7 @@ class HandTrackingService(private val context: Context) {
                 }
             }
             if (landmarker == null) status = "Falha ao iniciar o MediaPipe: ${failures.joinToString()}"
+            synchronized(slotLock) { inflight = null; queued = null; restarting = false }
             Diagnostics.log("Hand tracking: $status, backend $backendInUse")
         }
         return true
@@ -155,9 +159,14 @@ class HandTrackingService(private val context: Context) {
     fun wantsFrame(): Boolean {
         val now = System.nanoTime()
         synchronized(slotLock) {
-            // Watchdog: a result that never arrives must not stop hand tracking forever.
-            if (inflight != null && now - inflightSinceNs > 600_000_000L) inflight = null
-            return landmarker != null && converting == null && now - lastSubmitNs >= minIntervalNs
+            // Watchdog: a result that never arrives must not stop hand tracking forever. A stuck
+            // graph is recreated (the same backend), which costs ~1 s once instead of losing hands.
+            if (inflight != null && now - inflightSinceNs > 1_500_000_000L && !restarting) {
+                restarting = true
+                Diagnostics.log("Hand tracking: no result for 1.5 s, restarting MediaPipe")
+                start(backendRequested)
+            }
+            return landmarker != null && !restarting && converting == null && now - lastSubmitNs >= minIntervalNs
         }
     }
 
@@ -192,7 +201,14 @@ class HandTrackingService(private val context: Context) {
         if (launchNow) launch(slot)
     }
 
-    private fun launch(slot: Slot) {
+    /**
+     * Inference always starts on our own worker thread: MediaPipe's result callback runs on the
+     * graph's thread, and feeding the graph from inside it deadlocks the pipeline (the first
+     * result arrives, then nothing more).
+     */
+    private fun launch(slot: Slot) { handler.post { launchNow(slot) } }
+
+    private fun launchNow(slot: Slot) {
         val lm = landmarker ?: run { finishInflight(); return }
         val bmp = slot.bitmap ?: run { finishInflight(); return }
         slot.submitNs = System.nanoTime()
