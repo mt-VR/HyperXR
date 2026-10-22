@@ -30,8 +30,18 @@ class HandVerifier {
 
     private val streak = IntArray(2)
     private val confirmed = BooleanArray(2)
+    private val gatedThisFrame = BooleanArray(2)
 
     fun reset() { streak.fill(0); confirmed.fill(false) }
+
+    /** Call before the frame's gate() calls. */
+    fun beginFrame() { gatedThisFrame.fill(false) }
+
+    /**
+     * Call after them: a side not looked at this frame lost its hand. A side that was looked at
+     * keeps its count even when not yet confirmed (that is how a new hand gets confirmed).
+     */
+    fun endFrame() { for (i in 0..1) if (!gatedThisFrame[i]) { streak[i] = 0; confirmed[i] = false } }
 
     private fun reject(reason: String): String { lastRejection = reason; rejections++; return reason }
 
@@ -53,7 +63,7 @@ class HandVerifier {
         return null
     }
 
-    /** Distance check on the fused wrist position in camera space (metres). Null = within reach. */
+    /** Distance check on the wrist relative to the camera (metres). Null = within reach. */
     fun reach(wristX: Float, wristY: Float, wristZ: Float): String? {
         val dist = sqrt(wristX * wristX + wristY * wristY + wristZ * wristZ)
         if (dist.isNaN()) return null
@@ -68,6 +78,7 @@ class HandVerifier {
      * be used this frame.
      */
     fun gate(side: Int, presence: Float): Boolean {
+        gatedThisFrame[side] = true
         val p = if (presence.isNaN()) 1f else presence
         if (confirmed[side]) {
             if (p >= keepPresence) return true
@@ -85,6 +96,4 @@ class HandVerifier {
         return false
     }
 
-    /** The side was not seen this frame. */
-    fun missing(side: Int) { streak[side] = 0; confirmed[side] = false }
 }

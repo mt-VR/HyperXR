@@ -101,6 +101,8 @@ class NpuHandEngine(private val context: Context) {
                 val l = build(lm, name, "landmark")
                 // a delegate can accept the graph and still fail on the first run: run once now
                 warmUp(d, l)
+                // and an accelerator can run it with too little precision: compare with the CPU
+                if (name != null) agreesWithCpu(l, lm)?.let { problem -> throw IllegalStateException(problem) }
                 detector = d; landmarks = l; device = label
                 Diagnostics.log("NPU hand tracker on $label")
                 return true
@@ -146,6 +148,34 @@ class NpuHandEngine(private val context: Context) {
     private fun warmUp(d: Interpreter, l: Interpreter) {
         palmIn.rewind(); d.runForMultipleInputsOutputs(arrayOf(palmIn), mapOf(0 to regressors, 1 to logits))
         lmIn.rewind(); l.runForMultipleInputsOutputs(arrayOf(lmIn), mapOf(0 to outLm, 1 to outPresence, 2 to outHanded, 3 to outWorld))
+    }
+
+    /**
+     * Runs the landmark model on the accelerator and on the CPU with the same synthetic picture
+     * (skin-toned blob with finger-like bars) and compares. Null when they agree.
+     */
+    private fun agreesWithCpu(accel: Interpreter, model: ByteBuffer): String? {
+        val cpu = build(model, null, "check")
+        try {
+            val c = Canvas(cropBmp)
+            c.drawColor(Color.rgb(60, 70, 90))
+            val skin = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(205, 160, 130) }
+            c.drawOval(62f, 110f, 162f, 210f, skin)
+            for (i in 0 until 4) c.drawRoundRect(70f + i * 24f, 30f + (i % 2) * 10f, 88f + i * 24f, 130f, 9f, 9f, skin)
+            c.drawRoundRect(150f, 120f, 200f, 140f, 9f, 9f, skin)
+            toFloats(cropBmp, 224, lmIn)
+            val a = Array(1) { FloatArray(63) }; val ap = Array(1) { FloatArray(1) }
+            lmIn.rewind(); accel.runForMultipleInputsOutputs(arrayOf(lmIn), mapOf(0 to a, 1 to ap, 2 to outHanded, 3 to outWorld))
+            val b = Array(1) { FloatArray(63) }; val bp = Array(1) { FloatArray(1) }
+            lmIn.rewind(); cpu.runForMultipleInputsOutputs(arrayOf(lmIn), mapOf(0 to b, 1 to bp, 2 to outHanded, 3 to outWorld))
+            var diff = 0f
+            for (i in 0 until 63) if (i % 3 != 2) diff += kotlin.math.abs(a[0][i] - b[0][i])
+            diff /= 42f
+            Diagnostics.log("NPU check: landmarks differ %.2f px, presence %.3f vs %.3f".format(diff, ap[0][0], bp[0][0]))
+            if (diff.isNaN() || diff > 4f) return "resultado da NPU difere da CPU (%.1f px)".format(diff)
+            if (kotlin.math.abs(ap[0][0] - bp[0][0]) > 0.15f) return "presença na NPU difere da CPU"
+            return null
+        } finally { cpu.close() }
     }
 
     fun close() {

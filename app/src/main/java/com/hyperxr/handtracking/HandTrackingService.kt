@@ -326,13 +326,16 @@ class HandTrackingService(private val context: Context) {
             h.world?.copyInto(obs.world)
             debugLms?.add(obs.image.copyOf())
             if (fusion.fuse(obs, intr, depth, slot.pose, fused[n])) {
+                // fused joints are in world space when a camera pose is known: measure from the camera
                 val w = fused[n].cameraSpace[HandJoint.WRIST]
-                if (verifier.reach(w.x, w.y, w.z) != null) continue
+                val c = slot.pose?.position
+                if (verifier.reach(w.x - (c?.x ?: 0f), w.y - (c?.y ?: 0f), w.z - (c?.z ?: 0f)) != null) continue
                 fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); presenceOf[n] = h.presence; n++
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
         seen.clear()
+        verifier.beginFrame()
         for (k in 0 until n) {
             val side = assign[k]
             // confirmation over frames: a confident first sighting, then kept through blur
@@ -347,10 +350,8 @@ class HandTrackingService(private val context: Context) {
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k])
             seen += side
         }
-        for ((side, tracker) in trackers) if (side !in seen) {
-            tracker.update(null, 0f, DepthSource.NONE, t0)
-            verifier.missing(if (side == Handedness.LEFT) 0 else 1)
-        }
+        verifier.endFrame()
+        for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
         synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)

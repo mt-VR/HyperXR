@@ -40,6 +40,22 @@ class HandVerifierTest {
         assertFalse(v.gate(1, 0.6f))  // must be re-acquired with a confident score
     }
 
+    /** The way the service calls it each frame: a new hand must get confirmed (regression). */
+    @Test fun newHandIsConfirmedAcrossFrames() {
+        val v = HandVerifier()
+        var used = false
+        repeat(3) {
+            v.beginFrame()
+            used = v.gate(1, 0.95f)
+            v.endFrame()
+        }
+        assertTrue(used)
+        // a frame without the hand drops it; it then needs confirming again
+        v.beginFrame(); v.endFrame()
+        v.beginFrame(); assertFalse(v.gate(1, 0.95f)); v.endFrame()
+        v.beginFrame(); assertTrue(v.gate(1, 0.95f)); v.endFrame()
+    }
+
     @Test fun reachRejectsFeetAndOtherPeople() {
         val v = HandVerifier()
         assertNull(v.reach(0.1f, -0.2f, -0.45f))
