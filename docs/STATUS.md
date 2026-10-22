@@ -56,6 +56,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | App-to-World: música (sessão de mídia) como caixa de som, notificações como cartas com ações/resposta, estante de arquivos, portais de apps com compartilhamento por arrastar | 🟡 |
 | App-to-World API: manifesto espacial de apps de terceiros (objetos, gestos, intents ao próprio pacote, estado por provider) | ✅ parser (testes) · 🟡 aparelho |
 | Jogo "Gato vs. Vovó" (VR, Joy-Cons, física, IA da vovó) — docs/CAT_GAME.md | 🟡 |
+| Comandos de voz em português (botão "Voz" na barra): abrir apps, pesquisar, ambientes, modo, recentralizar, capturar, janelas, espaços — docs/NEW_FEATURES.md | ✅ parser (testes) · 🟡 aparelho |
+| Espaços de trabalho: salvar e reabrir conjuntos de janelas por nome | 🟡 |
+| Janela "Mundo real": imagem da câmera num painel móvel dentro do VR | 🟡 |
 | Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |

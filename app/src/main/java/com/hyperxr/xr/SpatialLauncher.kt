@@ -51,7 +51,7 @@ import kotlin.math.sin
  * opens from the taskbar. Both modes share the window manager (system panels, spatial web apps,
  * Android apps) and the pointer stack.
  */
-class SpatialLauncher(override val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost, com.hyperxr.files.MediaHost {
+class SpatialLauncher(override val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost, com.hyperxr.files.MediaHost, WorkspaceHost {
     private val app = HyperXRApp.instance
     private val model = LauncherModel { allApps() }
     private lateinit var ctx: XrContext
@@ -565,6 +565,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
+            "workspaces" -> WorkspacesPanel(workspaces, this)
+            "reality" -> RealityWindow(ctx)
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
@@ -784,6 +786,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (!app.settings.current.launcher.restoreWindows) return
         val arr = runCatching { org.json.JSONArray(sessionFile.readText()) }.getOrNull() ?: return
         lastSessionJson = arr.toString()
+        restoreFrom(arr)
+    }
+
+    /** Reopens the windows described by [sessionJson] (last session or a saved workspace). */
+    private fun restoreFrom(arr: org.json.JSONArray) {
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             when (o.optString("t")) {
@@ -809,6 +816,69 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 "web" -> openWindow(WebWindow(activity, o.optString("url"), o.optString("title", "Navegador"), false))
             }
         }
+    }
+
+    // ---------------------------------------------------------------- workspaces
+    private val workspaces by lazy { Workspaces(app.filesDir) }
+
+    override fun saveWorkspace(name: String): Boolean {
+        if (appWindows.isEmpty()) return false
+        val json = sessionJson()
+        sessionIo.execute { runCatching { workspaces.save(name, json) } }
+        return true
+    }
+
+    override fun openWorkspace(name: String) {
+        val arr = runCatching { org.json.JSONArray(workspaces.load(name)) }.getOrNull() ?: return
+        closeKeyboard()
+        appWindows.toList().forEach { closeWindow(it) }
+        windowsMinimized = false
+        libraryShown = false
+        restoreFrom(arr)
+    }
+
+    // ---------------------------------------------------------------- voice commands
+    @Volatile private var voiceText = ""
+    @Volatile private var voiceUntil = 0L
+    @Volatile private var listening = false
+
+    override fun voiceStatus(): String = if (listening || System.currentTimeMillis() < voiceUntil) voiceText else ""
+
+    private fun voiceSay(text: String) { voiceText = text; voiceUntil = System.currentTimeMillis() + 4000 }
+
+    override fun startVoice() {
+        if (listening) return
+        listening = true; voiceText = "Ouvindo…"
+        dictate { heard ->
+            listening = false
+            if (heard.isNullOrBlank()) { voiceSay("Não ouvi nada (permita o microfone)"); return@dictate }
+            val cmd = com.hyperxr.voice.VoiceCommands.parse(heard,
+                allApps().filter { it.kind != AppKind.UNAVAILABLE }.map { com.hyperxr.voice.VoiceCommands.Named(it.id, it.title) },
+                app.environments.installed().map { com.hyperxr.voice.VoiceCommands.Named(it.id, it.name) },
+                workspaces.list())
+            voiceSay(if (cmd is com.hyperxr.voice.VoiceCommand.Unknown) "Não entendi: $heard" else "Entendi: $heard")
+            glTasks += { runVoice(cmd) }
+        }
+    }
+
+    private fun runVoice(cmd: com.hyperxr.voice.VoiceCommand) {
+        when (cmd) {
+            is com.hyperxr.voice.VoiceCommand.OpenApp -> allApps().firstOrNull { it.id == cmd.appId }?.let { launch(it) }
+            is com.hyperxr.voice.VoiceCommand.Search -> openBrowser(com.hyperxr.browser.UrlInput.resolve(cmd.query), app.settings.current.network.webAppsDesktopMode)
+            is com.hyperxr.voice.VoiceCommand.Background -> setBackgroundChoice(cmd.choice)
+            is com.hyperxr.voice.VoiceCommand.SaveWorkspace -> if (!saveWorkspace(cmd.name)) voiceSay("Nenhuma janela aberta para salvar")
+            is com.hyperxr.voice.VoiceCommand.OpenWorkspace -> if (workspaces.load(cmd.name) != null) openWorkspace(cmd.name) else voiceSay("Espaço \"${cmd.name}\" não existe")
+            is com.hyperxr.voice.VoiceCommand.SetMode -> setMode(if (cmd.dock) LauncherMode.DOCK else LauncherMode.NEW)
+            com.hyperxr.voice.VoiceCommand.Recenter -> recenter()
+            com.hyperxr.voice.VoiceCommand.Capture -> capture()
+            com.hyperxr.voice.VoiceCommand.CloseWindows -> pendingClose += appWindows
+            com.hyperxr.voice.VoiceCommand.HideWindows -> { windowsMinimized = true; closeKeyboard() }
+            com.hyperxr.voice.VoiceCommand.ShowWindows -> { windowsMinimized = false; libraryShown = false }
+            com.hyperxr.voice.VoiceCommand.Library -> toggleLibrary()
+            com.hyperxr.voice.VoiceCommand.RealityWindow -> openSystem("reality")
+            is com.hyperxr.voice.VoiceCommand.Unknown -> Unit
+        }
+        taskbar.dirty = true
     }
 
     /** Control bar under a window: title + status, back/reload/keyboard/curve/size/external/close. */

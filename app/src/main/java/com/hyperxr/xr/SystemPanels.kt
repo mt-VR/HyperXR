@@ -56,6 +56,10 @@ interface LauncherActions {
     fun libraryOpen(): Boolean
     fun toggleLibrary()
     fun isRunning(app: AppEntry): Boolean
+    /** Taskbar "Voz": listen for one spoken command. */
+    fun startVoice()
+    /** Last voice state for the taskbar ("Ouvindo…", "Entendi: …"), empty when idle. */
+    fun voiceStatus(): String
 }
 
 private val background = Executors.newSingleThreadExecutor()

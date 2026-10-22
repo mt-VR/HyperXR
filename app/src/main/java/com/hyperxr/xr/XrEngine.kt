@@ -91,6 +91,8 @@ class XrContext(
     var trackingDescription = ""
     /** Live hand-tracking status for in-XR diagnostics. */
     var handStatus: () -> String = { "" }
+    /** The camera image when one is running (MR, or VR with hand tracking), for content that shows it. */
+    var camera: com.hyperxr.rendering.CameraImageSource? = null
 }
 
 interface XrContent {
@@ -293,6 +295,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
         // 3. content
         scene.reset()
+        ctx.camera = arCore ?: passthrough
         val sim0 = System.nanoTime()
         content.onFrame(ctx, dt)
         Diagnostics.record(Stage.SIMULATION, System.nanoTime() - sim0)

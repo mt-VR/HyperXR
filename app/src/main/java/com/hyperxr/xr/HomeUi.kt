@@ -131,7 +131,7 @@ class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.7f, 0.13f, title 
 
     override fun update(dt: Float) {
         val m = System.currentTimeMillis() / 60_000
-        val k = "${a.windowCount()}/${a.windowsMinimized()}/${a.mode()}/${a.pinnedApps().joinToString { it.id }}"
+        val k = "${a.windowCount()}/${a.windowsMinimized()}/${a.mode()}/${a.voiceStatus()}/${a.pinnedApps().joinToString { it.id }}"
         if (m != minute || k != key) { minute = m; key = k; battery = batteryText(); dirty = true }
     }
 
@@ -145,16 +145,21 @@ class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.7f, 0.13f, title 
         val gap = 6f
         val libW = 170f
         val leftEdge = c.pad + 150f
-        val rightEdge = c.w - c.pad - 440f
+        val rightEdge = c.w - c.pad - 560f
         val fit = ((rightEdge - leftEdge - libW - gap) / (size + gap)).toInt().coerceAtLeast(0)
         val pinned = a.pinnedApps().take(fit)
         val total = libW + gap + pinned.size * (size + gap)
         var x = (leftEdge + rightEdge) / 2 - total / 2
-        c.button("lib", "Biblioteca", x, 14f, libW, size - 8f, accent = a.libraryOpen()) { a.toggleLibrary() }
-        x += libW + gap
-        for (app in pinned) {
-            c.iconButton("pin:${app.id}", a.appIcon(app, 128), x, 10f, size, active = a.isRunning(app)) { a.launch(app) }
-            x += size + gap
+        // while listening (and briefly after) the middle shows what was heard instead of the pins
+        val voice = a.voiceStatus()
+        if (voice.isNotEmpty()) c.label(voice, leftEdge, 36f, 30f, XrTheme.accent2, maxWidth = rightEdge - leftEdge)
+        else {
+            c.button("lib", "Biblioteca", x, 14f, libW, size - 8f, accent = a.libraryOpen()) { a.toggleLibrary() }
+            x += libW + gap
+            for (app in pinned) {
+                c.iconButton("pin:${app.id}", a.appIcon(app, 128), x, 10f, size, active = a.isRunning(app)) { a.launch(app) }
+                x += size + gap
+            }
         }
         // right side
         var rx = c.w - c.pad
@@ -164,6 +169,7 @@ class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.7f, 0.13f, title 
             rx -= gap
         }
         right("qs", "Ajustes", 130f) { a.openTarget("settings") }
+        right("voice", "Voz", 110f, accent = voice.isNotEmpty()) { a.startVoice() }
         right("mode", if (a.mode() == LauncherMode.DOCK) "Dock" else "New", 100f) {
             a.setMode(if (a.mode() == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)
         }
