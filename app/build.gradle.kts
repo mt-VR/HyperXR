@@ -23,6 +23,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // One debug key for every build (kept in the repository; it protects nothing), so a new APK
+    // installs over the previous one instead of failing with "conflicts with an existing package".
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/hyperxr-debug.jks")
+            storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

@@ -19,4 +19,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "HyperXR"
-include(":core", ":app")
+include(":core", ":app", ":broker")

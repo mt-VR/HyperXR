@@ -28,7 +28,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Runtime Broker (descoberta, seleção, árbitro de sessão) | ✅ modelo · 🟡 Android |
 | Monado | 🚫 não embutido (ver ARCHITECTURE.md); detectado e preferido quando instalado |
 | **HyperXR Runtime** (runtime OpenXR próprio, GLES, 3DoF, lente + timewarp, quad layers) | ✅ host (260 verificações, ASan) · 🟡 aparelho · ver OPENXR_RUNTIME.md |
-| Apps OpenXR acham o runtime sem o broker da Khronos (HyperXR é o broker do sistema) | 🟡 |
+| Apps OpenXR acham o runtime sem o broker da Khronos (APK complementar HyperXR OpenXR Broker) | 🟡 |
 | Joy-Con/gamepad e toque na tela viram ações OpenXR (perfis Touch e simple), poses presas à cabeça | ✅ host · 🟡 aparelho |
 | Mãos (hand tracking) para apps OpenXR (XR_EXT_hand_tracking) | ⏳ |
 | Importar jogos Quest: análise do APK (motor, loader, VrApi, Platform SDK, Vulkan/GLES, extensões) e veredito | ✅ análise (testes) · 🟡 aparelho |

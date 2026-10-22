@@ -163,14 +163,6 @@
             <meta-data android:name="org.khronos.openxr.OpenXRRuntime.MajorVersion" android:value="1" />
         </service>
 
-        <!-- The OpenXR loader's system runtime broker: makes OpenXR apps find the HyperXR runtime
-             without the Khronos broker app (which, when installed, is asked first). -->
-        <provider
-            android:name=".openxr.SystemBrokerProvider"
-            android:authorities="org.khronos.openxr.system_runtime_broker"
-            android:exported="true"
-            tools:ignore="ExportedContentProvider" />
-
         <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps. Read-only numbers. -->
         <provider
             android:name=".openxr.RuntimeConfigProvider"

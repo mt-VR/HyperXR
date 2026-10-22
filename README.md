@@ -80,7 +80,9 @@ Meta não), VrApi (não roda), Meta Platform SDK (a checagem de licença pode fe
 ou OpenGL ES e extensões Meta citadas. Com o Shizuku ativo a instalação é direta e o OBB que estiver
 ao lado do APK é copiado para `Android/obb`; sem ele, o instalador do Android pergunta na tela.
 
-Apps OpenXR acham o runtime HyperXR sozinhos (o HyperXR responde como broker do sistema). Os
+Para apps OpenXR acharem o runtime HyperXR instale também o APK pequeno **HyperXR OpenXR Broker**
+(`broker/`); se ele não instalar por conflito, o celular já tem um broker OpenXR: escolha "HyperXR
+Runtime" nele. Os
 Joy-Cons/gamepad e o toque na tela viram os controles do jogo (perfil Touch); a mira segue o olhar.
 Jogos feitos só para o Quest geralmente exigem recursos que um celular não tem, então espere
 muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tempo.
