@@ -12,11 +12,12 @@
 #include <vector>
 
 #include "../common/config.h"
+#include "../common/perf.h"
 
 namespace {
 
-enum { ID_PHONE_IP = 101, ID_BITRATE, ID_START, ID_REMOVE, ID_TIMER };
-HWND g_phoneIp, g_bitrate, g_status, g_pcIp;
+enum { ID_PHONE_IP = 101, ID_BITRATE, ID_START, ID_REMOVE, ID_TIMER, ID_PRESET };
+HWND g_phoneIp, g_bitrate, g_status, g_pcIp, g_preset;
 HFONT g_font, g_bold;
 
 std::wstring Widen(const std::string& s) {
@@ -142,11 +143,13 @@ void Start() {
     cfg.phoneIp = Narrow(ip);
     int mbps = _wtoi(GetText(g_bitrate).c_str());
     cfg.bitrateMbps = mbps >= 5 && mbps <= 200 ? mbps : 40;
+    int sel = int(SendMessageW(g_preset, CB_GETCURSEL, 0, 0));
+    cfg.preset = sel >= 0 && sel <= hxvr::PRESET_STRONG ? sel : 0;
     cfg.Save();
     std::wstring msg;
     if (!RegisterDriver(true, msg)) { SetStatus(msg); return; }
     if (IsSteamVrRunning()) {
-        SetStatus(L"Configurado. O SteamVR já está aberto: feche e abra de novo para usar o IP novo.");
+        SetStatus(L"Configurado. O SteamVR já está aberto: feche e abra de novo para usar o IP e o desempenho novos.");
         return;
     }
     ShellExecuteW(nullptr, L"open", L"steam://rungameid/250820", nullptr, nullptr, SW_SHOWNORMAL);
@@ -196,11 +199,22 @@ LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
             g_bitrate = CreateWindowW(L"EDIT", std::to_wstring(cfg.bitrateMbps).c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 160, 168, 80, 26, w, (HMENU)ID_BITRATE, nullptr, nullptr);
             SendMessageW(g_bitrate, WM_SETFONT, (WPARAM)g_font, TRUE);
             Label(w, L"(Wi-Fi 5 GHz: 40-80; Wi-Fi comum: 20-30)", 250, 172, 290, 22, g_font);
-            HWND go = CreateWindowW(L"BUTTON", L"Conectar e iniciar o SteamVR", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 20, 210, 260, 40, w, (HMENU)ID_START, nullptr, nullptr);
+            Label(w, L"Desempenho do PC:", 20, 208, 130, 22, g_font);
+            g_preset = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 160, 204, 380, 200, w, (HMENU)ID_PRESET, nullptr, nullptr);
+            SendMessageW(g_preset, WM_SETFONT, (WPARAM)g_font, TRUE);
+            for (int p = 0; p <= hxvr::PRESET_STRONG; p++) SendMessageW(g_preset, CB_ADDSTRING, 0, (LPARAM)hxvr::PresetLabel(p));
+            SendMessageW(g_preset, CB_SETCURSEL, cfg.preset, 0);
+            {
+                bool integrated = false;
+                std::wstring gpu = hxvr::PrimaryGpu(&integrated);
+                std::wstring note = L"Placa de vídeo: " + gpu + (integrated ? L" (integrada: o Automático usa o perfil de PC fraco)" : L"");
+                Label(w, note.c_str(), 20, 236, 520, 22, g_font);
+            }
+            HWND go = CreateWindowW(L"BUTTON", L"Conectar e iniciar o SteamVR", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 20, 266, 260, 40, w, (HMENU)ID_START, nullptr, nullptr);
             SendMessageW(go, WM_SETFONT, (WPARAM)g_bold, TRUE);
-            HWND rm = CreateWindowW(L"BUTTON", L"Remover do SteamVR", WS_CHILD | WS_VISIBLE, 300, 210, 180, 40, w, (HMENU)ID_REMOVE, nullptr, nullptr);
+            HWND rm = CreateWindowW(L"BUTTON", L"Remover do SteamVR", WS_CHILD | WS_VISIBLE, 300, 266, 180, 40, w, (HMENU)ID_REMOVE, nullptr, nullptr);
             SendMessageW(rm, WM_SETFONT, (WPARAM)g_font, TRUE);
-            g_status = Label(w, L"", 20, 266, 520, 110, g_font);
+            g_status = Label(w, L"", 20, 320, 520, 110, g_font);
             SetTimer(w, ID_TIMER, 1000, nullptr);
             RefreshStatus();
             return 0;
@@ -229,7 +243,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
     RegisterClassW(&wc);
     HWND w = CreateWindowW(L"HyperXRPC", L"HyperXR PC", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 580, 430, nullptr, nullptr, inst, nullptr);
+                           CW_USEDEFAULT, CW_USEDEFAULT, 580, 490, nullptr, nullptr, inst, nullptr);
     ShowWindow(w, show);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {

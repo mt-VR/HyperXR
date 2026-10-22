@@ -22,6 +22,7 @@ inline std::wstring DataDir() {
 struct Config {
     std::string phoneIp;
     int bitrateMbps = 40;
+    int preset = 0;  // perf.h: 0 automatic, 1 weak, 2 weakest, 3 medium, 4 strong
     // display parameters, filled from the phone's first hello (SteamVR restarts once to apply them)
     int eyeWidth = 1280, eyeHeight = 1280, refreshHz = 72;
     float tanLeft = 1.0f, tanRight = 1.0f, tanUp = 1.0f, tanDown = 1.0f, ipd = 0.063f;
@@ -43,13 +44,14 @@ struct Config {
         auto i = [&](const char* k, int& v) { if (kv.count(k)) v = atoi(kv[k].c_str()); };
         auto fl = [&](const char* k, float& v) { if (kv.count(k)) v = float(atof(kv[k].c_str())); };
         if (kv.count("phone_ip")) phoneIp = kv["phone_ip"];
-        i("bitrate_mbps", bitrateMbps); i("eye_width", eyeWidth); i("eye_height", eyeHeight); i("refresh_hz", refreshHz);
+        i("bitrate_mbps", bitrateMbps); i("preset", preset); i("eye_width", eyeWidth); i("eye_height", eyeHeight); i("refresh_hz", refreshHz);
         fl("tan_left", tanLeft); fl("tan_right", tanRight); fl("tan_up", tanUp); fl("tan_down", tanDown); fl("ipd", ipd);
     }
 
     void Save() const {
         FILE* f = _wfopen(Path().c_str(), L"w");
         if (!f) return;
+        fprintf(f, "preset=%d\n", preset);
         fprintf(f, "phone_ip=%s\nbitrate_mbps=%d\neye_width=%d\neye_height=%d\nrefresh_hz=%d\n", phoneIp.c_str(), bitrateMbps, eyeWidth, eyeHeight, refreshHz);
         fprintf(f, "tan_left=%.5f\ntan_right=%.5f\ntan_up=%.5f\ntan_down=%.5f\nipd=%.5f\n", tanLeft, tanRight, tanUp, tanDown, ipd);
         fclose(f);

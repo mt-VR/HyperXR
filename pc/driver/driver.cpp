@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <d3d10.h>
+#include <mmsystem.h>
 
 #include <atomic>
 #include <chrono>
@@ -22,6 +23,7 @@
 
 #include "openvr_driver.h"
 #include "../common/config.h"
+#include "../common/perf.h"
 #include "../common/hxvr_protocol.h"
 #include "encoder.h"
 
@@ -48,12 +50,14 @@ struct Status {
     std::mutex m;
     std::string phone = "aguardando o celular";
     std::string encoder = "-";
+    std::string gpu = "-";
     std::string error;
     double fps = 0, mbps = 0, targetMbps = 0;
     void Write() {
         std::lock_guard<std::mutex> l(m);
         FILE* f = _wfopen(hxvr::StatusPath().c_str(), L"w");
         if (!f) return;
+        fprintf(f, "gpu=%s\n", gpu.c_str());
         fprintf(f, "phone=%s\nencoder=%s\nfps=%.0f\nmbps=%.1f\ntarget=%.0f\nerror=%s\n", phone.c_str(), encoder.c_str(), fps, mbps, targetMbps, error.c_str());
         fclose(f);
     }
@@ -394,7 +398,8 @@ public:
         // SteamVR may reuse its backbuffer once our copy has finished on the GPU
         BOOL done = FALSE;
         double until = NowSeconds() + 0.05;
-        while (context_->GetData(query_, &done, sizeof done, 0) != S_OK && NowSeconds() < until) std::this_thread::yield();
+        // poll gently: spinning here would steal a core from the game on a 4-core laptop
+        while (context_->GetData(query_, &done, sizeof done, 0) != S_OK && NowSeconds() < until) Sleep(1);
         presentPending_ = false;
     }
 
@@ -546,6 +551,7 @@ private:
 
     /** SteamVR paces its compositor on these events (a virtual display has no real vsync). */
     void VsyncLoop() {
+        timeBeginPeriod(1);
         vsyncBase_ = NowSeconds();
         double next = vsyncBase_;
         double lastStats = vsyncBase_;
@@ -553,8 +559,9 @@ private:
         while (running_) {
             next += 1.0 / cfg_.refreshHz;
             double wait = next - NowSeconds();
-            if (wait > 0.002) std::this_thread::sleep_for(std::chrono::microseconds(int64_t((wait - 0.001) * 1e6)));
-            while (NowSeconds() < next) std::this_thread::yield();
+            // 1 ms timer resolution (timeBeginPeriod) makes Sleep precise enough; no busy waiting
+            if (wait > 0.0015) Sleep(DWORD((wait - 0.001) * 1000));
+            while (NowSeconds() < next) Sleep(0);
             VRServerDriverHost()->VsyncEvent(0);
             double now = NowSeconds();
             if (now - lastStats > 1.0) {
@@ -609,6 +616,7 @@ public:
     EVRInitError Init(IVRDriverContext* ctx) override {
         VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
         cfg_.Load();
+        ApplySteamVrSettings();
         hmd_ = new PhoneHmd(cfg_, &link_);
         left_ = new TouchController(true);
         right_ = new TouchController(false);
@@ -658,6 +666,28 @@ public:
     void LeaveStandby() override {}
 
 private:
+    /**
+     * Keeps SteamVR from adding work: our render size is used as is (no automatic supersampling),
+     * and on integrated graphics the SteamVR Home environment, which alone can saturate an Intel
+     * UHD, is turned off (the dashboard still works).
+     */
+    void ApplySteamVrSettings() {
+        auto* st = VRSettings();
+        if (!st) return;
+        st->SetBool(k_pch_SteamVR_Section, k_pch_SteamVR_SupersampleManualOverride_Bool, true);
+        st->SetFloat(k_pch_SteamVR_Section, k_pch_SteamVR_SupersampleScale_Float, 1.0f);
+        int preset = hxvr::ResolvePreset(cfg_.preset);
+        if (preset == hxvr::PRESET_WEAK || preset == hxvr::PRESET_WEAKEST) {
+            st->SetBool(k_pch_SteamVR_Section, "enableHomeApp", false);
+            st->SetBool(k_pch_SteamVR_Section, k_pch_SteamVR_MotionSmoothing_Bool, false);
+        }
+        bool integrated = false;
+        std::wstring gpu = hxvr::PrimaryGpu(&integrated);
+        std::lock_guard<std::mutex> l(g_status.m);
+        char name[256]; WideCharToMultiByte(CP_UTF8, 0, gpu.c_str(), -1, name, sizeof name, nullptr, nullptr);
+        g_status.gpu = std::string(name) + (integrated ? " (integrada)" : "");
+    }
+
     /** The phone describes its screen; a different size or field of view needs one SteamVR restart. */
     void OnHello(const hxvr::Hello& h) {
         {
@@ -665,18 +695,24 @@ private:
             g_status.phone = "conectado: " + h.name;
         }
         g_status.Write();
-        bool changed = h.eyeWidth != cfg_.eyeWidth || h.eyeHeight != cfg_.eyeHeight || h.refreshHz != cfg_.refreshHz ||
+        // the PC renders and streams at its preset's share of what the phone asked for; the phone
+        // upscales and reprojects to its own refresh rate
+        hxvr::PresetParams pp = hxvr::Params(hxvr::ResolvePreset(cfg_.preset));
+        int eyeW = std::max(320, int(h.eyeWidth * pp.scale) / 16 * 16);
+        int eyeH = std::max(320, int(h.eyeHeight * pp.scale) / 8 * 8);
+        int fps = pp.fps > 0 ? std::min<int>(pp.fps, h.refreshHz) : h.refreshHz;
+        bool changed = eyeW != cfg_.eyeWidth || eyeH != cfg_.eyeHeight || fps != cfg_.refreshHz ||
                        std::fabs(h.tanLeft - cfg_.tanLeft) > 0.01f || std::fabs(h.tanRight - cfg_.tanRight) > 0.01f ||
                        std::fabs(h.tanUp - cfg_.tanUp) > 0.01f || std::fabs(h.tanDown - cfg_.tanDown) > 0.01f;
         if (!changed) { hmd_->SetStream(h.codecs, h.maxMbps); return; }
-        link_.Send(hxvr::MakeConfig(uint16_t(h.eyeWidth), uint16_t(h.eyeHeight), uint16_t(h.refreshHz), uint32_t(cfg_.bitrateMbps * 1000), hxvr::CODEC_H264, true));
-        cfg_.eyeWidth = h.eyeWidth; cfg_.eyeHeight = h.eyeHeight; cfg_.refreshHz = h.refreshHz;
+        link_.Send(hxvr::MakeConfig(uint16_t(eyeW), uint16_t(eyeH), uint16_t(fps), uint32_t(cfg_.bitrateMbps * 1000), hxvr::CODEC_H264, true));
+        cfg_.eyeWidth = eyeW; cfg_.eyeHeight = eyeH; cfg_.refreshHz = fps;
         cfg_.tanLeft = h.tanLeft; cfg_.tanRight = h.tanRight; cfg_.tanUp = h.tanUp; cfg_.tanDown = h.tanDown; cfg_.ipd = h.ipd;
         hxvr::Config saved; saved.Load();  // keep the IP and bitrate the app may have changed
         saved.eyeWidth = cfg_.eyeWidth; saved.eyeHeight = cfg_.eyeHeight; saved.refreshHz = cfg_.refreshHz;
         saved.tanLeft = cfg_.tanLeft; saved.tanRight = cfg_.tanRight; saved.tanUp = cfg_.tanUp; saved.tanDown = cfg_.tanDown; saved.ipd = cfg_.ipd;
         saved.Save();
-        Log("HyperXR: new phone display %dx%d @ %d Hz; restarting SteamVR\n", h.eyeWidth, h.eyeHeight, h.refreshHz);
+        Log("HyperXR: phone %dx%d @ %d Hz -> rendering %dx%d @ %d fps; restarting SteamVR\n", h.eyeWidth, h.eyeHeight, h.refreshHz, eyeW, eyeH, fps);
         VRServerDriverHost()->RequestRestart("O HyperXR ajustou o SteamVR para a tela do seu celular.", nullptr, nullptr, nullptr);
     }
 

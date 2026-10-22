@@ -74,6 +74,12 @@ Para manter fluido num celular fraco:
   - mãos sem desenho e a 12 Hz no Leve (20 no Equilibrado, 30 no Qualidade);
   - modo de desempenho sustentado ligado.
 
+## PC fraco
+
+Veja os perfis de desempenho do PC em `pc/README.md`. O perfil de PC fraco renderiza a 60% da
+resolução e a 45 fps, desliga o SteamVR Home e é escolhido sozinho quando a placa de vídeo é
+integrada. O celular reprojeta cada quadro para a taxa da própria tela.
+
 ## Limitações conhecidas
 
 - **Nada disso foi testado com SteamVR de verdade.** O driver e o programa foram compilados no

@@ -28,6 +28,35 @@ celular.
 - Quem abre a conexão é o PC, então o firewall do Windows não precisa de regra nova. Se o PC não
   alcançar o celular, o celular também tenta se conectar ao PC (porta 9944).
 
+## PC fraco (vídeo integrado Intel ou AMD)
+
+O campo **Desempenho do PC** define quanto o PC renderiza. No **Automático**, o programa
+reconhece vídeo integrado (por exemplo, Intel UHD 620 de notebook) e usa o perfil de PC fraco.
+
+| Perfil | Resolução renderizada | Quadros do PC |
+|---|---|---|
+| PC fraco | 60% da do celular | 45 por segundo |
+| PC muito fraco | 50% | 30 por segundo |
+| PC médio | 80% | 60 por segundo |
+| PC forte | 100% | os do celular |
+
+A tela do celular continua na taxa dela (60 Hz ou mais). A cada atualização da tela, o celular
+gira o último quadro do PC conforme a cabeça. Por isso virar a cabeça fica suave mesmo com o PC
+mandando 30 ou 45 quadros por segundo; o que anda a 30 ou 45 são a animação do jogo e a posição.
+
+Nos perfis fracos, o driver também:
+
+- desliga o SteamVR Home, cujo ambiente sozinho já ocupa uma GPU integrada (o painel do SteamVR
+  continua funcionando);
+- desliga o Motion Smoothing do SteamVR;
+- fixa o supersampling em 100%, para o SteamVR não aumentar a resolução por conta própria.
+
+O codificador é o Quick Sync da própria Intel (H.264 ou HEVC). A espera pela GPU e o relógio de
+vsync dormem em vez de girar em loop, o que libera um núcleo para o jogo num notebook de 4
+núcleos.
+
+Jogos pesados continuam pesados: uma Intel UHD 620 roda jogos VR simples, não os grandes.
+
 ## Controles (emulação do Quest 3 Touch)
 
 | Joy-Con | Quest 3 |
