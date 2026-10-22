@@ -59,6 +59,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Comandos de voz em português (botão "Voz" na barra): abrir apps, pesquisar, ambientes, modo, recentralizar, capturar, janelas, espaços — docs/NEW_FEATURES.md | ✅ parser (testes) · 🟡 aparelho |
 | Espaços de trabalho: salvar e reabrir conjuntos de janelas por nome | 🟡 |
 | Janela "Mundo real": imagem da câmera num painel móvel dentro do VR | 🟡 |
+| Assistente com IA no celular (MediaPipe LLM + Qwen 2.5): estado do runtime, conhecimento do HyperXR, ações, voz ou texto | ✅ protocolo e filtros (testes) · 🟡 aparelho |
+| Compartilhar tela 16:9: vídeo MP4, capturas, navegador (MJPEG), telas externas, gravação externa em 16:9 (Android 15+) | 🟡 |
 | Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |

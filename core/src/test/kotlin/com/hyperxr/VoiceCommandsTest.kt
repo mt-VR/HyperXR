@@ -29,6 +29,8 @@ class VoiceCommandsTest {
         assertEquals(VoiceCommand.Background("polyhaven-hdri:sunset"), p("ambiente sunset"))
         assertEquals(VoiceCommand.Search("receita de bolo"), p("pesquisar receita de bolo"))
         assertEquals(VoiceCommand.RealityWindow, p("mostrar o mundo real"))
+        assertEquals(VoiceCommand.Record(true), p("gravar a tela"))
+        assertEquals(VoiceCommand.Record(false), p("parar gravação"))
         assertTrue(p("blá blá") is VoiceCommand.Unknown)
     }
 

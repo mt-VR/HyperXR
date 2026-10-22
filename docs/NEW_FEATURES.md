@@ -34,3 +34,66 @@ cada app (posição num vídeo, rascunhos) não é guardado.
 App **Mundo real**, ou o comando de voz "mundo real". É um painel móvel com a imagem da câmera
 que o hand tracking ou a realidade mista já usam. Serve para ver a mesa, o celular ou quem
 entrou na sala sem sair do ambiente 360. Sem a câmera ligada, o painel explica como ligá-la.
+
+# Assistente com IA no celular
+
+App **Assistente** na biblioteca, ou o botão **Voz** da barra de tarefas, que agora fala com o
+assistente.
+
+- **Entrada:** a voz vira texto pelo reconhecimento de fala do Android/Google. Também dá para
+  digitar no painel.
+- **IA:** um modelo de linguagem pequeno roda no próprio celular, com MediaPipe LLM Inference e
+  Qwen 2.5 da Alibaba (licença Apache 2.0). O modelo é baixado uma vez do Hugging Face
+  (litert-community) pelo painel e depois funciona sem internet. Há duas opções: 1.5B (1,6 GB,
+  entende melhor, precisa de ~6 GB de RAM) e 0.5B (550 MB, leve, erra mais). O painel indica a
+  melhor para o celular.
+- **O que a IA vê:** a cada pergunta ela recebe o estado do runtime:
+  - modo XR, rastreamento e mãos;
+  - fundo, modo do launcher e bateria;
+  - janelas abertas, apps, ambientes e espaços salvos;
+  - Joy-Cons conectados;
+  - ajustes atuais.
+
+  Também recebe os trechos do conhecimento sobre o HyperXR que combinam com a pergunta
+  (`core/.../assistant/AssistantKnowledge.kt`).
+- **O que a IA faz:** responde perguntas e executa ações:
+  - abrir apps e pesquisar;
+  - trocar fundo e modo;
+  - recentralizar e capturar;
+  - gerenciar janelas e espaços;
+  - abrir o mundo real;
+  - gravar a tela;
+  - mudar ajustes (hand tracking, toque direto, fps, escala de render, IPD, FOV, volume).
+- **Segurança contra erros do modelo** (`AssistantBrain`, com testes):
+  - perguntas nunca executam ações;
+  - fechar janelas, salvar ou abrir espaços, trocar o modo e mudar ajustes só acontecem se o
+    pedido falar disso;
+  - valores fora da faixa são limitados.
+- **Comandos curtos** como "abre o YouTube" vão direto ao parser de palavras-chave, sem esperar o
+  modelo. Sem modelo baixado, esses comandos continuam funcionando.
+- **Resposta falada:** opção de ler as respostas em voz alta (TextToSpeech pt-BR).
+
+As instruções foram testadas no PC com os mesmos modelos Qwen 2.5 (versão transformers), não no
+celular.
+
+# Compartilhar tela 16:9
+
+App **Compartilhar tela** na biblioteca. Uma câmera de espectador renderiza a cena numa imagem
+única em 16:9, sem a divisão em duas lentes e sem a distorção. A resolução pode ser 720p, 1080p
+ou 1440p. Por padrão a câmera é estabilizada, com a rotação suavizada; sobre a câmera do celular
+(MR) ela segue a cabeça exatamente, para a imagem continuar alinhada. Essa imagem só é
+renderizada enquanto algo a usa, em até 30 fps.
+
+- **Gravar vídeo:** MP4 H.264, com microfone opcional, salvo em `Filmes/HyperXR`. Também por
+  voz: "gravar", "parar gravação".
+- **Capturas:** a Captura agora sai em 16:9 nessa resolução, não mais a metade esquerda da tela.
+- **Navegador:** a opção *Transmitir para o navegador* mostra o endereço
+  `http://<ip-do-celular>:8090`. Qualquer navegador no mesmo Wi-Fi assiste em 720p (MJPEG).
+- **Telas externas:** HDMI/USB-C, Miracast ou transmissão que ofereça segunda tela recebem a
+  imagem 16:9 sozinhas.
+- **Gravação externa em 16:9:** no Android 15 ou mais novo o sistema avisa quando outro app grava
+  ou espelha a tela. Com a opção ligada (padrão), a tela do celular mostra a imagem 16:9 enquanto
+  isso, então o gravador do sistema grava em 16:9. Durante a gravação o visor sai do modo lentes.
+  No Android 14 ou mais antigo o app não tem como saber que está sendo gravado: use *Gravar
+  vídeo*.
+- **Limite:** o jogo Gato vs. Vovó tem um renderizador próprio e ainda não passa por isso.

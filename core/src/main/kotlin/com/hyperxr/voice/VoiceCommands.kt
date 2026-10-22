@@ -19,6 +19,8 @@ sealed class VoiceCommand {
     object RealityWindow : VoiceCommand()
     /** A setting change asked of the assistant ("fps" to "60"); keys in AssistantBrain.SETTINGS. */
     data class Setting(val key: String, val value: String) : VoiceCommand()
+    /** Start or stop the 16:9 screen recording. */
+    data class Record(val start: Boolean) : VoiceCommand()
     data class Unknown(val heard: String) : VoiceCommand()
 }
 
@@ -56,6 +58,7 @@ object VoiceCommands {
         }
         if (has("mundo real", "janela real", "ver a sala", "ver o quarto", "portal")) return VoiceCommand.RealityWindow
         if (has("recentralizar", "centralizar", "recentrar")) return VoiceCommand.Recenter
+        if (has("gravar", "gravacao", "grava", "gravando")) return VoiceCommand.Record(!has("parar", "para", "pare", "terminar", "encerrar", "salvar"))
         if (has("capturar", "captura", "print", "screenshot") || has("tirar foto")) return VoiceCommand.Capture
         if (has("fechar", "fecha", "feche") && has("janela", "janelas", "tudo")) return VoiceCommand.CloseWindows
         if (has("esconder", "esconde", "minimizar", "ocultar") && has("janela", "janelas")) return VoiceCommand.HideWindows

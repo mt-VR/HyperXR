@@ -86,13 +86,15 @@ class XrContext(
     /** Run on the UI thread (start activities, web views...). */
     fun ui(block: () -> Unit) = activity.runOnUiThread(block)
     var requestRecenter: () -> Unit = {}
-    /** Set by content; the engine fills it with the left-eye image after the next composite. */
+    /** Set by content; the engine fills it with the 16:9 spectator image of the next frame. */
     @Volatile var captureRequest: ((android.graphics.Bitmap) -> Unit)? = null
     var trackingDescription = ""
     /** Live hand-tracking status for in-XR diagnostics. */
     var handStatus: () -> String = { "" }
     /** The camera image when one is running (MR, or VR with hand tracking), for content that shows it. */
     var camera: com.hyperxr.rendering.CameraImageSource? = null
+    /** 16:9 screen sharing (recording, external displays, browser stream). */
+    lateinit var share: com.hyperxr.share.ScreenShare
 }
 
 interface XrContent {
@@ -138,6 +140,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     private val xrTargets = HashMap<Int, RenderTarget>()
 
     private val eyes = arrayOf(EyeView(), EyeView())
+    val share = com.hyperxr.share.ScreenShare(activity)
+    private val spectatorEye = EyeView()
     private var lastFrameNs = 0L
     private var width = 0
     private var height = 0
@@ -149,6 +153,8 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         joyCons.settings = settings.controllers
         joyCons.onAction = { side, ev -> pendingActions += Triple(ev.action, ev.pressed, side) }
         joyCons.start()
+        share.displays.start()
+        share.externalRecordingDetector.start()
         hands.configure(settings.handTracking, settings.performance.handInferenceHz)
         hands.onPalmMeasured = { palm ->
             app.settings.update { it.copy(handTracking = it.handTracking.copy(calibratedPalmMm = palm * 1000f)) }
@@ -168,6 +174,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         compositor.init()
         aura.opacity = settings.handTracking.auraOpacity
         ctx = XrContext(activity, settings, decision, renderer, images, icons, audio, scene, input)
+        ctx.share = share
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
@@ -312,6 +319,16 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         val r0 = System.nanoTime()
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
+        // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only
+        // while something uses it
+        val capture = ctx.captureRequest
+        val spectator = share.wanted(capture != null)
+        if (spectator) {
+            share.follow(input.head, dt, overCamera = scene.background == Background.PASSTHROUGH && ctx.passthroughAvailable)
+            setupSpectator(camera)
+            renderEye(spectatorEye, share.target(), camera)
+            share.deliver()
+        }
         if (openXrSession != 0L) {
             if (xrFrame == 1) {
                 for (eye in 0..1) {
@@ -328,6 +345,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         } else {
             // Over a mono camera image, per-eye offsets would make virtual hands/panels double up
             // against the real ones; MR renders both eyes from the camera viewpoint unless asked.
+            if (share.monoScreen && spectator) {
+                // another app is recording or mirroring the screen: show it the 16:9 view
+                share.drawOnScreen(width, height)
+            } else {
             val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
             val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
             for (eye in 0..1) {
@@ -336,7 +357,12 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
                 renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
             }
             compositor.composite(settings.graphics)
-            ctx.captureRequest?.let { cb -> ctx.captureRequest = null; cb(readLeftHalf()) }
+            }
+        }
+        if (capture != null) {
+            ctx.captureRequest = null
+            val bmp = if (spectator) share.snapshot() else null
+            capture(bmp ?: readLeftHalf())
         }
         Diagnostics.record(Stage.RENDER_CPU, System.nanoTime() - r0)
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
@@ -400,6 +426,26 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         compositor.eyeTanH = th; compositor.eyeTanV = tv
         Mat4.frustumTan(-th, th, -tv, tv, 0.05f, 200f, eye.proj)
         eye.update()
+    }
+
+    /** Mono 16:9 frustum from the (steadied) spectator pose; over the camera it matches the image. */
+    private fun setupSpectator(cam: CameraImageSource?) {
+        val e = spectatorEye
+        e.index = 0
+        e.position.set(share.pose.position)
+        Mat4.compose(share.pose.position, share.pose.orientation, 1f, 1f, 1f, headMatrix)
+        Mat4.invertRigid(headMatrix, e.view)
+        val a = 16f / 9f
+        val tv: Float; val th: Float
+        if (renderer.passthroughFill && scene.background == Background.PASSTHROUGH && cam != null && cam.hasFrame) {
+            val (cu, cv) = SceneRenderer.fillCrop(a, cam)
+            th = cam.regionTanX * cu; tv = cam.regionTanY * cv
+        } else {
+            tv = 0.625f  // ~64 degrees vertical, ~96 horizontal: close to what one eye sees
+            th = tv * a
+        }
+        Mat4.frustumTan(-th, th, -tv, tv, 0.05f, 200f, e.proj)
+        e.update()
     }
 
     private fun setupEyeFromXr(eye: EyeView, o: Int) {
@@ -529,6 +575,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         content.onGlRelease()
         images.clear()
         compositor.release()
+        share.release()
         xrTargets.values.forEach { it.release() }
         if (openXrSession != 0L) { OpenXrNative.nativeDestroySession(openXrSession); openXrSession = 0L }
     }

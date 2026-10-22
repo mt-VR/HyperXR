@@ -87,7 +87,7 @@ object AssistantBrain {
             appendLine("Responda SÓ com JSON: {\"resposta\":\"texto ao usuário\",\"acoes\":[...]}")
             appendLine("Perguntas e problemas: explique os passos com base em SOBRE O HYPERXR e no ESTADO, sem inventar, e use \"acoes\":[].")
             appendLine("Ações (só quando o pedido mandar fazer algo):")
-            appendLine("abrir_app:nome · pesquisar:texto · fundo:camera|escurecer|ambiente · modo:dock|new · recentralizar · capturar · fechar_janelas · esconder_janelas · mostrar_janelas · biblioteca · mundo_real · salvar_espaco:nome · abrir_espaco:nome · ajuste:nome=valor")
+            appendLine("abrir_app:nome · pesquisar:texto · fundo:camera|escurecer|ambiente · modo:dock|new · recentralizar · capturar · fechar_janelas · esconder_janelas · mostrar_janelas · biblioteca · mundo_real · gravar_tela · parar_gravacao · salvar_espaco:nome · abrir_espaco:nome · ajuste:nome=valor")
             appendLine("Ajustes: " + SETTINGS.entries.joinToString(" ") { "${it.key}(${it.value})" })
             appendLine()
             appendLine("ESTADO AGORA")
@@ -177,6 +177,7 @@ object AssistantBrain {
         VoiceCommand.ShowWindows -> "Mostrando as janelas."
         VoiceCommand.Library -> "Biblioteca."
         VoiceCommand.RealityWindow -> "Abrindo a janela do mundo real."
+        is VoiceCommand.Record -> if (c.start) "Gravando em 16:9." else "Gravação salva em Filmes/HyperXR."
         is VoiceCommand.Unknown -> "Não entendi: ${c.heard}"
     }
 
@@ -230,6 +231,8 @@ object AssistantBrain {
             "mostrar_janelas" -> VoiceCommand.ShowWindows
             "biblioteca" -> VoiceCommand.Library
             "mundo_real" -> VoiceCommand.RealityWindow
+            "gravar_tela", "gravar" -> VoiceCommand.Record(true)
+            "parar_gravacao" -> VoiceCommand.Record(false)
             "salvar_espaco" -> VoiceCommand.SaveWorkspace(arg.ifEmpty { "espaço" })
             "abrir_espaco" -> VoiceCommands.closest(arg, s.workspaces.map { Named(it, it) })?.let { VoiceCommand.OpenWorkspace(it.id) }
             "ajuste", "ajustes", "configurar", "setting" -> setting(arg)
@@ -278,6 +281,7 @@ object AssistantBrain {
                 is VoiceCommand.SaveWorkspace -> said("salv", "guard") && said("espac", "workspace")
                 is VoiceCommand.SetMode -> said("modo", "dock", "new")
                 VoiceCommand.Capture -> said("captur", "print", "foto", "screenshot")
+                is VoiceCommand.Record -> said("grav")
                 is VoiceCommand.Setting -> said(*SETTING_WORDS.getValue(a.key))
                 else -> true
             }

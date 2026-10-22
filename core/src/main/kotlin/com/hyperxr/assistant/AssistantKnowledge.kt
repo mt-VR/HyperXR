@@ -62,6 +62,8 @@ object AssistantKnowledge {
             "Teclado XR: abre ao tocar num campo de texto ou no botão Teclado da janela; tem botão de ditado por voz."),
         Topic(listOf("capturar", "captura", "print", "screenshot", "gravar"),
             "Captura: menu radial > Captura ou dizer \"capturar\"; as imagens vão para a Galeria."),
+        Topic(listOf("gravar", "gravacao", "video", "compartilhar", "transmitir", "tv", "16", "9", "hdmi", "espelhar", "stream"),
+            "Compartilhar tela 16:9: grava vídeo MP4 em 720p/1080p/1440p sem as duas lentes (Filmes/HyperXR), transmite para o navegador no mesmo Wi-Fi, mostra em telas externas e, no Android 15+, deixa gravações de outros apps em 16:9."),
         Topic(listOf("sair", "configuracoes", "ajustes", "2d"),
             "Configurações 2D: Ajustes rápidos > Sair para as configurações 2D. Lá ficam gráficos, rastreamento, hand tracking, controles e áudio."),
         Topic(listOf("sdk", "hyperx", "lua", "criar", "desenvolver"),

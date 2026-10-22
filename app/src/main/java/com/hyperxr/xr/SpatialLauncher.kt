@@ -568,6 +568,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)
+            "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
@@ -844,7 +845,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     @Volatile private var voiceUntil = 0L
     @Volatile private var listening = false
 
-    override fun voiceStatus(): String { followAssistant(); return if (listening || System.currentTimeMillis() < voiceUntil) voiceText else "" }
+    override fun voiceStatus(): String {
+        followAssistant()
+        if (listening || System.currentTimeMillis() < voiceUntil) return voiceText
+        // otherwise the taskbar shows what is being shared ("Gravando 0:12")
+        return if (::ctx.isInitialized) ctx.share.summary else ""
+    }
 
     private fun voiceSay(text: String) { voiceText = text; voiceUntil = System.currentTimeMillis() + 4000 }
 
@@ -941,6 +947,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             com.hyperxr.voice.VoiceCommand.Library -> toggleLibrary()
             com.hyperxr.voice.VoiceCommand.RealityWindow -> openSystem("reality")
             is com.hyperxr.voice.VoiceCommand.Setting -> applySetting(cmd.key, cmd.value)
+            is com.hyperxr.voice.VoiceCommand.Record -> if (cmd.start) ctx.share.startRecording() else ctx.share.stopRecording()
             is com.hyperxr.voice.VoiceCommand.Unknown -> Unit
         }
         taskbar.dirty = true
