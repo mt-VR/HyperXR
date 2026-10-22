@@ -45,8 +45,9 @@ Testes da ponte JNI real no host: veja [docs/TESTING.md](docs/TESTING.md).
 4. Coloque o celular no VR Box. Para clicar: olhe para o botão por ~1 s (anel de progresso no
    retículo), toque na tela/botão do visor, pinçe com a mão apontada para o botão, toque o botão com
    o dedo (Direct Touch) ou use o R do Joy-Con.
-5. Mãos: uma **bolinha** fica entre o polegar e o indicador e o raio sai dela; o anel em volta
-   fecha conforme você pinça, e **pinçar é tocar** (segurar e mover arrasta/rola a página).
+5. Mãos: uma **bolinha** fica entre o polegar e o indicador (sem feixe) e se preenche conforme você
+   pinça; **pinçar é tocar** (segurar e mover arrasta/rola a página). Joy-Con: o **analógico** move
+   o cursor, **A** clica, **B** volta/fecha (segurar B fecha a janela), R/ZR + analógico rola.
 6. Gestos: pinçar e segurar longe de botões abre o **menu radial** (Voltar, Início, Teclado,
    Captura); deslizar o polegar sobre o indicador **rola**; dois toques do polegar **voltam**;
    pinça longa num link do navegador **arrasta** o link para outra janela.
@@ -77,6 +78,7 @@ outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 - [Modelo de segurança do SDK](docs/SECURITY.md)
 - [Desempenho e metodologia de latência](docs/PERFORMANCE.md)
 - [Hand tracking](docs/HAND_TRACKING.md)
+- [HyperXR Runtime (OpenXR próprio)](docs/OPENXR_RUNTIME.md)
 - [Ícones](docs/ICONS.md)
 - [Testes](docs/TESTING.md)
 - [Status das funcionalidades](docs/STATUS.md)
@@ -84,6 +86,7 @@ outras arquiteturas o HyperXR usa o WebView do sistema. Licença: MPL 2.0.
 ## Licenças de terceiros
 
 - LuaJIT — MIT (`native/luajit/COPYRIGHT`)
+- Cabeçalhos OpenXR (`native/openxr-runtime/include`) — Apache-2.0 OR MIT, Khronos Group
 - Khronos OpenXR loader — Apache-2.0 (dependência Maven `org.khronos.openxr:openxr_loader_for_android`)
 - ARCore SDK, MediaPipe Tasks Vision, AndroidX, Jetpack Compose — Apache-2.0
 - GeckoView (Mozilla) — MPL-2.0 (dependência Maven `org.mozilla.geckoview:geckoview-arm64-v8a`)

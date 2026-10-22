@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -121,6 +122,34 @@
             android:name=".handtracking.HandTestActivity"
             android:exported="false"
             android:screenOrientation="landscape"
+            android:theme="@style/Theme.HyperXR.Immersive" />
+
+        <!-- HyperXR OpenXR runtime: discovered by the Khronos runtime broker through this service's
+             metadata; the library is loaded by the OpenXR loader inside each OpenXR app. -->
+        <service
+            android:name=".openxr.RuntimeService"
+            android:exported="true"
+            android:label="HyperXR Runtime"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+            </intent-filter>
+            <meta-data android:name="org.khronos.openxr.OpenXRRuntime.SoFilename" android:value="libhyperxr_openxr.so" />
+            <meta-data android:name="org.khronos.openxr.OpenXRRuntime.MajorVersion" android:value="1" />
+        </service>
+
+        <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps. Read-only numbers. -->
+        <provider
+            android:name=".openxr.RuntimeConfigProvider"
+            android:authorities="com.hyperxr.runtime"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <activity
+            android:name=".openxr.RuntimeTestActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.HyperXR.Immersive" />
 
         <activity

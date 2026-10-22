@@ -28,4 +28,6 @@ object OpenXrNative {
     @JvmStatic external fun nativeSessionState(handle: Long): String
     @JvmStatic external fun nativeRequestExit(handle: Long)
     @JvmStatic external fun nativeDestroySession(handle: Long)
+    /** Drives a GLES session on the HyperXR runtime (libhyperxr_openxr.so) for [seconds]; returns a report. */
+    @JvmStatic external fun nativeRuntimeSelfTest(activity: Activity, seconds: Int): String
 }

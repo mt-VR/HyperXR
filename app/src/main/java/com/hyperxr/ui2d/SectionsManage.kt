@@ -129,6 +129,13 @@ fun RuntimeSection(a: MainActivity) {
     val s = a.settingsState.runtime
     var probe by remember { mutableStateOf<RuntimeProbe?>(broker.lastProbe) }
     var probing by remember { mutableStateOf(false) }
+    SectionCard("HyperXR Runtime (OpenXR próprio)", "Runtime OpenXR do próprio HyperXR: apps OpenXR rodam no VR Box com 3DoF, lente corrigida e timewarp.") {
+        Note("Para apps OpenXR usarem este runtime, instale o \"OpenXR Runtime Broker\" da Khronos e escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
+        Note("Suporta: sessões OpenGL ES, camadas de projeção e quad, espaços VIEW/LOCAL/STAGE/LOCAL_FLOOR, ações (sem controles: o runtime roda dentro do app e não recebe os Joy-Cons). Sem Vulkan nem 6DoF.")
+        Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.openxr.RuntimeTestActivity::class.java)) }) {
+            Text("Testar o runtime HyperXR no visor (15 s)")
+        }
+    }
     SectionCard("Runtime Broker do HyperXR", "Descobre runtimes OpenXR, mostra capacidades reais e evita sessões concorrentes. Não substitui o loader nem o broker da Khronos.") {
         KeyValue("Broker Khronos", if (brokerInstalled) "instalado" else "não encontrado (o loader usa o runtime do sistema, se houver)")
         if (runtimes.isEmpty()) Note("Nenhum runtime OpenXR instalado. Para usar o Monado instale o APK do runtime e selecione-o no broker.", HxColors.warn)

@@ -52,13 +52,14 @@ aparelho (quadro sintético sem mão: mede o detector de palma).
 - **Aura preta**: campo de distância de cápsulas unido por blending MAX em meia resolução e
   composto como borda escura + interior translúcido; some com Joy-Cons conectados.
 
-- **Pinça**: distância polegar–indicador dividida pelo comprimento da palma (liga em 25 %, desliga em
-  40 %), então funciona igual perto ou longe da câmera e para mãos grandes ou pequenas.
+- **Pinça**: medida nos *world landmarks* do MediaPipe (um modelo 3D métrico e consistente da mão),
+  como distância polegar–indicador dividida pelo comprimento da palma: fecha abaixo de 38 % e abre
+  acima de 55 %. Antes era medida nas juntas reconstruídas em espaço de câmera, cuja profundidade
+  por junta é ruidosa: a pinça raramente fechava. O teste de detecção mostra a porcentagem ao vivo.
 - **Raio estável**: ombro estimado → articulação da base do indicador (que quase não se move ao
   pinçar), filtrado por One Euro na origem e na direção; se o rastreamento falha por até 350 ms o
   raio fica parado em vez de pular.
-- **Controles 6DoF pela mão**: com Joy-Cons, a posição e a orientação do controle vêm da mão
-  rastreada; o IMU é opcional e, quando ligado, é corrigido continuamente em direção ao raio da mão.
+- **Sem feixe**: a bolinha de pinça marca a mão; o alvo é indicado só pelo cursor na superfície.
 - **Menu radial**: pinçar e segurar (~0,45 s) longe de botões e janelas abre um anel em volta da mão
   com Voltar, Início, Teclado e Captura; mova a mão na direção do item e solte para confirmar
   (soltar no centro cancela).

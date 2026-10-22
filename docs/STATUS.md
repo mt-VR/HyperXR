@@ -27,6 +27,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | OpenXR: sessão GLES, swapchains, laço de quadros | 🟡 (código completo; precisa de runtime instalado) |
 | Runtime Broker (descoberta, seleção, árbitro de sessão) | ✅ modelo · 🟡 Android |
 | Monado | 🚫 não embutido (ver ARCHITECTURE.md); detectado e preferido quando instalado |
+| **HyperXR Runtime** (runtime OpenXR próprio, GLES, 3DoF, lente + timewarp, quad layers) | ✅ host (196 verificações, ASan) · 🟡 aparelho · ver OPENXR_RUNTIME.md |
+| Entrada de controles para apps OpenXR no HyperXR Runtime | 🚫 o runtime roda no processo do app |
 | Mãos/controles vindos do runtime OpenXR (XR_EXT_hand_tracking, ações) | ⏳ |
 | Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
 | Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |
@@ -46,7 +48,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Janelas acima da dock (Dock) e à frente dos ícones (New); botão Início minimiza/restaura | 🟡 |
 | Reabrir janelas (abas e apps Android) ao entrar no XR; redimensionar (Menor/Maior) | 🟡 |
 | Teclado XR menor e próximo, acentos (áç), ditado por voz (SpeechRecognizer) | 🟡 |
-| Bolinha de pinça na mão: o raio sai dela; pinçar = toque real (down/move/up) | 🟡 |
+| Bolinha de pinça na mão, sem feixe; pinçar = toque real (down/move/up) | 🟡 |
 | Apps Android em janela plana ou curva via Shizuku (display virtual + injeção de toque/tecla/texto) | 🟡 · 🚫 sem Shizuku |
 | Teclado XR (QWERTY, símbolos) para navegador e apps | 🟡 |
 | Arrastar link entre janelas (pinça longa no link, soltar em outra janela ou no vazio) | ✅ lógica · 🟡 aparelho |
@@ -62,9 +64,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Hand tracking também no modo VR (câmera só para as mãos) | 🟡 |
 | Clique por olhar (dwell com anel de progresso), toque travado (não perde toques curtos), raio de mão + pinça | ✅ lógica (core e Lua) · 🟡 aparelho |
 | Aura preta (campo SDF unido + composição) | 🟡 |
-| Joy-Cons: botões, R/L configuráveis, reconexão, IMU quando o driver expõe | ✅ lógica · 🟡 Android |
-| Fusão mão + orientação do controle com calibração | ✅ |
-| 6DoF dos controles pela mão (IMU opcional corrigido pela mão), raio estabilizado | ✅ lógica · 🟡 aparelho |
+| Joy-Cons: analógico move o cursor, A clica/arrasta, B volta/fecha (segurar fecha a janela), R/ZR + analógico rola; sem sensores de movimento | ✅ lógica · 🟡 Android |
+| Pinça medida nos landmarks métricos do MediaPipe (fecha < 38 % da palma, abre > 55 %) | ✅ lógica · 🟡 aparelho |
 | Tamanho real da mão (calibração por ARCore Depth ou comprimento informado), pinça proporcional | ✅ lógica · 🟡 aparelho |
 | Menu radial por pinça segurada (Voltar, Início, Teclado, Captura) | ✅ lógica · 🟡 aparelho |
 | Microgestos: polegar no indicador rola, toque duplo volta | ✅ lógica · 🟡 aparelho |

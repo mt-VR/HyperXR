@@ -19,6 +19,16 @@ tools/build_host_bridge.sh /tmp/luajit /tmp/hxbridge
 ```
 Sem `-Phyperxr.hostBridge` esses testes são pulados (Assume).
 
+## Runtime OpenXR no host
+
+```sh
+native/openxr-runtime/tests/run_host_tests.sh
+```
+
+Compila o runtime com a camada de plataforma headless e roda 196 verificações (AddressSanitizer +
+UBSan): negociação com o loader, extensões, caminhos, sistema, estados da sessão, ciclo de quadros,
+espaços, visões, perda de rastreamento e ações. Veja [OPENXR_RUNTIME.md](OPENXR_RUNTIME.md).
+
 ## O que não foi testado
 
 Não há aparelho nem emulador neste ambiente (sem KVM). Tudo que depende de hardware — renderização
