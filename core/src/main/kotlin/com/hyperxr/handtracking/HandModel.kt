@@ -39,6 +39,9 @@ class LandmarkObservation(
     val image: FloatArray = FloatArray(HandJoint.COUNT * 3),
     /** Model presence/landmark score in [0,1]. */
     var score: Float = 0f,
+    /** Metric 3D landmarks from the model (x, y, z per joint, metres, hand-centred), when provided. */
+    val world: FloatArray = FloatArray(HandJoint.COUNT * 3),
+    var hasWorld: Boolean = false,
     var timestampNs: Long = 0L,
 )
 
@@ -58,11 +61,30 @@ class HandState(val handedness: Handedness) {
     var depthSource: DepthSource = DepthSource.NONE
     /** 0..1 thumb-index closure. */
     var pinchStrength: Float = 0f
+    /** Last measured thumb–index distance / palm length (NaN before the first frame). */
+    var pinchRatio: Float = Float.NaN
     var gesture: Gesture = Gesture.NONE
     var timestampNs: Long = 0L
 
     /** Includes the short coasting phase after a missed detection (gesture and position are held). */
     val isUsable: Boolean get() = state != TrackingState.NOT_TRACKED
+}
+
+/**
+ * Thumb–index closure measured on the model's metric world landmarks: tip distance divided by the
+ * palm length (wrist to middle knuckle). These landmarks come from one consistent 3D hand model, so
+ * the ratio does not suffer from the per-joint depth noise of the camera-space reconstruction.
+ * Returns NaN when unavailable.
+ */
+fun pinchRatioFromWorld(o: LandmarkObservation): Float {
+    if (!o.hasWorld) return Float.NaN
+    fun d(a: Int, b: Int): Float {
+        val dx = o.world[a * 3] - o.world[b * 3]; val dy = o.world[a * 3 + 1] - o.world[b * 3 + 1]; val dz = o.world[a * 3 + 2] - o.world[b * 3 + 2]
+        return kotlin.math.sqrt(dx * dx + dy * dy + dz * dz)
+    }
+    val palm = d(HandJoint.WRIST, HandJoint.MIDDLE_MCP)
+    if (palm < 1e-4f) return Float.NaN
+    return d(HandJoint.THUMB_TIP, HandJoint.INDEX_TIP) / palm
 }
 
 enum class Gesture(val id: Int) { NONE(0), OPEN_PALM(1), PINCH(2), POINT(3), FIST(4), GRAB(5) }

@@ -1,11 +1,7 @@
 package com.hyperxr.joycon
 
 import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
 import android.hardware.input.InputManager
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.InputDevice
@@ -14,49 +10,23 @@ import android.view.MotionEvent
 import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.input.ButtonMapper
 import com.hyperxr.input.ControllerButton
-import com.hyperxr.input.ImuOrientationFilter
-import com.hyperxr.math.Quat
 
 enum class JoyConSide { LEFT, RIGHT, PRO, COMBINED }
 
-/** Live state of one Nintendo controller as Android exposes it. */
+/** Live state of one Nintendo controller as Android exposes it (buttons + analog stick, no motion sensors). */
 class JoyCon(val deviceId: Int, val name: String, val side: JoyConSide) {
     @Volatile var buttons = 0
     @Volatile var stickX = 0f
     @Volatile var stickY = 0f
-    val imu = ImuOrientationFilter()
-    @Volatile var hasImu = false
-    @Volatile var lastImuNs = 0L
-    val orientation = Quat()
-    var listener: SensorEventListener? = null
-    private val gyro = FloatArray(3)
-    private val lock = Any()
-
-    fun onSensor(e: SensorEvent) {
-        synchronized(lock) {
-            when (e.sensor.type) {
-                Sensor.TYPE_GYROSCOPE -> {
-                    gyro[0] = e.values[0]; gyro[1] = e.values[1]; gyro[2] = e.values[2]
-                }
-                Sensor.TYPE_ACCELEROMETER -> {
-                    val dt = if (lastImuNs == 0L) 0.005f else ((e.timestamp - lastImuNs) / 1e9f).coerceIn(0.0005f, 0.05f)
-                    lastImuNs = e.timestamp
-                    imu.update(gyro[0], gyro[1], gyro[2], e.values[0], e.values[1], e.values[2], dt)
-                    orientation.set(imu.orientation)
-                    hasImu = true
-                }
-            }
-        }
-    }
-
-    fun orientationSnapshot(out: Quat) { synchronized(lock) { out.set(orientation) } }
+    /** Second stick (Pro Controller / paired Joy-Cons): used for scrolling. */
+    @Volatile var stick2X = 0f
+    @Volatile var stick2Y = 0f
 }
 
 /**
  * Detects Joy-Cons / Pro Controllers through Android's input stack (Bluetooth HID handled by the
- * OS driver). Buttons come from KeyEvents; orientation from the controller IMU when the kernel
- * driver exposes it to Android (InputDevice sensors, Android 12+). When no IMU is exposed the
- * controller still works for buttons and the pointer falls back to the hand/gaze direction.
+ * OS driver). Buttons come from KeyEvents and the stick from joystick MotionEvents. Motion sensors
+ * are deliberately not used: navigation is the stick (cursor), A (click) and B (back/close).
  */
 class JoyConManager(context: Context) : InputManager.InputDeviceListener {
     private val im = context.getSystemService(InputManager::class.java)
@@ -84,27 +54,12 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
         if (controllers.containsKey(deviceId)) return
         val jc = JoyCon(deviceId, dev.name, side)
         controllers[deviceId] = jc
-        if (Build.VERSION.SDK_INT >= 31) {
-            val sm = dev.sensorManager
-            val gyro = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-            val acc = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            if (gyro != null && acc != null) {
-                val l = object : SensorEventListener {
-                    override fun onSensorChanged(e: SensorEvent) = jc.onSensor(e)
-                    override fun onAccuracyChanged(s: Sensor?, a: Int) {}
-                }
-                sm.registerListener(l, gyro, 5000)
-                sm.registerListener(l, acc, 5000)
-                jc.listener = l
-            }
-        }
-        Diagnostics.log("Controller connected: ${dev.name} ($side)${if (jc.listener != null) " with IMU" else " (no IMU exposed)"}")
+        Diagnostics.log("Controller connected: ${dev.name} ($side)")
         onChange?.invoke()
     }
 
     override fun onInputDeviceRemoved(deviceId: Int) {
         val jc = controllers.remove(deviceId) ?: return
-        if (Build.VERSION.SDK_INT >= 31) jc.listener?.let { l -> InputDevice.getDevice(deviceId)?.sensorManager?.unregisterListener(l) }
         // A button held while Bluetooth dropped must not stay pressed.
         mapperFor(jc.side).releaseAll().forEach { onAction?.invoke(jc.side, it) }
         Diagnostics.log("Controller disconnected: ${jc.name}")
@@ -133,15 +88,35 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
     fun onMotionEvent(e: MotionEvent): Boolean {
         val jc = controllers[e.deviceId] ?: return false
         if (e.source and InputDevice.SOURCE_JOYSTICK == 0) return false
-        jc.stickX = e.getAxisValue(MotionEvent.AXIS_X).let { if (kotlin.math.abs(it) < 0.12f) 0f else it }
-        jc.stickY = -e.getAxisValue(MotionEvent.AXIS_Y).let { if (kotlin.math.abs(it) < 0.12f) 0f else it }
+        // A single right Joy-Con reports its stick on the right-stick axes (Z/RZ or RX/RY) on most
+        // drivers, the left one on X/Y: use whichever pair is deflected.
+        val a = dz(e.getAxisValue(MotionEvent.AXIS_X)) to dz(-e.getAxisValue(MotionEvent.AXIS_Y))
+        val b = dz(e.getAxisValue(MotionEvent.AXIS_Z)) to dz(-e.getAxisValue(MotionEvent.AXIS_RZ))
+        val c = dz(e.getAxisValue(MotionEvent.AXIS_RX)) to dz(-e.getAxisValue(MotionEvent.AXIS_RY))
+        val right = if (mag(b) >= mag(c)) b else c
+        if (jc.side == JoyConSide.PRO || jc.side == JoyConSide.COMBINED) {
+            jc.stickX = right.first; jc.stickY = right.second   // right stick: cursor
+            jc.stick2X = a.first; jc.stick2Y = a.second         // left stick: scroll
+        } else {
+            val main = if (mag(a) >= mag(right)) a else right
+            jc.stickX = main.first; jc.stickY = main.second
+        }
         // ZL/ZR may arrive as analog triggers on some drivers
         val zr = e.getAxisValue(MotionEvent.AXIS_RTRIGGER).coerceAtLeast(e.getAxisValue(MotionEvent.AXIS_GAS))
         val zl = e.getAxisValue(MotionEvent.AXIS_LTRIGGER).coerceAtLeast(e.getAxisValue(MotionEvent.AXIS_BRAKE))
         updateAnalog(jc, ControllerButton.ZR, zr > 0.5f)
         updateAnalog(jc, ControllerButton.ZL, zl > 0.5f)
+        // D-pad reported as a hat: right = A position, down = B position (Nintendo layout)
+        val hx = e.getAxisValue(MotionEvent.AXIS_HAT_X); val hy = e.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        if (jc.side == JoyConSide.LEFT) {
+            updateAnalog(jc, ControllerButton.A, hx > 0.5f)
+            updateAnalog(jc, ControllerButton.B, hy > 0.5f)
+        }
         return true
     }
+
+    private fun dz(v: Float) = if (kotlin.math.abs(v) < 0.1f) 0f else v
+    private fun mag(p: Pair<Float, Float>) = p.first * p.first + p.second * p.second
 
     private fun updateAnalog(jc: JoyCon, b: ControllerButton, down: Boolean) {
         val bit = BUTTON_BITS.getValue(b)
@@ -200,7 +175,11 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
             KeyEvent.KEYCODE_BUTTON_THUMBR -> ControllerButton.STICK_R
             KeyEvent.KEYCODE_BUTTON_THUMBL -> ControllerButton.STICK_L
             KeyEvent.KEYCODE_BUTTON_C, KeyEvent.KEYCODE_BUTTON_Z -> if (side == JoyConSide.LEFT) ControllerButton.SL else ControllerButton.SR
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> null
+            // left Joy-Con arrows, by position in the Nintendo layout (right = A, down = B, up = X, left = Y)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerButton.A
+            KeyEvent.KEYCODE_DPAD_DOWN -> ControllerButton.B
+            KeyEvent.KEYCODE_DPAD_UP -> ControllerButton.X
+            KeyEvent.KEYCODE_DPAD_LEFT -> ControllerButton.Y
             else -> null
         }
     }

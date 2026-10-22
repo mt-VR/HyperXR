@@ -43,6 +43,7 @@ class HandTrackingService(private val context: Context) {
     private val fused = arrayOf(DepthFusion.Result(), DepthFusion.Result())
     private val fusedLabel = arrayOfNulls<Handedness>(2)
     private val fusedScore = FloatArray(2)
+    private val fusedPinch = FloatArray(2)
     private var busySinceNs = 0L
 
     /** Live statistics (shown in the hand test screen and in Diagnostics). */
@@ -84,7 +85,7 @@ class HandTrackingService(private val context: Context) {
         minIntervalNs = 1_000_000_000L / inferenceHz.coerceIn(5, 60)
         trackers.values.forEach {
             it.setFilterParams(s.filterMinCutoff, s.filterBeta)
-            it.pinchRatio = s.pinchRatio
+            it.pinchRatio = s.pinchClose
             it.predictionSeconds = s.predictionMs / 1000f
         }
     }
@@ -191,9 +192,13 @@ class HandTrackingService(private val context: Context) {
                 val p = lms[j]
                 obs.image[j * 3] = p.x(); obs.image[j * 3 + 1] = p.y(); obs.image[j * 3 + 2] = p.z()
             }
+            result.worldLandmarks().getOrNull(i)?.takeIf { it.size >= HandJoint.COUNT }?.let { wl ->
+                for (j in 0 until HandJoint.COUNT) { val p = wl[j]; obs.world[j * 3] = p.x(); obs.world[j * 3 + 1] = p.y(); obs.world[j * 3 + 2] = p.z() }
+                obs.hasWorld = true
+            }
             debugLms?.add(obs.image.copyOf())
             if (fusion.fuse(obs, intr, depth, pendingPose, fused[n])) {
-                fusedLabel[n] = label; fusedScore[n] = obs.score; n++
+                fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); n++
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
@@ -207,7 +212,7 @@ class HandTrackingService(private val context: Context) {
                 Diagnostics.log("Hand size measured with ARCore Depth: palm ${"%.1f".format(palm * 100)} cm")
                 onPalmMeasured?.invoke(palm)
             }
-            trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0)
+            trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k])
             seen += side
         }
         for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
@@ -245,7 +250,7 @@ class HandTrackingService(private val context: Context) {
     private fun copy(src: HandState, dst: HandState) {
         for (i in 0 until HandJoint.COUNT) dst.joints[i].set(src.joints[i])
         dst.state = src.state; dst.confidence = src.confidence; dst.depthSource = src.depthSource
-        dst.pinchStrength = src.pinchStrength; dst.gesture = src.gesture; dst.timestampNs = src.timestampNs
+        dst.pinchStrength = src.pinchStrength; dst.pinchRatio = src.pinchRatio; dst.gesture = src.gesture; dst.timestampNs = src.timestampNs
     }
 
     /**

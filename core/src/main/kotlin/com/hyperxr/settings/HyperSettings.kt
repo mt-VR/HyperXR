@@ -72,7 +72,8 @@ data class HandTrackingSettings(
     val auraOpacity: Float = 0.45f,
     val directTouch: Boolean = true,
     /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
-    val pinchRatio: Float = 0.25f,
+    /** Pinch closes below this thumb–index distance / palm length (model landmarks). Renamed so old 0.25 values reset. */
+    val pinchClose: Float = 0.38f,
     /** Your hand length, wrist crease to middle fingertip, in cm (measure with a ruler). */
     val handLengthCm: Float = 18.5f,
     /** Measure the palm with ARCore Depth and use it instead of [handLengthCm]. */
@@ -96,8 +97,8 @@ data class ControllerSettings(
     val screenTapSelects: Boolean = true,
     /** Look at a button for [dwellMs] to click it (works without touching the screen). */
     val dwellClick: Boolean = true,
-    /** Use the Joy-Con IMU for pointer rotation (drift-corrected by the hand). Off: hand 6DoF only. */
-    val pointerUsesImu: Boolean = false,
+    /** Joy-Con stick cursor speed, degrees per second at full deflection. */
+    val stickCursorSpeed: Float = 75f,
     val dwellMs: Int = 1100,
 )
 

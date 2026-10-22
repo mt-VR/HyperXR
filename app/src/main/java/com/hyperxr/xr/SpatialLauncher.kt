@@ -166,8 +166,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     override fun onAction(ctx: XrContext, action: ControllerAction, pressed: Boolean, side: JoyConSide?) {
         if (!pressed) return
         when (action) {
-            ControllerAction.BACK -> windows.lastOrNull { it.visible && it.closable }?.let { it.visible = false }
-                ?: appWindows.lastOrNull()?.back()
+            ControllerAction.BACK -> backOrClose()
             ControllerAction.MENU -> openSystem("settings")
             else -> Unit
         }
@@ -355,19 +354,42 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         hitPoints.clear()
         val input = ctx.input
         val controls = app.settings.current.controllers
-        var anyController = false
-        for (i in 0..1) {
-            val c = input.controllers[i]
-            if (c.connected) {
-                anyController = true
-                c.ray(ray)
-                val primary = c.buttons and (1 or 4 or 128) != 0 // R, ZR, A
-                ctrlPointers[i].update(ray, primary, surfaces, now)
-                recordPointer(1 + i, ray, primary)
-                trackHit(ctrlPointers[i], ray)
-                dragWindows(ctrlPointers[i], ray, primary)
-            } else ctrlPointers[i].update(null, false, surfaces, now)
-        }
+        val dt = if (lastPointerNs == 0L) 1f / 60 else ((now - lastPointerNs) / 1e9f).coerceIn(0.001f, 0.1f)
+        lastPointerNs = now
+        val anyController = input.controllers.any { it.connected }
+        ctrlPointers[1].update(null, false, surfaces, now)
+        if (anyController) {
+            // Joy-Con: the stick moves a cursor, A clicks (hold to drag), B goes back / closes
+            val p = input.controllers[1].takeIf { it.connected } ?: input.controllers[0]
+            val other = input.controllers[0].takeIf { it.connected && it !== p }
+            if (input.recenterCursor) { stickCursor.recenter(); input.recenterCursor = false }
+            val shoulder = p.buttons and (1 or 2 or 4 or 8) != 0 // R, L, ZR, ZL held: the stick scrolls
+            var scrollY = if (shoulder) p.stickY else 0f
+            val second = other?.stickY ?: p.stick2Y
+            if (kotlin.math.abs(second) > 0.15f) scrollY = second
+            stickCursor.speedDegPerSec = controls.stickCursorSpeed
+            if (!shoulder) stickCursor.update(p.stickX, p.stickY, dt)
+            stickCursor.ray(input.head, ray)
+            val buttons = p.buttons or (other?.buttons ?: 0)
+            val aDown = buttons and 128 != 0
+            ctrlPointers[0].update(ray, aDown, surfaces, now)
+            recordPointer(1, ray, aDown)
+            if (ctrlPointers[0].hitDistance.isNaN()) hitPoints += ray.pointAt(1.5f) else trackHit(ctrlPointers[0], ray)
+            dragWindows(ctrlPointers[0], ray, aDown)
+            if (kotlin.math.abs(scrollY) > 0.15f) {
+                val target = (ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible }
+                target?.scroll(-scrollY * STICK_SCROLL_PX_PER_SEC * dt)
+            }
+            // B: short press = back / close the top panel; held 0.8 s on a window = close it
+            val bDown = buttons and 256 != 0
+            if (bDown && !bWasDown) bDownNs = now
+            if (bDown && bDownNs != 0L && now - bDownNs > 800_000_000L) {
+                bDownNs = 0L
+                ((ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible })?.let { pendingClose += it }
+            }
+            if (!bDown && bWasDown && bDownNs != 0L) { bDownNs = 0L; backOrClose() }
+            bWasDown = bDown
+        } else ctrlPointers[0].update(null, false, surfaces, now)
         // hands: far rays clicked with a pinch, plus direct touch with the fingertip
         for (i in 0..1) {
             val h = input.hands[i]
@@ -381,7 +403,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
             val raw = if (!anyController && !menuOpen) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
             if (raw != null) {
-                // the visible ray starts at the pinch ball; same line, so the hit point does not move
+                // the (invisible) ray starts at the pinch ball; same line, so the hit point does not move
                 pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
                 val along = (pinchBall[i].x - raw.origin.x) * raw.direction.x + (pinchBall[i].y - raw.origin.y) * raw.direction.y + (pinchBall[i].z - raw.origin.z) * raw.direction.z
                 if (along > 0f) raw.origin.addScaled(raw.direction, along)
@@ -408,11 +430,11 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         }
         // gaze: screen tap / viewer button, or dwell (look at a button to click it)
         input.gazeRay(ray)
-        dwell.dwellNs = if (controls.dwellClick) controls.dwellMs * 1_000_000L else 0L
+        dwell.dwellNs = if (controls.dwellClick && !anyController) controls.dwellMs * 1_000_000L else 0L
         val dwellDown = dwell.update(gaze.hovered ?: gaze.captured, gaze.hitU, gaze.hitV, now)
         gaze.update(ray, input.tapDown || dwellDown, surfaces, now)
         recordPointer(0, ray, input.tapDown || dwellDown)
-        gazeHit = if (gaze.hitDistance.isNaN()) null else ray.pointAt(gaze.hitDistance - 0.004f)
+        gazeHit = if (gaze.hitDistance.isNaN() || anyController) null else ray.pointAt(gaze.hitDistance - 0.004f)
         dragWindows(gaze, ray, input.tapDown)
     }
 
@@ -421,6 +443,20 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         (gaze.hovered as? com.hyperxr.windows.SpatialWindow)
             ?: (handRays[hand].hovered as? com.hyperxr.windows.SpatialWindow)
             ?: appWindows.lastOrNull { it.visible }
+
+    private val stickCursor = com.hyperxr.input.StickCursor()
+    private var lastPointerNs = 0L
+    private var bWasDown = false
+    private var bDownNs = 0L
+    private val STICK_SCROLL_PX_PER_SEC = 1400f
+
+    /** Back: keyboard, then the top panel, then the window's own back. */
+    private fun backOrClose() {
+        if (keyboard != null) { closeKeyboard(); return }
+        val top = windows.lastOrNull { it.visible && it.closable }
+        if (top != null) { top.visible = false; top.onClose?.invoke(); return }
+        ((ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible })?.back()
+    }
 
     private fun recordPointer(id: Int, r: Ray, down: Boolean) {
         val copy = pointerRays.getOrPut(id) { Ray() }
@@ -583,7 +619,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             p.width = 0.018f; p.height = 0.018f; p.radius = 0f
             p.overlay = true
         }
-        // pinch ball: a small sphere between thumb and index; the ring around it closes with the pinch
+        // pinch ball: a small sphere between thumb and index, no beam. It fills with colour as the
+        // fingers close and turns pink when the pinch (the click) is held.
         for (i in 0..1) {
             if (!pinchBallVisible[i]) continue
             val k = pinchStrength[i]
@@ -591,46 +628,11 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val ball = ctx.scene.addDraw()
             ball.mesh = ctx.renderer.sphere
             ball.unlit = true; ball.transparent = true
-            if (pinched) { ball.color[0] = 0.94f; ball.color[1] = 0.36f; ball.color[2] = 0.75f } else { ball.color[0] = 1f; ball.color[1] = 1f; ball.color[2] = 1f }
-            ball.color[3] = 0.95f
-            val r = if (pinched) 0.007f else 0.009f
+            if (pinched) { ball.color[0] = 0.94f; ball.color[1] = 0.36f; ball.color[2] = 0.75f }
+            else { ball.color[0] = 1f - 0.4f * k; ball.color[1] = 1f - 0.45f * k; ball.color[2] = 1f }
+            ball.color[3] = 0.55f + 0.45f * k
+            val r = if (pinched) 0.008f else 0.011f - 0.002f * k
             com.hyperxr.math.Mat4.compose(pinchBall[i], identityQ, 2 * r, 2 * r, 2 * r, ball.matrix) // unit sphere mesh has radius 0.5
-            val ring = ctx.scene.addPanel()
-            ring.texture = ringTex
-            ring.pose.position.set(pinchBall[i])
-            faceTowards(ring.pose, ctx.input.head.position)
-            val sz = 0.045f - 0.027f * k
-            ring.width = sz; ring.height = sz; ring.radius = 0f
-            ring.alpha = 0.35f + 0.65f * k
-            ring.overlay = true
-        }
-        // hand ray beams: brighter and thinner as the pinch closes
-        for (i in 0..1) {
-            if (!handRayVisible[i]) continue
-            val r = handRayOut[i]
-            val len = (handRays[i].hitDistance.takeIf { !it.isNaN() } ?: 2.0f).coerceAtMost(4f)
-            val d = ctx.scene.addDraw()
-            d.mesh = ctx.renderer.cylinder
-            d.unlit = true; d.transparent = true
-            val k = pinchStrength[i]
-            d.color[0] = 0.75f + 0.25f * k; d.color[1] = 0.7f + 0.3f * k; d.color[2] = 1f; d.color[3] = 0.25f + 0.5f * k
-            val mid = r.pointAt(len / 2)
-            val q = Quat.fromTo(Vec3(0f, 1f, 0f), r.direction)
-            com.hyperxr.math.Mat4.compose(mid, q, 0.005f - 0.002f * k, len, 0.005f - 0.002f * k, d.matrix)
-        }
-        // controller beams
-        for (i in 0..1) {
-            val c = ctx.input.controllers[i]
-            if (!c.connected) continue
-            val len = ctrlPointers[i].hitDistance.takeIf { !it.isNaN() } ?: 2.5f
-            val d = ctx.scene.addDraw()
-            d.mesh = ctx.renderer.cylinder
-            d.unlit = true; d.transparent = true
-            d.color[0] = 0.7f; d.color[1] = 0.65f; d.color[2] = 1f; d.color[3] = 0.45f
-            c.ray(ray)
-            val mid = ray.pointAt(len / 2)
-            val q = Quat.fromTo(Vec3(0f, 1f, 0f), ray.direction)
-            com.hyperxr.math.Mat4.compose(mid, q, 0.004f, len, 0.004f, d.matrix)
         }
     }
 

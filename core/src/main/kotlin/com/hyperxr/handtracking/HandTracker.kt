@@ -39,10 +39,14 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     /** Pinch closes when thumb-index distance / palm length drops below this ratio (scale-free). */
     var pinchRatio: Float
         get() = gestures.pinchOn
-        set(v) { gestures.pinchOn = v; gestures.pinchOff = v * 1.6f }
+        set(v) { gestures.pinchOn = v; gestures.pinchOff = v * 1.45f }
 
     /** Feed one frame. [joints] is null when the detector did not find this hand. */
-    fun update(joints: Array<Vec3>?, score: Float, depthSource: DepthSource, timestampNs: Long) {
+    /**
+     * @param rawPinchRatio pinch ratio measured on this frame's model landmarks (preferred over the
+     *   filtered camera-space joints, which lag and carry depth noise); NaN to use the joints.
+     */
+    fun update(joints: Array<Vec3>?, score: Float, depthSource: DepthSource, timestampNs: Long, rawPinchRatio: Float = Float.NaN) {
         val dt = if (lastUpdateNs == 0L) 0f else ((timestampNs - lastUpdateNs) / 1e9f).coerceIn(0f, 0.25f)
         lastUpdateNs = timestampNs
         state.timestampNs = timestampNs
@@ -96,7 +100,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         lastSeenNs = timestampNs
         state.confidence = score
         state.depthSource = depthSource
-        gestures.update(state)
+        gestures.update(state, rawPinchRatio)
     }
 
     private fun handleMissing(now: Long, dt: Float) {
@@ -144,18 +148,19 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
 class GestureRecognizer {
     // Thresholds are ratios to the palm length, so pinch works the same whatever the estimated
     // hand scale or distance (an absolute millimetre threshold breaks when depth is off).
-    var pinchOn = 0.25f
-    var pinchOff = 0.40f
+    var pinchOn = 0.38f
+    var pinchOff = 0.55f
     private val pinch = Hysteresis(pinchOn, pinchOff, activeWhenBelow = true)
 
     fun reset() = pinch.reset()
 
-    fun update(s: HandState) {
+    fun update(s: HandState, rawRatio: Float = Float.NaN) {
         val j = s.joints
         val palm = j[HandJoint.WRIST].distanceTo(j[HandJoint.MIDDLE_MCP]).coerceAtLeast(1e-4f)
-        val ratio = j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) / palm
+        val ratio = if (rawRatio.isFinite()) rawRatio else j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) / palm
         pinch.onThreshold = pinchOn; pinch.offThreshold = pinchOff
         pinch.update(ratio)
+        s.pinchRatio = ratio
         s.pinchStrength = (1f - (ratio - pinchOn) / (1.0f - pinchOn)).coerceIn(0f, 1f)
 
         val index = extended(j, HandJoint.INDEX_MCP, HandJoint.INDEX_PIP, HandJoint.INDEX_TIP)

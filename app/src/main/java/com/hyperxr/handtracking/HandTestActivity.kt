@@ -139,7 +139,7 @@ class HandTestActivity : Activity() {
             line(hands.stats)
             for ((side, t) in hands.trackers) {
                 val st = t.state
-                line("${if (side == Handedness.LEFT) "Esquerda" else "Direita"}: ${st.state} · ${st.gesture} · pinça ${"%.0f".format(st.pinchStrength * 100)}% · ${st.depthSource}")
+                line("${if (side == Handedness.LEFT) "Esquerda" else "Direita"}: ${st.state} · ${st.gesture} · pinça ${"%.0f".format(st.pinchRatio * 100)}% da palma (fecha < ${"%.0f".format(t.pinchRatio * 100)}%) · ${st.depthSource}")
             }
             if (fovText.isNotEmpty()) line(fovText)
             message?.let { line(it) }

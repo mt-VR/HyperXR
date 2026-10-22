@@ -195,7 +195,8 @@ fun HandsSection(a: MainActivity) {
         }
         if (h.calibratedPalmMm > 0) OutlinedButton(onClick = { a.update { it.copy(handTracking = it.handTracking.copy(calibratedPalmMm = 0f)) } }) { Text("Medir de novo") }
         Note("O tamanho da mão define a que distância ela está da câmera. Sem ARCore Depth, meça a mão com uma régua e ajuste acima.")
-        SliderRow("Sensibilidade da pinça", h.pinchRatio, 0.12f..0.40f, { "%.0f%% da palma".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(pinchRatio = v)) } }
+        SliderRow("Sensibilidade da pinça", h.pinchClose, 0.22f..0.60f, { "fecha abaixo de %.0f%% da palma".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(pinchClose = v)) } }
+        Note("Maior = a pinça fecha mais cedo (mais fácil). Use o teste de detecção para ver a porcentagem ao vivo.")
         SliderRow("Filtro: corte mínimo", h.filterMinCutoff, 0.2f..4f, { "%.2f Hz".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterMinCutoff = v)) } }
         SliderRow("Filtro: beta (resposta a velocidade)", h.filterBeta, 0f..0.2f, { "%.3f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterBeta = v)) } }
         SliderRow("Predição", h.predictionMs, 0f..50f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(predictionMs = v)) } }
@@ -223,9 +224,10 @@ fun ControlsSection(a: MainActivity) {
         if (connected.isEmpty()) Note("Nenhum Joy-Con conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
         Note("O apontamento do Joy-Con vem da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão.")
-        ToggleRow("Usar o IMU do Joy-Con na rotação", c.pointerUsesImu, "Menor latência ao girar o pulso; o drift é corrigido pela mão. Só funciona se o driver expõe o IMU") { v ->
-            a.update { it.copy(controllers = it.controllers.copy(pointerUsesImu = v)) }
+        SliderRow("Velocidade do cursor (analógico)", c.stickCursorSpeed, 30f..160f, { "%.0f°/s".format(it) }) { v ->
+            a.update { it.copy(controllers = it.controllers.copy(stickCursorSpeed = v)) }
         }
+        Note("Joy-Con: o analógico move o cursor, A clica (segure e mova para arrastar), B volta/fecha. R ou ZR + analógico rola a página. Os sensores de movimento do controle não são usados.")
         val actions = ControllerAction.entries
         fun name(x: ControllerAction) = when (x) {
             ControllerAction.SELECT -> "Selecionar"; ControllerAction.BACK -> "Voltar"; ControllerAction.MENU -> "Menu"

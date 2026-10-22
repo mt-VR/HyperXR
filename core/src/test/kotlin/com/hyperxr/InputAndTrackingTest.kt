@@ -110,6 +110,25 @@ class InputAndTrackingTest {
         assertEquals(listOf(Handedness.LEFT, Handedness.RIGHT), two.toList())
     }
 
+    @Test fun pinchUsesModelWorldLandmarks() {
+        val o = LandmarkObservation(Handedness.RIGHT)
+        o.hasWorld = true
+        // palm 9 cm; tips 2 cm apart = touching (ratio 0.22), 6 cm apart = open (0.67)
+        o.world[HandJoint.MIDDLE_MCP * 3 + 1] = 0.09f
+        o.world[HandJoint.THUMB_TIP * 3] = 0.03f; o.world[HandJoint.THUMB_TIP * 3 + 1] = 0.12f
+        o.world[HandJoint.INDEX_TIP * 3] = 0.05f; o.world[HandJoint.INDEX_TIP * 3 + 1] = 0.12f
+        val touching = com.hyperxr.handtracking.pinchRatioFromWorld(o)
+        assertEquals(0.222f, touching, 0.01f)
+        val t = HandTracker(Handedness.RIGHT)
+        // camera-space joints say "open" (depth noise), the model landmarks say "pinched": the model wins
+        t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 0, touching)
+        assertEquals(Gesture.PINCH, t.state.gesture)
+        t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 33_000_000L, 0.45f)
+        assertEquals("hysteresis keeps it closed between on and off", Gesture.PINCH, t.state.gesture)
+        t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 66_000_000L, 0.67f)
+        assertTrue(t.state.gesture != Gesture.PINCH)
+    }
+
     @Test fun implausibleSkeletonRejected() {
         val t = HandTracker(Handedness.LEFT)
         val bad = openHand(Vec3(0f, 0f, -0.4f)).also { it[HandJoint.INDEX_TIP].set(1f, 1f, 1f) }

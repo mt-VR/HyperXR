@@ -51,7 +51,8 @@ class ControllerState {
     var stickX = 0f
     var stickY = 0f
     var positionFromHand = false
-    var hasImu = false
+    var stick2X = 0f
+    var stick2Y = 0f
     fun ray(out: Ray): Ray { out.origin.set(pose.position); pose.orientation.rotate(Pose.FORWARD, out.direction); return out }
 }
 
@@ -62,6 +63,8 @@ class XrInput {
     val controllers = arrayOf(ControllerState(), ControllerState())
     var tapDown = false
     var handsAvailable = false
+    /** Set by recenter: content puts the Joy-Con stick cursor back in the middle of the view. */
+    var recenterCursor = false
     fun gazeRay(out: Ray): Ray { out.origin.set(head.position); head.orientation.rotate(Pose.FORWARD, out.direction); return out }
 }
 
@@ -124,7 +127,6 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
     val hands = HandTrackingService(activity)
     val joyCons = JoyConManager(activity)
     private val fusions = arrayOf(ControllerPoseFusion(), ControllerPoseFusion())
-    private val imuQ = Quat()
 
     private var openXrSession = 0L
     private val xrViews = FloatArray(28)
@@ -452,23 +454,17 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             c.connected = true
             c.buttons = jc.buttons
             c.stickX = jc.stickX; c.stickY = jc.stickY
-            c.hasImu = jc.hasImu
-            // 6DoF comes from the hand holding the controller; the IMU is optional and drift-corrected.
-            fusions[idx].useImu = settings.controllers.pointerUsesImu && jc.hasImu
-            val imu = if (fusions[idx].useImu) { jc.orientationSnapshot(imuQ); imuQ } else null
-            fusions[idx].update(imu, input.hands[idx], input.head, rightSide = idx == 1, nowNs = now, dtSeconds = dt)
+            c.stick2X = jc.stick2X; c.stick2Y = jc.stick2Y
+            // Controller motion sensors are not used; games get the pose of the hand holding it.
+            fusions[idx].useImu = false
+            fusions[idx].update(null, input.hands[idx], input.head, rightSide = idx == 1, nowNs = now, dtSeconds = dt)
             c.pose.orientation.set(fusions[idx].worldOrientation)
             c.pose.position.set(fusions[idx].gripPosition)
             c.positionFromHand = fusions[idx].positionFromHand
         }
     }
 
-    private fun recenterControllers() {
-        for (jc in joyCons.controllers.values) {
-            val idx = if (jc.side == JoyConSide.LEFT) 0 else 1
-            if (jc.hasImu) { jc.orientationSnapshot(imuQ); fusions[idx].recenter(imuQ, input.head) }
-        }
-    }
+    private fun recenterControllers() { input.recenterCursor = true }
 
     // ---------------------------------------------------------------- activity hooks
     fun onTouch(e: MotionEvent): Boolean {
