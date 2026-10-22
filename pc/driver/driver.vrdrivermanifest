@@ -1,0 +1,7 @@
+{
+	"alwaysActivate": true,
+	"name": "hyperxr",
+	"directory": "",
+	"resourceOnly": false,
+	"hmd_presence": ["*.*"]
+}

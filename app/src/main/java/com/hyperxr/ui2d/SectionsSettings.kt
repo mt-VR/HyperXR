@@ -54,6 +54,7 @@ fun HomeSection(a: MainActivity) {
         }
         Note("Coloque o celular no VR Box após iniciar. Toque na tela (ou no botão do visor) para selecionar.")
     }
+    SteamVrCard(a)
     SectionCard("Resumo do aparelho") {
         KeyValue("Aparelho", "${caps.manufacturer} ${caps.model} • Android ${caps.androidRelease} (API ${caps.androidSdk})")
         KeyValue("SoC", "${caps.socManufacturer} ${caps.socModel}")
@@ -288,5 +289,23 @@ fun NetworkSection(a: MainActivity) {
         ToggleRow("Baixar apenas em Wi-Fi", s.downloadsOnWifiOnly) { v -> a.update { it.copy(network = it.network.copy(downloadsOnWifiOnly = v)) } }
         ToggleRow("Apps web em modo desktop", s.webAppsDesktopMode, "Igual ao \"site para computador\" dos navegadores") { v -> a.update { it.copy(network = it.network.copy(webAppsDesktopMode = v)) } }
         Note("Pacotes .hyperx só acessam a rede com a permissão 'network' e apenas hosts HTTPS declarados no manifesto.")
+    }
+}
+
+/** SteamVR: the phone becomes the headset of a Windows PC running the HyperXR PC app. */
+@Composable
+private fun SteamVrCard(a: MainActivity) {
+    val prefs = com.hyperxr.steamvr.SteamVrActivity.prefs(a)
+    var ip by remember { mutableStateOf(prefs.getString("pc_ip", "") ?: "") }
+    SectionCard("SteamVR", "Jogue jogos do SteamVR do PC no celular. No PC: HyperXR PC.exe (pasta pc/ do projeto) com o IP deste celular.") {
+        KeyValue("IP deste celular", com.hyperxr.steamvr.SteamVrContent.localIp() ?: "conecte o Wi-Fi")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            androidx.compose.material3.OutlinedTextField(value = ip, onValueChange = { ip = it.trim() }, singleLine = true, label = { Text("IP do PC") })
+            Button(onClick = {
+                prefs.edit().putString("pc_ip", ip).apply()
+                a.startActivity(android.content.Intent(a, com.hyperxr.steamvr.SteamVrActivity::class.java).putExtra(com.hyperxr.steamvr.SteamVrActivity.EXTRA_PC_IP, ip))
+            }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Conectar") }
+        }
+        Note("Use Wi-Fi 5 GHz. Os Joy-Cons viram controles do Quest 3 (posição pela mão); sem Joy-Con, as mãos são os controles. Joy-Con Home recentraliza.")
     }
 }

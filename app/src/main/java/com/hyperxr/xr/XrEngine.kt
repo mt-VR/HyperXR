@@ -97,6 +97,11 @@ class XrContext(
     lateinit var share: com.hyperxr.share.ScreenShare
 }
 
+/** Content that draws an eye itself (SteamVR streaming): return false to render the scene normally. */
+interface EyeOverride {
+    fun renderEye(eye: EyeView, target: RenderTarget): Boolean
+}
+
 interface XrContent {
     fun onGlInit(ctx: XrContext)
     /** Fill ctx.scene for this frame. [dt] in seconds. */
@@ -382,6 +387,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
     private fun renderEye(eye: EyeView, target: RenderTarget, camera: CameraImageSource?) {
         target.bind()
+        if ((content as? EyeOverride)?.renderEye(eye, target) == true) {
+            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
+            return
+        }
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         renderer.renderBackground(scene, eye, camera, input.head)
         renderer.renderScene(scene, eye)

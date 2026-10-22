@@ -103,6 +103,15 @@
             </intent-filter>
         </activity>
 
+        <!-- SteamVR streaming client: the phone is the headset of the HyperXR SteamVR driver. -->
+        <activity
+            android:name=".steamvr.SteamVrActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:theme="@style/Theme.HyperXR.Immersive" />
         <!-- Immersive session: spatial launcher in MR or VR SBS. -->
         <activity
             android:name=".xr.XrActivity"
