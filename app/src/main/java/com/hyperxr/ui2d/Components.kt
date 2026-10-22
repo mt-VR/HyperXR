@@ -38,13 +38,14 @@ import com.hyperxr.capabilities.Support
 
 /** HyperXR identity colours for the 2D management UI. */
 object HxColors {
-    val bg = Color(0xFF0C0C16)
-    val surface = Color(0xFF17172A)
-    val surface2 = Color(0xFF222240)
-    val accent = Color(0xFF7C6CFF)
-    val accent2 = Color(0xFFF05CBE)
-    val text = Color(0xFFF4F4FF)
-    val dim = Color(0xFFAAAECC)
+    // Graphite greys and one blue, matching the XR panels (XrTheme).
+    val bg = Color(0xFF18191B)
+    val surface = Color(0xFF26272A)
+    val surface2 = Color(0xFF34363A)
+    val accent = Color(0xFF2874F0)
+    val accent2 = Color(0xFF5494FF)
+    val text = Color(0xFFF2F3F5)
+    val dim = Color(0xFFA6A9AF)
     val ok = Color(0xFF5ADC96)
     val warn = Color(0xFFFFC266)
     val bad = Color(0xFFFF606E)
@@ -153,3 +154,9 @@ fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
 @Composable
 fun Mono(text: String) = Text(text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, color = HxColors.text,
     style = MaterialTheme.typography.bodySmall)
+
+/** Rounded squares everywhere (cards, menus, fields), not pills. */
+val HxShapes = androidx.compose.material3.Shapes(
+    extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(24.dp),
+)

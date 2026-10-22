@@ -318,7 +318,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val fwd = t.pose.orientation.rotate(Vec3(0f, 0f, 1f))
         p.pose.position.addScaled(fwd, 0.02f * t.hover)
         p.width = t.size * grow; p.height = t.size * grow
-        p.radius = t.size * 0.22f * grow
+        p.radius = t.size * 0.18f * grow
         p.glow = 0.35f * t.hover
         if (t.app.kind == AppKind.UNAVAILABLE) p.alpha = 0.5f
         if (dim) p.alpha *= 0.3f + 0.7f * t.hover
@@ -524,7 +524,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             faceTowards(chip.pose, ctx.input.head.position)
             chip.height = 0.035f; chip.width = chip.height * dragChipAspect
             chip.radius = 0.0175f
-            chip.tint[0] = 0.8f; chip.tint[1] = 0.75f; chip.tint[2] = 1f
+            chip.tint[0] = 0.92f; chip.tint[1] = 0.94f; chip.tint[2] = 1f
             chip.overlay = true
             chip.glow = if (target != null) 0.4f else 0f
         }
@@ -664,7 +664,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         val c = Canvas(b)
         val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE }
         p.color = Color.argb(160, 0, 0, 0); p.strokeWidth = 14f; c.drawCircle(64f, 64f, 54f, p)
-        p.color = Color.rgb(160, 150, 255); p.strokeWidth = 8f; c.drawCircle(64f, 64f, 54f, p)
+        p.color = Color.rgb(235, 238, 245); p.strokeWidth = 8f; c.drawCircle(64f, 64f, 54f, p)
         return b
     }
 

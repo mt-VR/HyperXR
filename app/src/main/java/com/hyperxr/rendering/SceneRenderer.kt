@@ -200,11 +200,11 @@ class SceneRenderer {
         val n = 256
         val b = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
         val c = Canvas(b)
-        c.drawColor(Color.rgb(28, 30, 40))
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 120, 110, 255); strokeWidth = 3f }
+        c.drawColor(Color.rgb(30, 31, 34))
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(120, 150, 154, 162); strokeWidth = 3f }
         c.drawLine(0f, 0f, n.toFloat(), 0f, p)
         c.drawLine(0f, 0f, 0f, n.toFloat(), p)
-        p.color = Color.argb(60, 200, 120, 255); p.strokeWidth = 1.5f
+        p.color = Color.argb(50, 150, 154, 162); p.strokeWidth = 1.5f
         c.drawLine(0f, n / 2f, n.toFloat(), n / 2f, p)
         c.drawLine(n / 2f, 0f, n / 2f, n.toFloat(), p)
         return b

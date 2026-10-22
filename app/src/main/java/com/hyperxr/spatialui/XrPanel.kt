@@ -22,16 +22,26 @@ import com.hyperxr.rendering.PanelSurface
 
 /** HyperXR visual identity for spatial panels: deep indigo glass with violet/pink accents. */
 object XrTheme {
-    val panelTop = Color.argb(236, 30, 28, 52)
-    val panelBottom = Color.argb(236, 16, 16, 28)
-    val text = Color.rgb(244, 244, 255)
-    val textDim = Color.rgb(170, 174, 204)
-    val accent = Color.rgb(124, 108, 255)
-    val accent2 = Color.rgb(240, 92, 190)
-    val button = Color.argb(255, 48, 46, 78)
-    val buttonHover = Color.argb(255, 70, 66, 112)
-    val danger = Color.rgb(255, 96, 110)
-    val ok = Color.rgb(90, 220, 150)
+    // Neutral graphite like Horizon OS panels: flat translucent grey glass, lighter grey controls,
+    // blue only for primary/selected actions.
+    val panelTop = Color.argb(240, 42, 43, 46)
+    val panelBottom = Color.argb(240, 32, 33, 36)
+    val border = Color.argb(46, 255, 255, 255)
+    val text = Color.rgb(242, 243, 245)
+    val textDim = Color.rgb(166, 169, 175)
+    val accent = Color.rgb(40, 116, 240)
+    val accentPressed = Color.rgb(84, 148, 255)
+    val accent2 = Color.rgb(84, 148, 255)
+    val button = Color.argb(255, 58, 60, 64)
+    val buttonHover = Color.argb(255, 78, 80, 86)
+    val buttonPressed = Color.argb(255, 104, 107, 114)
+    val buttonDisabled = Color.argb(255, 44, 45, 48)
+    val danger = Color.rgb(232, 72, 72)
+    val ok = Color.rgb(70, 200, 130)
+    /** Corner radius of panels in metres (also used by the quad shader). */
+    const val PANEL_RADIUS_M = 0.045f
+    /** Rounded-square controls: radius as a fraction of the control height. */
+    const val CONTROL_ROUNDING = 0.32f
     val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 }
@@ -87,7 +97,7 @@ abstract class XrPanel(
         if (dirty) {
             s.begin()
             regions.clear()
-            val pc = PanelCanvas(s.canvas, pxW.toFloat(), pxH.toFloat(), this)
+            val pc = PanelCanvas(s.canvas, pxW.toFloat(), pxH.toFloat(), this, ppm)
             pc.background()
             if (title.isNotEmpty() || closable) pc.titleBar(title, closable)
             draw(pc)
@@ -98,7 +108,7 @@ abstract class XrPanel(
         p.texture = s.texture
         p.pose.set(pose)
         p.width = widthMeters; p.height = heightMeters
-        p.radius = 0.035f
+        p.radius = XrTheme.PANEL_RADIUS_M
     }
 
     fun release() { surface?.release(); surface = null }
@@ -171,7 +181,7 @@ abstract class XrPanel(
 }
 
 /** Immediate-mode drawing helpers bound to one panel render. */
-class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val panel: XrPanel) {
+class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val panel: XrPanel, private val ppm: Float = 900f) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -180,9 +190,14 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
     val titleHeight = 92f
 
     fun background() {
+        val r = XrTheme.PANEL_RADIUS_M * ppm
         fill.shader = LinearGradient(0f, 0f, 0f, h, XrTheme.panelTop, XrTheme.panelBottom, Shader.TileMode.CLAMP)
-        canvas.drawRoundRect(RectF(0f, 0f, w, h), 40f, 40f, fill)
+        canvas.drawRoundRect(RectF(0f, 0f, w, h), r, r, fill)
         fill.shader = null
+        // hairline rim catches the light like the edge of a glass pane
+        fill.style = Paint.Style.STROKE; fill.strokeWidth = 2f; fill.color = XrTheme.border
+        canvas.drawRoundRect(RectF(1f, 1f, w - 1f, h - 1f), r - 1f, r - 1f, fill)
+        fill.style = Paint.Style.FILL
         y = pad
     }
 
@@ -195,8 +210,8 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         if (closable) {
             val r = RectF(w - 104f, 18f, w - 24f, 76f)
             val hover = panel.isHovered("__close")
-            fill.color = if (hover) XrTheme.danger else Color.argb(255, 60, 56, 92)
-            canvas.drawRoundRect(r, 29f, 29f, fill)
+            fill.color = if (hover) XrTheme.danger else XrTheme.button
+            canvas.drawRoundRect(r, r.height() * XrTheme.CONTROL_ROUNDING, r.height() * XrTheme.CONTROL_ROUNDING, fill)
             fill.color = Color.WHITE; fill.strokeWidth = 5f
             canvas.drawLine(r.centerX() - 11f, r.centerY() - 11f, r.centerX() + 11f, r.centerY() + 11f, fill)
             canvas.drawLine(r.centerX() + 11f, r.centerY() - 11f, r.centerX() - 11f, r.centerY() + 11f, fill)
@@ -226,13 +241,20 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         val r = RectF(x, top, x + bw, top + bh)
         val hover = panel.isHovered(id); val press = panel.isPressed(id)
         fill.color = when {
-            !enabled -> Color.argb(255, 38, 36, 56)
-            press -> XrTheme.accent2
+            !enabled -> XrTheme.buttonDisabled
+            press && accent -> XrTheme.accentPressed
+            press -> XrTheme.buttonPressed
             accent -> XrTheme.accent
             hover -> XrTheme.buttonHover
             else -> XrTheme.button
         }
-        canvas.drawRoundRect(r, 24f, 24f, fill)
+        val cr = bh * XrTheme.CONTROL_ROUNDING
+        canvas.drawRoundRect(r, cr, cr, fill)
+        if (hover && enabled && !press) {
+            fill.style = Paint.Style.STROKE; fill.strokeWidth = 3f; fill.color = Color.argb(90, 255, 255, 255)
+            canvas.drawRoundRect(r, cr, cr, fill)
+            fill.style = Paint.Style.FILL
+        }
         var tx = x + 26f
         if (icon != null) {
             val s2 = bh - 20f
@@ -265,7 +287,7 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         text.textSize = 24f; text.typeface = XrTheme.medium
         val tw = text.measureText(s)
         fill.color = color
-        canvas.drawRoundRect(RectF(x, top, x + tw + 28f, top + 40f), 20f, 20f, fill)
+        canvas.drawRoundRect(RectF(x, top, x + tw + 28f, top + 40f), 12f, 12f, fill)
         text.color = Color.WHITE
         canvas.drawText(s, x + 14f, top + 28f, text)
         return tw + 28f

@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { refresh++ }
         }
         setContent {
-            MaterialTheme(colorScheme = HxColorScheme) {
+            MaterialTheme(colorScheme = HxColorScheme, shapes = HxShapes) {
                 DisposableEffect(Unit) {
                     val l: (HyperSettings) -> Unit = { s -> runOnUiThread { settingsState = s } }
                     app.settings.addListener(l)
