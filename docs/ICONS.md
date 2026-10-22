@@ -27,7 +27,7 @@ explorador de arquivos removido por preenchimento a partir da borda + recuperaç
 | gallery | Galeria |
 | help_center | Central de ajuda |
 | instagram | Instagram (web) |
-| remote_desktop | Área de trabalho remota (indisponível) e ícone do app HyperXR |
+| remote_desktop | Apps XR, Área de trabalho remota (indisponível) e ícone do app HyperXR (é um headset) |
 | settings | Configurações / ajustes rápidos |
 | store | HyperXR Environments |
 | system_messenger | Mensagens do sistema |
@@ -36,6 +36,6 @@ explorador de arquivos removido por preenchimento a partir da borda + recuperaç
 
 ## Sem ícone fornecido (espaço reservado neutro, sem símbolo)
 
-Hand Physics Lab, YouTube, Twitch, TikTok, Apps XR e pacotes `.hyperx` de terceiros
+Hand Physics Lab, YouTube, Twitch, TikTok e pacotes `.hyperx` de terceiros
 (que podem trazer seu próprio `icon` no manifesto — exibição dele é pendente). Para esses, o launcher
 mostra um bloco gradiente neutro e o nome do app.

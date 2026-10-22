@@ -68,7 +68,7 @@ object BuiltinApps {
         AppEntry("hx:system_messenger", "Mensagens do sistema", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "system_messenger", "messages"),
         AppEntry("hx:help_center", "Central de ajuda", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "help_center", "help"),
         AppEntry("hx:tv", "TV", AppKind.SYSTEM_PANEL, AppCategory.WEB, "tv", "tv"),
-        AppEntry("hx:xrapps", "Apps XR", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "xrapps"),
+        AppEntry("hx:xrapps", "Apps XR", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "remote_desktop", "xrapps"),
         AppEntry("hx:androidapps", "Apps Android", AppKind.SYSTEM_PANEL, AppCategory.ANDROID, null, "androidapps",
             limitations = "Abre qualquer app instalado numa janela plana ou curva; requer o Shizuku"),
         AppEntry("hx:clock", "Relógio", AppKind.HYPERX_PACKAGE, AppCategory.SYSTEM, "clock", "com.hyperxr.clock"),

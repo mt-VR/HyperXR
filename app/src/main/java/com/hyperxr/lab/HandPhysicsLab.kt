@@ -127,8 +127,12 @@ class HandPhysicsLab(private val ctx: XrContext, private val onClose: () -> Unit
     }
 
     fun release() {
+        // every id is cleared after deleting it: a second release must not delete texture names
+        // that the GPU has since handed to launcher icons (they would show the wrong image)
         for (t in intArrayOf(texBench, texBlock, texDomino, texMat, labelTex) + texCans + texCubes) Gl.deleteTexture(t)
-        texBench = 0
+        texBench = 0; texBlock = 0; texDomino = 0; texMat = 0; labelTex = 0
+        texCans.fill(0); texCubes.fill(0)
+        labelFor = null
         panel.release()
     }
 
