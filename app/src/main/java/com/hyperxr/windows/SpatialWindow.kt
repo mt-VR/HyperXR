@@ -21,6 +21,13 @@ class VirtualScreen(val widthPx: Int, val heightPx: Int) {
     @Volatile private var frameAvailable = false
     @Volatile var hasFrame = false; private set
     var onSurface: ((Surface) -> Unit)? = null
+    /**
+     * Texture transform for quad UVs with a top-left origin. Producers differ (a View hierarchy,
+     * GeckoView's GL compositor, another app's display), so the SurfaceTexture's own transform is
+     * used instead of assuming one orientation.
+     */
+    val texMatrix = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
+    private val stMatrix = FloatArray(16)
 
     /** GL thread. */
     fun ensure() {
@@ -35,7 +42,19 @@ class VirtualScreen(val widthPx: Int, val heightPx: Int) {
 
     /** GL thread: latch the newest frame. */
     fun latch() {
-        if (frameAvailable) { frameAvailable = false; st?.updateTexImage(); hasFrame = true }
+        if (frameAvailable) {
+            frameAvailable = false
+            val s = st ?: return
+            s.updateTexImage()
+            s.getTransformMatrix(stMatrix)
+            android.opengl.Matrix.multiplyMM(texMatrix, 0, stMatrix, 0, FLIP_Y, 0)
+            hasFrame = true
+        }
+    }
+
+    private companion object {
+        /** Quad UV (top-left origin) -> SurfaceTexture convention (bottom-left origin). */
+        val FLIP_Y = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
     }
 
     fun release() {
@@ -156,6 +175,7 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
         val p = scene.addPanel()
         p.texture = screen.texture
         p.oes = true
+        p.texMatrix = screen.texMatrix
         p.pose.set(pose)
         p.width = widthMeters; p.height = heightMeters
         p.curvature = curvatureRadius

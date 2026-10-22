@@ -17,7 +17,7 @@ originais.
 | `app/` | App Android: UI 2D (Compose), engine XR (GLES 3), ARCore/Camera2, hand tracking (LiteRT), Joy-Con, áudio, web apps, launcher espacial, runtime de jogos |
 | `app/src/main/cpp/` | JNI: ponte LuaJIT, OpenXR (loader Khronos), enumeração NNAPI |
 | `app/src/main/assets/hxsdk/` | SDK Lua confiável: `bootstrap.lua` (sandbox + API `hx`), `physics.lua`, `ui.lua`, `vmath.lua` |
-| `games/` | Fontes dos pacotes: STILLSHOT, FORGE LAB, PRIMAL RUSH, Relógio, Calculadora, Calendário |
+| `games/` | Fontes dos pacotes `.hyperx` embutidos: Relógio, Calculadora, Calendário |
 | `native/luajit/` | LuaJIT 2.1 estático (arm64-v8a, x86_64) + cabeçalhos; reproduzível com `tools/build_luajit_android.sh` |
 | `sdk/tests/` | Testes do SDK rodando o `bootstrap.lua` real no LuaJIT de desktop |
 | `branding/icons-source/` | Folha original dos ícones do autor |

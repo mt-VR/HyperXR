@@ -19,7 +19,6 @@ import com.hyperxr.math.Pose
 import com.hyperxr.settings.HandTrackingSettings
 import com.hyperxr.settings.InferenceBackend
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Camera frames -> MediaPipe Hand Landmarker (GPU delegate, CPU fallback) -> HyperXR depth fusion
@@ -32,7 +31,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class HandTrackingService(private val context: Context) {
     private val thread = HandlerThread("hx-hands").apply { start() }
     private val handler = Handler(thread.looper)
-    private val busy = AtomicBoolean(false)
 
     private var landmarker: HandLandmarker? = null
     @Volatile var status: String = "parado"; private set
@@ -44,7 +42,6 @@ class HandTrackingService(private val context: Context) {
     private val fusedLabel = arrayOfNulls<Handedness>(2)
     private val fusedScore = FloatArray(2)
     private val fusedPinch = FloatArray(2)
-    private var busySinceNs = 0L
 
     /** Live statistics (shown in the hand test screen and in Diagnostics). */
     @Volatile var stats: String = "-"; private set
@@ -58,19 +55,36 @@ class HandTrackingService(private val context: Context) {
      * the normalized landmarks found (x, y, z per joint). Must copy what it needs before returning.
      */
     @Volatile var debugListener: ((Bitmap, List<FloatArray>) -> Unit)? = null
-    private var pendingBitmap: Bitmap? = null
     private val lock = Any()
     private val published = mapOf(Handedness.LEFT to HandState(Handedness.LEFT), Handedness.RIGHT to HandState(Handedness.RIGHT))
     private var minIntervalNs = 33_000_000L
     private var lastSubmitNs = 0L
     private var lastTimestampMs = 0L
 
-    // Context of the frame currently inside MediaPipe (only one at a time).
-    private var pendingIntr: CameraIntrinsics? = null
-    private var pendingPose: Pose? = null
-    private val pendingDepth = DepthSnapshot()
-    private var pendingSubmitNs = 0L
-    private val converter = YuvToBitmap()
+    /**
+     * Two frame slots pipeline the work: while the GPU runs inference on one slot, the camera
+     * thread converts the next frame into the other (split across two CPU threads), and the next
+     * inference starts the moment the previous result arrives. The newest frame always wins the
+     * queued slot, so latency stays one frame at most.
+     */
+    private class Slot {
+        val converter = YuvToBitmap()
+        var bitmap: Bitmap? = null
+        var intr: CameraIntrinsics? = null
+        var pose: Pose? = null
+        val depth = DepthSnapshot()
+        var captureNs = 0L
+        var submitNs = 0L
+    }
+    // one on the GPU, one being post-processed, one being converted / queued
+    private val slots = arrayOf(Slot(), Slot(), Slot())
+    private val slotLock = Any()
+    private var inflight: Slot? = null
+    private var queued: Slot? = null
+    private var converting: Slot? = null
+    private var processing: Slot? = null
+    private var inflightSinceNs = 0L
+    private var lastAnalysed: Slot? = null
 
     private val scaleEstimator = HandScaleEstimator()
     private var autoCalibrate = false
@@ -128,54 +142,97 @@ class HandTrackingService(private val context: Context) {
             .setMinTrackingConfidence(0.35f)
         if (mode == RunningMode.LIVE_STREAM) {
             opts.setResultListener { result, _ -> onResult(result) }
-            opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; busy.set(false) }
+            opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; finishInflight() }
         }
         return HandLandmarker.createFromOptions(context, opts.build())
     }
 
     fun stop() { handler.post { landmarker?.close(); landmarker = null; status = "parado" } }
 
+    /** True when a new frame would be used now (lets callers skip acquiring camera images). */
+    fun wantsFrame(): Boolean {
+        val now = System.nanoTime()
+        synchronized(slotLock) {
+            // Watchdog: a result that never arrives must not stop hand tracking forever.
+            if (inflight != null && now - inflightSinceNs > 600_000_000L) inflight = null
+            return landmarker != null && converting == null && now - lastSubmitNs >= minIntervalNs
+        }
+    }
+
     /**
      * Submit a camera frame (closed here). [cameraPose] is the camera pose in tracking space at
      * capture time; [rotation180] is true when the landscape display is upside down relative to
      * the sensor (ROTATION_270).
      */
-    /** True when a new frame would be analysed now (lets callers skip acquiring camera images). */
-    fun wantsFrame(): Boolean {
-        val now = System.nanoTime()
-        // Watchdog: a result that never arrives must not stop hand tracking forever.
-        if (busy.get() && now - busySinceNs > 600_000_000L) busy.set(false)
-        return landmarker != null && !busy.get() && now - lastSubmitNs >= minIntervalNs
+    fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthImage?, rotation180: Boolean = false) {
+        if (!wantsFrame()) { image.close(); return }
+        val slot: Slot
+        synchronized(slotLock) {
+            // any slot that is not on the GPU (an unsent queued frame is replaced by this newer one)
+            slot = slots.first { it !== inflight && it !== processing }
+            if (queued === slot) queued = null
+            converting = slot
+        }
+        lastSubmitNs = System.nanoTime()
+        try {
+            slot.bitmap = slot.converter.convert(image, rotation180, pool)
+        } finally { image.close() }
+        slot.intr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
+        slot.pose = cameraPose?.copy()
+        slot.depth.capture(depth, rotation180)
+        slot.captureNs = lastSubmitNs
+        val launchNow: Boolean
+        synchronized(slotLock) {
+            converting = null
+            launchNow = inflight == null
+            if (launchNow) { inflight = slot; inflightSinceNs = System.nanoTime() } else queued = slot
+        }
+        if (launchNow) launch(slot)
     }
 
-    fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthImage?, rotation180: Boolean = false) {
-        val lm = landmarker
-        val now = System.nanoTime()
-        if (lm == null || !wantsFrame() || !busy.compareAndSet(false, true)) { image.close(); return }
-        busySinceNs = now
-        lastSubmitNs = now
-        val bitmap = try { converter.convert(image, rotation180) } finally { image.close() }
-        pendingBitmap = bitmap
-        pendingIntr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
-        pendingPose = cameraPose?.copy()
-        pendingDepth.capture(depth, rotation180)
-        pendingSubmitNs = System.nanoTime()
+    private fun launch(slot: Slot) {
+        val lm = landmarker ?: run { finishInflight(); return }
+        val bmp = slot.bitmap ?: run { finishInflight(); return }
+        slot.submitNs = System.nanoTime()
         var ts = SystemClock.uptimeMillis()
         if (ts <= lastTimestampMs) ts = lastTimestampMs + 1 // MediaPipe needs strictly increasing timestamps
         lastTimestampMs = ts
         try {
-            lm.detectAsync(BitmapImageBuilder(bitmap).build(), ts)
+            lm.detectAsync(BitmapImageBuilder(bmp).build(), ts)
         } catch (t: Throwable) {
-            busy.set(false)
             status = "detectAsync falhou: ${t.message}"
+            finishInflight()
         }
     }
 
+    /** Ends the in-flight inference and immediately starts the queued frame, if any. */
+    private fun finishInflight() {
+        val next: Slot?
+        synchronized(slotLock) {
+            inflight = null
+            next = queued
+            queued = null
+            if (next != null) { inflight = next; inflightSinceNs = System.nanoTime() }
+        }
+        if (next != null) launch(next)
+    }
+
+    /** Second CPU thread for the YUV->RGB conversion (the camera thread does the other half). */
+    private val pool = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-hands-yuv").apply { priority = Thread.MAX_PRIORITY } }
+
     private fun onResult(result: HandLandmarkerResult) {
         val t0 = System.nanoTime()
-        Diagnostics.record(Stage.HAND_INFERENCE, t0 - pendingSubmitNs)
-        val intr = pendingIntr ?: run { busy.set(false); return }
-        val depth = if (pendingDepth.valid) pendingDepth else null
+        val slot = synchronized(slotLock) { inflight?.also { processing = it } } ?: return
+        // the GPU is free: start the queued frame first, then post-process this one on the CPU
+        finishInflight()
+        try { process(result, slot, t0) } finally { synchronized(slotLock) { if (processing === slot) processing = null } }
+    }
+
+    private fun process(result: HandLandmarkerResult, slot: Slot, t0: Long) {
+        Diagnostics.record(Stage.HAND_INFERENCE, t0 - slot.submitNs)
+        val intr = slot.intr ?: return
+        val depth = if (slot.depth.valid) slot.depth else null
+        lastAnalysed = slot
         var n = 0
         val debug = debugListener
         val debugLms = if (debug != null) ArrayList<FloatArray>(2) else null
@@ -197,7 +254,7 @@ class HandTrackingService(private val context: Context) {
                 obs.hasWorld = true
             }
             debugLms?.add(obs.image.copyOf())
-            if (fusion.fuse(obs, intr, depth, pendingPose, fused[n])) {
+            if (fusion.fuse(obs, intr, depth, slot.pose, fused[n])) {
                 fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); n++
             }
         }
@@ -218,24 +275,27 @@ class HandTrackingService(private val context: Context) {
         for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
         synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
-        updateStats(t0, n)
-        if (debug != null) pendingBitmap?.let { runCatching { debug(it, debugLms!!) } }
-        busy.set(false)
+        updateStats(t0, n, t0 - slot.submitNs, t0 - slot.captureNs)
+        if (debug != null) slot.bitmap?.let { runCatching { debug(it, debugLms!!) } }
     }
 
-    private fun updateStats(now: Long, hands: Int) {
+    private var statLatencyNs = 0L
+
+    private fun updateStats(now: Long, hands: Int, inferNs: Long, latencyNs: Long) {
         if (statStartNs == 0L) statStartNs = now
         statFrames++
         if (hands > 0) statWithHands++
-        statInferNs += now - pendingSubmitNs
+        statInferNs += inferNs
+        statLatencyNs += latencyNs
         val span = now - statStartNs
         if (span >= 1_000_000_000L) {
             val fps = statFrames * 1e9f / span
-            stats = "%.0f quadros/s analisados · mão em %d%% · inferência %.0f ms · %s · %dx%d".format(
-                fps, statWithHands * 100 / statFrames.coerceAtLeast(1), statInferNs / 1e6f / statFrames.coerceAtLeast(1),
-                backendInUse, pendingBitmap?.width ?: 0, pendingBitmap?.height ?: 0,
+            val f = statFrames.coerceAtLeast(1)
+            stats = "%.0f quadros/s · mão em %d%% · GPU %.0f ms · câmera→pose %.0f ms · %s · %dx%d".format(
+                fps, statWithHands * 100 / f, statInferNs / 1e6f / f, statLatencyNs / 1e6f / f,
+                backendInUse, lastAnalysed?.bitmap?.width ?: 0, lastAnalysed?.bitmap?.height ?: 0,
             )
-            statFrames = 0; statWithHands = 0; statInferNs = 0; statStartNs = now
+            statFrames = 0; statWithHands = 0; statInferNs = 0; statLatencyNs = 0; statStartNs = now
         }
     }
 
@@ -326,8 +386,10 @@ class DepthSnapshot : DepthSampler {
 class YuvToBitmap {
     private var pixels = IntArray(0)
     private var bitmap: Bitmap? = null
+    private val done = java.util.concurrent.Semaphore(0)
 
-    fun convert(img: Image, rotate180: Boolean): Bitmap {
+    /** Converts on the calling thread and [helper] at once (top and bottom halves of the image). */
+    fun convert(img: Image, rotate180: Boolean, helper: java.util.concurrent.Executor? = null): Bitmap {
         val step = maxOf(1, (img.width + HandTrackingService.MAX_WIDTH - 1) / HandTrackingService.MAX_WIDTH)
         val ow = img.width / step
         val oh = img.height / step
@@ -337,7 +399,26 @@ class YuvToBitmap {
         val yb = p[0].buffer; val ub = p[1].buffer; val vb = p[2].buffer
         val yRow = p[0].rowStride; val yPix = p[0].pixelStride
         val uvRow = p[1].rowStride; val uvPix = p[1].pixelStride
-        for (oy in 0 until oh) {
+        val half = oh / 2
+        if (helper != null) {
+            // ByteBuffer absolute gets are thread-safe for reading with duplicated buffers
+            val y2 = yb.duplicate(); val u2 = ub.duplicate(); val v2 = vb.duplicate()
+            helper.execute {
+                try { rows(half, oh, step, ow, oh, rotate180, y2, u2, v2, yRow, yPix, uvRow, uvPix) } finally { done.release() }
+            }
+            rows(0, half, step, ow, oh, rotate180, yb, ub, vb, yRow, yPix, uvRow, uvPix)
+            done.acquireUninterruptibly()
+        } else {
+            rows(0, oh, step, ow, oh, rotate180, yb, ub, vb, yRow, yPix, uvRow, uvPix)
+        }
+        b.setPixels(pixels, 0, ow, 0, 0, ow, oh)
+        return b
+    }
+
+    private fun rows(from: Int, to: Int, step: Int, ow: Int, oh: Int, rotate180: Boolean,
+                     yb: java.nio.ByteBuffer, ub: java.nio.ByteBuffer, vb: java.nio.ByteBuffer, yRow: Int, yPix: Int, uvRow: Int, uvPix: Int) {
+        val px = pixels
+        for (oy in from until to) {
             val sy = oy * step
             val yBase = sy * yRow
             val uvBase = (sy shr 1) * uvRow
@@ -352,10 +433,8 @@ class YuvToBitmap {
                 var r = (c + 1634 * v) shr 10; if (r < 0) r = 0 else if (r > 255) r = 255
                 var g = (c - 833 * v - 400 * u) shr 10; if (g < 0) g = 0 else if (g > 255) g = 255
                 var bl = (c + 2066 * u) shr 10; if (bl < 0) bl = 0 else if (bl > 255) bl = 255
-                pixels[dstRow + (if (rotate180) ow - 1 - ox else ox)] = (0xff shl 24) or (r shl 16) or (g shl 8) or bl
+                px[dstRow + (if (rotate180) ow - 1 - ox else ox)] = (0xff shl 24) or (r shl 16) or (g shl 8) or bl
             }
         }
-        b.setPixels(pixels, 0, ow, 0, 0, ow, oh)
-        return b
     }
 }

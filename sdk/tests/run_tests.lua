@@ -365,9 +365,6 @@ local function bootGame(dir, perms, mode, frames)
 end
 
 for _, g in ipairs({
-  { "games/stillshot", { "ui", "audio", "input", "spatial", "physics", "hand_tracking" }, "scene" },
-  { "games/forgelab", { "ui", "audio", "input", "spatial", "physics", "hand_tracking" }, "scene" },
-  { "games/primalrush", { "ui", "audio", "input", "spatial", "physics", "hand_tracking" }, "scene" },
   { "games/clock", { "ui", "input" }, "window" },
   { "games/calculator", { "ui", "input" }, "window" },
   { "games/calendar", { "ui", "input", "filesystem" }, "window" },

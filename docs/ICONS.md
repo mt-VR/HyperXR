@@ -36,6 +36,6 @@ explorador de arquivos removido por preenchimento a partir da borda + recuperaç
 
 ## Sem ícone fornecido (espaço reservado neutro, sem símbolo)
 
-STILLSHOT, FORGE LAB, PRIMAL RUSH, YouTube, Twitch, TikTok, Apps XR e pacotes `.hyperx` de terceiros
+Hand Physics Lab, YouTube, Twitch, TikTok, Apps XR e pacotes `.hyperx` de terceiros
 (que podem trazer seu próprio `icon` no manifesto — exibição dele é pendente). Para esses, o launcher
 mostra um bloco gradiente neutro e o nome do app.

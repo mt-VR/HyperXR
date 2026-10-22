@@ -53,6 +53,9 @@ object IconLibrary {
 }
 
 object BuiltinApps {
+    /** Package ids that earlier versions bundled and that are no longer part of HyperXR. */
+    val RETIRED_PACKAGES = listOf("com.hyperxr.stillshot", "com.hyperxr.forgelab", "com.hyperxr.primalrush")
+
     val all: List<AppEntry> = listOf(
         AppEntry("hx:browser", "Navegador", AppKind.WEB, AppCategory.SYSTEM, "browser", "https://duckduckgo.com"),
         AppEntry("hx:settings", "Configurações", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "settings", "settings"),
@@ -73,9 +76,9 @@ object BuiltinApps {
         AppEntry("hx:calendar", "Calendário", AppKind.HYPERX_PACKAGE, AppCategory.SYSTEM, "calendar", "com.hyperxr.calendar"),
         AppEntry("hx:remote_desktop", "Área de trabalho remota", AppKind.UNAVAILABLE, AppCategory.SYSTEM, "remote_desktop",
             limitations = "Not implemented yet: needs a streaming protocol (e.g. VNC/RDP client) and a host component"),
-        AppEntry("game:stillshot", "STILLSHOT", AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, null, "com.hyperxr.stillshot"),
-        AppEntry("game:forgelab", "FORGE LAB", AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, null, "com.hyperxr.forgelab"),
-        AppEntry("game:primalrush", "PRIMAL RUSH", AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, null, "com.hyperxr.primalrush"),
+        AppEntry("game:handlab", "Hand Physics Lab", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "handlab",
+            runtime = "HyperXR (nativo)", compatibility = "Realidade mista ou VR",
+            limitations = "Física de corpos rígidos numa bancada à sua frente; use as mãos (ou o cursor do Joy-Con)"),
         AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, null, "https://m.youtube.com"),
         AppEntry("web:twitch", "Twitch", AppKind.WEB, AppCategory.WEB, null, "https://m.twitch.tv"),
         AppEntry("web:tiktok", "TikTok", AppKind.WEB, AppCategory.WEB, null, "https://www.tiktok.com"),

@@ -47,6 +47,8 @@ class PackageRepository(private val context: Context) {
     /** Extracts packages shipped in assets/packages when missing or when their version changed. */
     @Synchronized
     fun installBundled() {
+        // games removed from HyperXR are uninstalled once
+        for (id in com.hyperxr.launcher.BuiltinApps.RETIRED_PACKAGES) if (load(id) != null) runCatching { uninstall(id) }
         val assets = context.assets.list("packages").orEmpty().filter { it.endsWith(HyperxPackage.EXTENSION) }
         for (name in assets) {
             val tmp = File(context.cacheDir, name)

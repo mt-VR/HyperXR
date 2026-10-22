@@ -85,10 +85,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Sandbox, permissões, orçamento, memória, watchdog | ✅ (watchdog 🟡) |
 | Ponte JNI LuaJIT | ✅ no host · 🟡 no Android |
 | Scene/Window, UI, física, áudio, rede, arquivos | ✅ em Lua · 🟡 host Android |
-| STILLSHOT (tempo reage ao movimento, IA, armas, 3 níveis, reinício rápido) | ✅ roda 1200 quadros no host · 🟡 jogabilidade real |
-| FORGE LAB (agarrar, física, ferramentas, porta, alavanca, placa, vidro, 4 desafios) | ✅ idem · 🟡 |
-| PRIMAL RUSH (locomoção pelos braços, Tag contra bots, contra-relógio) | ✅ idem · 🟡 |
-| Multiplayer do PRIMAL RUSH | ⏳ módulo futuro (requer servidor de sincronização) |
+| Jogos antigos (STILLSHOT, FORGE LAB, PRIMAL RUSH) | removidos a pedido; desinstalados automaticamente |
 | `hx.camera` com pixels para scripts | ⏳ (retorna erro explicativo) |
 | Assinatura de pacotes por publicador | ⏳ |
 

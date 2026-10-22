@@ -146,7 +146,7 @@ data class LauncherSettings(
 ) {
     companion object {
         val DEFAULT_PINNED = listOf(
-            "hx:browser", "hx:gallery", "hx:store", "hx:files", "web:youtube", "hx:settings",
+            "hx:browser", "game:handlab", "hx:gallery", "hx:store", "hx:files", "web:youtube", "hx:settings",
         )
     }
 }

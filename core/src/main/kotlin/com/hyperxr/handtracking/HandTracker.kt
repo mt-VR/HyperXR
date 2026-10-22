@@ -3,11 +3,17 @@ package com.hyperxr.handtracking
 import com.hyperxr.math.Vec3
 
 /**
- * Temporal layer for one hand: filtering, plausibility checks, loss prediction and jump-free
- * recovery. Input is world-space joints (from [DepthFusion]); output is [state].
+ * Temporal layer for one hand. Each accepted frame goes through:
+ *  1. skeleton fit: the observation is fitted to the user's bone lengths (no stretching bones);
+ *  2. per-joint constant-velocity Kalman filter, weighted by how trustworthy the depth is;
+ *  3. One Euro filter on the Kalman estimate (removes the remaining jitter when the hand is still,
+ *     stays responsive when it moves);
+ *  4. skeleton fit again, then prediction to display time with the Kalman velocity.
+ * Plausibility checks, loss coasting and jump-free recovery work on top of that.
  */
 class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float = 0.02f) {
     val state = HandState(handedness)
+    val skeleton = HandSkeleton()
 
     var minScore = 0.3f
     /**
@@ -22,11 +28,14 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     var jumpThreshold = 0.12f
     var recoveryNs = 120_000_000L
     var predictionSeconds = 0.0f
+    /** Measurement standard deviation (m) with a depth map, and with the hand-size prior. */
+    var depthMapSigma = 0.005f
+    var sizePriorSigma = 0.012f
 
     private val filters = Array(HandJoint.COUNT * 3) { OneEuroFilter(minCutoff, beta) }
-    private val raw = Array(HandJoint.COUNT) { Vec3() }
+    private val kalman = Array(HandJoint.COUNT * 3) { Kalman1D(q = 3f) }
+    private val meas = Array(HandJoint.COUNT) { Vec3() }
     private val offset = Array(HandJoint.COUNT) { Vec3() }
-    private val coast = FloatArray(HandJoint.COUNT * 3)
     private val gestures = GestureRecognizer()
     private var lastSeenNs = 0L
     private var lastUpdateNs = 0L
@@ -36,12 +45,14 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         filters.forEach { it.minCutoff = minCutoff; it.beta = beta }
     }
 
+    /** Kalman process noise (m/s^2)^2: higher follows fast hands better, lower smooths more. */
+    fun setProcessNoise(q: Float) { kalman.forEach { it.q = q } }
+
     /** Pinch closes when thumb-index distance / palm length drops below this ratio (scale-free). */
     var pinchRatio: Float
         get() = gestures.pinchOn
         set(v) { gestures.pinchOn = v; gestures.pinchOff = v * 1.45f }
 
-    /** Feed one frame. [joints] is null when the detector did not find this hand. */
     /**
      * @param rawPinchRatio pinch ratio measured on this frame's model landmarks (preferred over the
      *   filtered camera-space joints, which lag and carry depth noise); NaN to use the joints.
@@ -55,20 +66,24 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         if (!accepted) { handleMissing(timestampNs, dt); return }
         joints!!
 
+        for (i in 0 until HandJoint.COUNT) meas[i].set(joints[i])
+        skeleton.learn(meas, trusted = depthSource == DepthSource.DEPTH_MAP)
+        skeleton.fit(meas)
+
         when (state.state) {
             TrackingState.NOT_TRACKED -> {
-                filters.forEach { it.reset() }
+                resetFilters()
                 offset.forEach { it.set(0f, 0f, 0f) }
                 state.state = TrackingState.TRACKING
             }
             TrackingState.LOST_PREDICTING -> {
                 // Measure the jump between the extrapolated pose and the new observation at the wrist.
-                val jump = joints[HandJoint.WRIST].distanceTo(state.joints[HandJoint.WRIST])
+                val jump = meas[HandJoint.WRIST].distanceTo(state.joints[HandJoint.WRIST])
                 if (jump > jumpThreshold) {
                     // Re-acquire: restart the filters on the new pose but keep the visual position
                     // continuous by fading out the offset between old and new.
-                    for (i in 0 until HandJoint.COUNT) offset[i].set(state.joints[i]).sub(joints[i])
-                    filters.forEach { it.reset() }
+                    for (i in 0 until HandJoint.COUNT) offset[i].set(state.joints[i]).sub(meas[i])
+                    resetFilters()
                 } else {
                     offset.forEach { it.set(0f, 0f, 0f) }
                 }
@@ -83,24 +98,38 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
             (1f - (timestampNs - recoveryStartNs).toFloat() / recoveryNs).coerceIn(0f, 1f)
         } else 0f
 
+        // less trusted observations (size prior, low score) count for less in the Kalman update
+        val sigma = (if (depthSource == DepthSource.DEPTH_MAP) depthMapSigma else sizePriorSigma) / score.coerceIn(0.3f, 1f)
+        val r = sigma * sigma
         for (i in 0 until HandJoint.COUNT) {
-            val src = joints[i]
-            val fx = filters[i * 3].filter(src.x, dt)
-            val fy = filters[i * 3 + 1].filter(src.y, dt)
-            val fz = filters[i * 3 + 2].filter(src.z, dt)
-            raw[i].set(fx, fy, fz)
-            val p = predictionSeconds
+            val m = meas[i]
+            val kx = kalman[i * 3]; val ky = kalman[i * 3 + 1]; val kz = kalman[i * 3 + 2]
+            kx.predict(dt); ky.predict(dt); kz.predict(dt)
+            kx.update(m.x, r); ky.update(m.y, r); kz.update(m.z, r)
             state.joints[i].set(
-                fx + filters[i * 3].velocity * p + offset[i].x * fade,
-                fy + filters[i * 3 + 1].velocity * p + offset[i].y * fade,
-                fz + filters[i * 3 + 2].velocity * p + offset[i].z * fade,
+                filters[i * 3].filter(kx.x, dt),
+                filters[i * 3 + 1].filter(ky.x, dt),
+                filters[i * 3 + 2].filter(kz.x, dt),
             )
         }
+        skeleton.fit(state.joints)
+        val p = predictionSeconds
+        for (i in 0 until HandJoint.COUNT) {
+            state.joints[i].x += kalman[i * 3].v * p + offset[i].x * fade
+            state.joints[i].y += kalman[i * 3 + 1].v * p + offset[i].y * fade
+            state.joints[i].z += kalman[i * 3 + 2].v * p + offset[i].z * fade
+        }
+        if (p != 0f) skeleton.fit(state.joints)
         if (fade == 0f) offset.forEach { it.set(0f, 0f, 0f) }
         lastSeenNs = timestampNs
         state.confidence = score
         state.depthSource = depthSource
         gestures.update(state, rawPinchRatio)
+    }
+
+    private fun resetFilters() {
+        filters.forEach { it.reset() }
+        kalman.forEach { it.reset() }
     }
 
     private fun handleMissing(now: Long, dt: Float) {
@@ -114,19 +143,18 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
                     gestures.reset()
                     return
                 }
-                if (state.state != TrackingState.LOST_PREDICTING) {
-                    for (k in coast.indices) coast[k] = filters[k].velocity.coerceIn(-1.5f, 1.5f)
-                    state.state = TrackingState.LOST_PREDICTING
-                }
-                // Extrapolate with a velocity that decays quickly: short gaps stay continuous, long
-                // ones leave the hand where it was last seen instead of flying off.
+                state.state = TrackingState.LOST_PREDICTING
+                // Kalman prediction with a velocity that decays quickly: short gaps stay continuous,
+                // long ones leave the hand where it was last seen instead of flying off.
                 val decay = kotlin.math.exp(-dt / coastDecaySeconds)
                 for (i in 0 until HandJoint.COUNT) {
-                    state.joints[i].x += coast[i * 3] * dt
-                    state.joints[i].y += coast[i * 3 + 1] * dt
-                    state.joints[i].z += coast[i * 3 + 2] * dt
+                    val kx = kalman[i * 3]; val ky = kalman[i * 3 + 1]; val kz = kalman[i * 3 + 2]
+                    state.joints[i].x += kx.v * dt
+                    state.joints[i].y += ky.v * dt
+                    state.joints[i].z += kz.v * dt
+                    kx.predict(dt); ky.predict(dt); kz.predict(dt)
+                    kx.dampVelocity(decay); ky.dampVelocity(decay); kz.dampVelocity(decay)
                 }
-                for (k in coast.indices) coast[k] *= decay
                 state.confidence *= 0.85f
             }
             TrackingState.NOT_TRACKED -> Unit

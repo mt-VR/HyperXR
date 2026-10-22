@@ -31,6 +31,8 @@ class DrawItem {
 class PanelItem {
     var texture = 0
     var oes = false
+    /** OES only: the producer's texture transform (SurfaceTexture), already flipped for top-left UVs. */
+    var texMatrix: FloatArray? = null
     val pose = Pose()
     var width = 1f
     var height = 1f
@@ -63,7 +65,7 @@ class FrameScene {
     }
     fun addPanel(): PanelItem {
         if (panelCount == panelPool.size) panelPool += PanelItem()
-        return panelPool[panelCount++].also { it.oes = false; it.alpha = 1f; it.glow = 0f; it.radius = 0.06f; it.overlay = false; it.tint.fill(1f); it.curvature = 0f }
+        return panelPool[panelCount++].also { it.oes = false; it.texMatrix = null; it.alpha = 1f; it.glow = 0f; it.radius = 0.06f; it.overlay = false; it.tint.fill(1f); it.curvature = 0f }
     }
     fun draw(i: Int) = drawPool[i]
     fun panel(i: Int) = panelPool[i]
@@ -430,7 +432,7 @@ class SceneRenderer {
             if (p.oes) {
                 GLES30.glUseProgram(oesProg.id)
                 GLES30.glUniformMatrix4fv(oesProg.u("uMvp"), 1, false, mvp, 0)
-                GLES30.glUniformMatrix4fv(oesProg.u("uTexMatrix"), 1, false, flipY, 0)
+                GLES30.glUniformMatrix4fv(oesProg.u("uTexMatrix"), 1, false, p.texMatrix ?: flipY, 0)
                 GLES30.glUniform1f(oesProg.u("uAlpha"), p.alpha)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                 GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, p.texture)
