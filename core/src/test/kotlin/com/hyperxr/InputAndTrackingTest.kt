@@ -71,7 +71,13 @@ class InputAndTrackingTest {
         assertEquals(TrackingState.TRACKING, t.state.state)
         t.update(null, 0f, DepthSource.NONE, now); now += step
         assertEquals(TrackingState.LOST_PREDICTING, t.state.state)
-        repeat(10) { t.update(null, 0f, DepthSource.NONE, now); now += step }
+        // a few missed frames keep the hand (usable, held near its last position)
+        val held = t.state.joints[HandJoint.WRIST].copy()
+        repeat(5) { t.update(null, 0f, DepthSource.NONE, now); now += step }
+        assertEquals(TrackingState.LOST_PREDICTING, t.state.state)
+        assertTrue(t.state.isUsable)
+        assertTrue("coasting drifted", t.state.joints[HandJoint.WRIST].distanceTo(held) < 0.01f)
+        repeat(15) { t.update(null, 0f, DepthSource.NONE, now); now += step }
         assertEquals(TrackingState.NOT_TRACKED, t.state.state)
 
         // Reacquire after short loss at a far position: output must start continuous, then converge.
@@ -86,6 +92,22 @@ class InputAndTrackingTest {
         repeat(30) { t2.update(openHand(Vec3(0.3f, 0f, -0.4f)), 0.9f, DepthSource.DEPTH_MAP, now); now += step }
         assertEquals(TrackingState.TRACKING, t2.state.state)
         assertEquals(0.3f, t2.state.joints[HandJoint.WRIST].x, 0.01f)
+    }
+
+    @Test fun handAssignmentFollowsPositionNotFlickeringLabels() {
+        val trackers = mapOf(Handedness.LEFT to HandTracker(Handedness.LEFT), Handedness.RIGHT to HandTracker(Handedness.RIGHT))
+        val right = openHand(Vec3(0.15f, 0f, -0.4f))
+        repeat(5) { trackers.getValue(Handedness.RIGHT).update(right, 0.9f, DepthSource.DEPTH_MAP, it * 33_000_000L) }
+        val near = right[HandJoint.WRIST].copy().add(Vec3(0.01f, 0f, 0f))
+        // label flipped to LEFT, but the detection sits on the tracked right hand
+        val a = com.hyperxr.handtracking.HandAssignment.assign(1, { near }, { Handedness.LEFT }, trackers)
+        assertEquals(Handedness.RIGHT, a[0])
+        // a new hand far away labelled LEFT goes to the left tracker
+        val far = Vec3(-0.3f, 0f, -0.4f)
+        assertEquals(Handedness.LEFT, com.hyperxr.handtracking.HandAssignment.assign(1, { far }, { Handedness.LEFT }, trackers)[0])
+        // both labelled RIGHT: both are kept, matched by position
+        val two = com.hyperxr.handtracking.HandAssignment.assign(2, { k -> if (k == 0) far else near }, { Handedness.RIGHT }, trackers)
+        assertEquals(listOf(Handedness.LEFT, Handedness.RIGHT), two.toList())
     }
 
     @Test fun implausibleSkeletonRejected() {
@@ -158,6 +180,14 @@ class InputAndTrackingTest {
         assertTrue(res.confidence < 0.9f * 0.61f)
         // synthetic palm length is exactly 0.09 m, so the prior recovers the true distance
         assertEquals(-0.5f, res.cameraSpace[HandJoint.WRIST].z, 0.02f)
+        // depth that hit the wall behind the hand (2 m) is rejected instead of throwing the hand away
+        assertTrue(fusion.fuse(obs, intr, { _, _ -> 2.0f }, null, res))
+        assertEquals(DepthSource.HAND_SIZE_PRIOR, res.depthSource)
+        assertEquals(-0.5f, res.cameraSpace[HandJoint.WRIST].z, 0.02f)
+        // mixed samples: the consistent ones win
+        assertTrue(fusion.fuse(obs, intr, { px, _ -> if (px < 320f) 0.52f else 2.4f }, null, res))
+        assertEquals(DepthSource.DEPTH_MAP, res.depthSource)
+        assertEquals(-0.52f, res.cameraSpace[HandJoint.MIDDLE_MCP].z, 0.01f)
     }
 
     private class Panel(override val pose: Pose) : InteractionSurface {

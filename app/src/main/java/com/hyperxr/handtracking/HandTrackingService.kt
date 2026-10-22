@@ -40,7 +40,24 @@ class HandTrackingService(private val context: Context) {
 
     val trackers = mapOf(Handedness.LEFT to HandTracker(Handedness.LEFT), Handedness.RIGHT to HandTracker(Handedness.RIGHT))
     private val fusion = DepthFusion()
-    private val fusionResult = DepthFusion.Result()
+    private val fused = arrayOf(DepthFusion.Result(), DepthFusion.Result())
+    private val fusedLabel = arrayOfNulls<Handedness>(2)
+    private val fusedScore = FloatArray(2)
+    private var busySinceNs = 0L
+
+    /** Live statistics (shown in the hand test screen and in Diagnostics). */
+    @Volatile var stats: String = "-"; private set
+    private var statFrames = 0
+    private var statWithHands = 0
+    private var statInferNs = 0L
+    private var statStartNs = 0L
+
+    /**
+     * Test screen hook, called on the inference thread with the exact frame that was analysed and
+     * the normalized landmarks found (x, y, z per joint). Must copy what it needs before returning.
+     */
+    @Volatile var debugListener: ((Bitmap, List<FloatArray>) -> Unit)? = null
+    private var pendingBitmap: Bitmap? = null
     private val lock = Any()
     private val published = mapOf(Handedness.LEFT to HandState(Handedness.LEFT), Handedness.RIGHT to HandState(Handedness.RIGHT))
     private var minIntervalNs = 33_000_000L
@@ -103,9 +120,11 @@ class HandTrackingService(private val context: Context) {
             .setBaseOptions(base)
             .setRunningMode(mode)
             .setNumHands(2)
-            .setMinHandDetectionConfidence(0.5f)
-            .setMinHandPresenceConfidence(0.5f)
-            .setMinTrackingConfidence(0.5f)
+            // Lower presence/tracking thresholds keep MediaPipe on its cheap ROI tracking through
+            // blur and partial occlusion instead of dropping the hand and re-running the detector.
+            .setMinHandDetectionConfidence(0.45f)
+            .setMinHandPresenceConfidence(0.35f)
+            .setMinTrackingConfidence(0.35f)
         if (mode == RunningMode.LIVE_STREAM) {
             opts.setResultListener { result, _ -> onResult(result) }
             opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; busy.set(false) }
@@ -120,12 +139,22 @@ class HandTrackingService(private val context: Context) {
      * capture time; [rotation180] is true when the landscape display is upside down relative to
      * the sensor (ROTATION_270).
      */
+    /** True when a new frame would be analysed now (lets callers skip acquiring camera images). */
+    fun wantsFrame(): Boolean {
+        val now = System.nanoTime()
+        // Watchdog: a result that never arrives must not stop hand tracking forever.
+        if (busy.get() && now - busySinceNs > 600_000_000L) busy.set(false)
+        return landmarker != null && !busy.get() && now - lastSubmitNs >= minIntervalNs
+    }
+
     fun submit(image: Image, intr: CameraIntrinsics, cameraPose: Pose?, depth: DepthImage?, rotation180: Boolean = false) {
         val lm = landmarker
         val now = System.nanoTime()
-        if (lm == null || now - lastSubmitNs < minIntervalNs || !busy.compareAndSet(false, true)) { image.close(); return }
+        if (lm == null || !wantsFrame() || !busy.compareAndSet(false, true)) { image.close(); return }
+        busySinceNs = now
         lastSubmitNs = now
         val bitmap = try { converter.convert(image, rotation180) } finally { image.close() }
+        pendingBitmap = bitmap
         pendingIntr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
         pendingPose = cameraPose?.copy()
         pendingDepth.capture(depth, rotation180)
@@ -145,36 +174,64 @@ class HandTrackingService(private val context: Context) {
         val t0 = System.nanoTime()
         Diagnostics.record(Stage.HAND_INFERENCE, t0 - pendingSubmitNs)
         val intr = pendingIntr ?: run { busy.set(false); return }
-        val seen = HashSet<Handedness>()
         val depth = if (pendingDepth.valid) pendingDepth else null
+        var n = 0
+        val debug = debugListener
+        val debugLms = if (debug != null) ArrayList<FloatArray>(2) else null
         for (i in result.landmarks().indices) {
+            if (n == 2) break
             val lms = result.landmarks()[i]
             if (lms.size < HandJoint.COUNT) continue
             val cat = result.handedness().getOrNull(i)?.firstOrNull()
             // MediaPipe labels assume a mirrored (selfie) image; the back camera is not mirrored.
-            val side = if (cat?.categoryName() == "Left") Handedness.RIGHT else Handedness.LEFT
-            if (side in seen) continue
-            val obs = LandmarkObservation(side)
+            val label = if (cat?.categoryName() == "Left") Handedness.RIGHT else Handedness.LEFT
+            val obs = LandmarkObservation(label)
             obs.score = cat?.score() ?: 0.8f
             for (j in 0 until HandJoint.COUNT) {
                 val p = lms[j]
                 obs.image[j * 3] = p.x(); obs.image[j * 3 + 1] = p.y(); obs.image[j * 3 + 2] = p.z()
             }
-            if (fusion.fuse(obs, intr, depth, pendingPose, fusionResult)) {
-                if (autoCalibrate) scaleEstimator.add(fusionResult.cameraSpace, fusionResult.depthSource, fusionResult.confidence)?.let { palm ->
-                    autoCalibrate = false
-                    fusion.palmLengthMeters = palm
-                    Diagnostics.log("Hand size measured with ARCore Depth: palm ${"%.1f".format(palm * 100)} cm")
-                    onPalmMeasured?.invoke(palm)
-                }
-                trackers.getValue(side).update(fusionResult.cameraSpace, obs.score, fusionResult.depthSource, t0)
-                seen += side
+            debugLms?.add(obs.image.copyOf())
+            if (fusion.fuse(obs, intr, depth, pendingPose, fused[n])) {
+                fusedLabel[n] = label; fusedScore[n] = obs.score; n++
             }
+        }
+        val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
+        val seen = HashSet<Handedness>()
+        for (k in 0 until n) {
+            val side = assign[k]
+            val r = fused[k]
+            if (autoCalibrate) scaleEstimator.add(r.cameraSpace, r.depthSource, r.confidence)?.let { palm ->
+                autoCalibrate = false
+                fusion.palmLengthMeters = palm
+                Diagnostics.log("Hand size measured with ARCore Depth: palm ${"%.1f".format(palm * 100)} cm")
+                onPalmMeasured?.invoke(palm)
+            }
+            trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0)
+            seen += side
         }
         for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
         synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
+        updateStats(t0, n)
+        if (debug != null) pendingBitmap?.let { runCatching { debug(it, debugLms!!) } }
         busy.set(false)
+    }
+
+    private fun updateStats(now: Long, hands: Int) {
+        if (statStartNs == 0L) statStartNs = now
+        statFrames++
+        if (hands > 0) statWithHands++
+        statInferNs += now - pendingSubmitNs
+        val span = now - statStartNs
+        if (span >= 1_000_000_000L) {
+            val fps = statFrames * 1e9f / span
+            stats = "%.0f quadros/s analisados · mão em %d%% · inferência %.0f ms · %s · %dx%d".format(
+                fps, statWithHands * 100 / statFrames.coerceAtLeast(1), statInferNs / 1e6f / statFrames.coerceAtLeast(1),
+                backendInUse, pendingBitmap?.width ?: 0, pendingBitmap?.height ?: 0,
+            )
+            statFrames = 0; statWithHands = 0; statInferNs = 0; statStartNs = now
+        }
     }
 
     /** Thread-safe copy of the latest hand states. */
@@ -224,7 +281,8 @@ class HandTrackingService(private val context: Context) {
 
     companion object {
         const val MODEL_ASSET = "models/hand_landmarker.task"
-        const val MAX_WIDTH = 480
+        /** Full 640x480 frames: hands at arm's length are small, and downscaling cost landmark quality. */
+        const val MAX_WIDTH = 640
     }
 }
 

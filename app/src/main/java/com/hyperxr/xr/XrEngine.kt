@@ -433,7 +433,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
     private val camPose = Pose()
     private fun submitArCoreHands(ar: ArCoreSession) {
-        if (!input.handsAvailable) return
+        if (!input.handsAvailable || !hands.wantsFrame()) return
         val intr = ar.cpuIntrinsics() ?: return
         if (!ar.cameraPose(camPose)) return
         val img = ar.acquireCpuImage() ?: return

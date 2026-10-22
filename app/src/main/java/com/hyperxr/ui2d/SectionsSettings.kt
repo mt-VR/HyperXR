@@ -172,6 +172,8 @@ fun HandsSection(a: MainActivity) {
     var running by remember { mutableStateOf(false) }
     SectionCard("Hand tracking", "Câmera → MediaPipe Hand Landmarker (GPU) → profundidade → filtro temporal → gestos.") {
         ToggleRow("Ativado", h.enabled) { v -> a.update { it.copy(handTracking = it.handTracking.copy(enabled = v)) } }
+        Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.handtracking.HandTestActivity::class.java)) }) { Text("Testar detecção (câmera + esqueleto)") }
+        Note("Segure o celular com a câmera para as mãos: o teste mostra o quadro analisado, o esqueleto encontrado e quantos quadros têm mão. Se aqui a mão some, o problema é luz, distância ou a câmera coberta pelo visor.")
         ChoiceRow("Backend de inferência", listOf(InferenceBackend.GPU, InferenceBackend.CPU), if (h.backend == InferenceBackend.CPU) InferenceBackend.CPU else InferenceBackend.GPU, {
             if (it == InferenceBackend.CPU) "CPU" else "GPU (recomendado)" }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(backend = v)) }

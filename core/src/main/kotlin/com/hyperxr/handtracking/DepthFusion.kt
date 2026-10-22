@@ -20,6 +20,9 @@ fun interface DepthSampler {
  * We never invent depth when neither is available; [fuse] returns false instead.
  */
 class DepthFusion(var palmLengthMeters: Float = 0.09f) {
+    /** Depth samples outside [priorZ * min, priorZ * max] are treated as background hits. */
+    var minDepthRatio = 0.6f
+    var maxDepthRatio = 1.55f
     private val palmIdx = intArrayOf(HandJoint.WRIST, HandJoint.INDEX_MCP, HandJoint.MIDDLE_MCP, HandJoint.RING_MCP, HandJoint.PINKY_MCP)
     private val depthScratch = FloatArray(palmIdx.size)
     private val tmp = Vec3()
@@ -45,27 +48,31 @@ class DepthFusion(var palmLengthMeters: Float = 0.09f) {
         var source = DepthSource.NONE
         var conf = obs.score
 
+        // Distance implied by the hand's size in the image (always available, used as a sanity bound).
+        val lenPx = maxOf(
+            dist3(img, HandJoint.WRIST, HandJoint.MIDDLE_MCP, w, h),
+            dist3(img, HandJoint.INDEX_MCP, HandJoint.PINKY_MCP, w, h) * (0.09f / 0.075f),
+        )
+        if (lenPx < 4f) return false
+        val priorZ = intr.fx * palmLengthMeters / lenPx
+
         if (depth != null) {
+            // Depth maps are coarse: palm samples often hit the background between the fingers or
+            // the wall behind the hand. Only samples consistent with the hand's image size count.
             var n = 0
             for (j in palmIdx) {
                 val d = depth.depthAt(img[j * 3] * w, img[j * 3 + 1] * h)
-                if (d.isFinite() && d > 0.05f && d < 3f) depthScratch[n++] = d
+                if (d.isFinite() && d > 0.05f && d < 3f && d > priorZ * minDepthRatio && d < priorZ * maxDepthRatio) depthScratch[n++] = d
             }
-            if (n >= 3) {
+            if (n >= 2) {
                 depthScratch.sort(0, n)
                 palmZ = depthScratch[n / 2]
                 source = DepthSource.DEPTH_MAP
-                conf *= n / palmIdx.size.toFloat()
+                conf *= 0.5f + 0.5f * n / palmIdx.size
             }
         }
         if (palmZ.isNaN()) {
-            // 3D palm length in pixel units from the model's relative z (scaled like x).
-            val lenPx = maxOf(
-                dist3(img, HandJoint.WRIST, HandJoint.MIDDLE_MCP, w, h),
-                dist3(img, HandJoint.INDEX_MCP, HandJoint.PINKY_MCP, w, h) * (0.09f / 0.075f),
-            )
-            if (lenPx < 4f) return false
-            palmZ = intr.fx * palmLengthMeters / lenPx
+            palmZ = priorZ
             source = DepthSource.HAND_SIZE_PRIOR
             conf *= 0.6f
         }

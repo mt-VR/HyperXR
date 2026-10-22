@@ -61,7 +61,8 @@ class HandState(val handedness: Handedness) {
     var gesture: Gesture = Gesture.NONE
     var timestampNs: Long = 0L
 
-    val isUsable: Boolean get() = state == TrackingState.TRACKING || state == TrackingState.RECOVERING
+    /** Includes the short coasting phase after a missed detection (gesture and position are held). */
+    val isUsable: Boolean get() = state != TrackingState.NOT_TRACKED
 }
 
 enum class Gesture(val id: Int) { NONE(0), OPEN_PALM(1), PINCH(2), POINT(3), FIST(4), GRAB(5) }

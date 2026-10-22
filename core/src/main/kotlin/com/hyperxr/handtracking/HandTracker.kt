@@ -9,9 +9,15 @@ import com.hyperxr.math.Vec3
 class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float = 0.02f) {
     val state = HandState(handedness)
 
-    var minScore = 0.5f
-    /** How long we keep extrapolating after the hand disappears before declaring it lost. */
-    var lostTimeoutNs = 150_000_000L
+    var minScore = 0.3f
+    /**
+     * How long the hand is kept (coasting, still usable) after the detector misses it. Phone
+     * detectors drop single frames constantly (motion blur, a finger crossing the palm); hiding the
+     * hand on every miss made it flicker and disappear.
+     */
+    var lostTimeoutNs = 450_000_000L
+    /** Coasting velocity decays with this time constant, so a lost hand settles instead of drifting. */
+    var coastDecaySeconds = 0.06f
     /** Positions further than this from the prediction are treated as a re-acquisition. */
     var jumpThreshold = 0.12f
     var recoveryNs = 120_000_000L
@@ -20,6 +26,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     private val filters = Array(HandJoint.COUNT * 3) { OneEuroFilter(minCutoff, beta) }
     private val raw = Array(HandJoint.COUNT) { Vec3() }
     private val offset = Array(HandJoint.COUNT) { Vec3() }
+    private val coast = FloatArray(HandJoint.COUNT * 3)
     private val gestures = GestureRecognizer()
     private var lastSeenNs = 0L
     private var lastUpdateNs = 0L
@@ -103,18 +110,20 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
                     gestures.reset()
                     return
                 }
-                state.state = TrackingState.LOST_PREDICTING
-                // Damped extrapolation from the filter velocities.
-                val damping = 0.85f
-                for (i in 0 until HandJoint.COUNT) {
-                    val fxv = filters[i * 3].velocity * damping
-                    val fyv = filters[i * 3 + 1].velocity * damping
-                    val fzv = filters[i * 3 + 2].velocity * damping
-                    state.joints[i].x += fxv * dt
-                    state.joints[i].y += fyv * dt
-                    state.joints[i].z += fzv * dt
+                if (state.state != TrackingState.LOST_PREDICTING) {
+                    for (k in coast.indices) coast[k] = filters[k].velocity.coerceIn(-1.5f, 1.5f)
+                    state.state = TrackingState.LOST_PREDICTING
                 }
-                state.confidence *= 0.7f
+                // Extrapolate with a velocity that decays quickly: short gaps stay continuous, long
+                // ones leave the hand where it was last seen instead of flying off.
+                val decay = kotlin.math.exp(-dt / coastDecaySeconds)
+                for (i in 0 until HandJoint.COUNT) {
+                    state.joints[i].x += coast[i * 3] * dt
+                    state.joints[i].y += coast[i * 3 + 1] * dt
+                    state.joints[i].z += coast[i * 3 + 2] * dt
+                }
+                for (k in coast.indices) coast[k] *= decay
+                state.confidence *= 0.85f
             }
             TrackingState.NOT_TRACKED -> Unit
         }

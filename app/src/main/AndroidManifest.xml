@@ -111,6 +111,13 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <!-- Hand tracking test (camera + skeleton + live numbers), opened from the 2D settings. -->
+        <activity
+            android:name=".handtracking.HandTestActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.HyperXR.Immersive" />
+
         <activity
             android:name=".webapps.WebAppActivity"
             android:exported="false"

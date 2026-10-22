@@ -69,3 +69,20 @@ aparelho (quadro sintético sem mão: mede o detector de palma).
   O contato é medido como distância do polegar ao segmento base→ponta do indicador relativa à
   palma; a ponta do dedo (zona da pinça) é ignorada para não confundir com clique.
   Precisão real depende do MediaPipe enxergar o polegar; não foi medida em aparelho.
+
+## Estabilidade (correções de "a mão não é detectada / some")
+
+- **Quadros em resolução cheia** (640x480): antes eram reduzidos para 320x240, e uma mão a um braço
+  de distância ficava pequena demais para os landmarks.
+- **Limiares do MediaPipe** de presença/rastreamento em 0,35: o MediaPipe continua seguindo a mão
+  (barato) em vez de descartá-la a cada borrão e rodar o detector de palma de novo.
+- **Falhas curtas não escondem a mão**: perder a mão por alguns quadros mantém posição e gesto
+  (fase de "coasting", velocidade decaindo em ~60 ms); só depois de 450 ms ela é dada como perdida.
+- **Mão atribuída por posição, não pelo rótulo**: o rótulo esquerda/direita do MediaPipe troca
+  de um quadro para outro e às vezes rotula as duas mãos iguais; isso fazia a mão pular de
+  rastreador e sumir. Agora cada detecção vai para a mão rastreada mais próxima (`HandAssignment`).
+- **Profundidade do ARCore conferida**: amostras que atingem a parede atrás da mão (incompatíveis
+  com o tamanho da mão na imagem) são descartadas, em vez de jogar a mão a metros e rejeitá-la.
+- **Watchdog**: se um resultado de inferência nunca chega, a fila é liberada após 600 ms.
+- **Teste fora do visor**: Configurações > Hand tracking > *Testar detecção* mostra o quadro
+  analisado, o esqueleto, o estado de cada mão e a taxa de quadros com mão.
