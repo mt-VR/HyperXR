@@ -35,6 +35,8 @@ class XrAppDiscovery(private val context: Context) {
             "Requires the deprecated Google VR Services; may fail on recent Android versions."),
         Category("org.khronos.openxr.intent.category.IMMERSIVE_HMD", AppCategory.OPENXR, "OpenXR runtime (via broker)",
             "Needs an installed OpenXR runtime (e.g. Monado) set as active in the runtime broker."),
+        Category("com.oculus.intent.category.VR", AppCategory.OPENXR, "Quest app (OpenXR via HyperXR runtime)",
+            "Built for Meta Quest: runs only if it uses the standard OpenXR loader and OpenGL ES (see the analysis in Files)."),
     )
 
     fun discover(): List<InstalledXrApp> {

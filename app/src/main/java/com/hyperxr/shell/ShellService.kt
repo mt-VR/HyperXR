@@ -151,6 +151,28 @@ class ShellService() : IShellService.Stub() {
             .let { out -> if (out.contains("Error", ignoreCase = true)) out.trim() else "" }
     }
 
+    override fun installApk(apk: android.os.ParcelFileDescriptor, size: Long): String = try {
+        val p = ProcessBuilder("pm", "install", "-r", "-S", size.toString()).redirectErrorStream(true).start()
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(apk).use { input -> p.outputStream.use { input.copyTo(it, 256 * 1024) } }
+        val out = p.inputStream.bufferedReader().readText().trim()
+        p.waitFor()
+        if (out.contains("Success")) "" else out.ifEmpty { "pm install falhou (código ${p.exitValue()})" }.also { lastError = it }
+    } catch (t: Throwable) { "Error: ${t.message}".also { lastError = it } }
+
+    override fun copyObb(obb: android.os.ParcelFileDescriptor, pkg: String, name: String): String {
+        if (!pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$"))) return "pacote inválido"
+        if (!name.matches(Regex("^[A-Za-z0-9_.-]+\\.obb$"))) return "nome de OBB inválido"
+        return try {
+            val dir = java.io.File("/sdcard/Android/obb/$pkg")
+            if (!dir.isDirectory && !dir.mkdirs()) return "não foi possível criar ${dir.path}"
+            val tmp = java.io.File(dir, "$name.part")
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(obb).use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 20) } }
+            val dest = java.io.File(dir, name)
+            dest.delete()
+            if (!tmp.renameTo(dest)) "não foi possível finalizar ${dest.path}" else ""
+        } catch (t: Throwable) { "Error: ${t.message}".also { lastError = it } }
+    }
+
     override fun releaseDisplay(displayId: Int) {
         displays.remove(displayId)?.release()
     }

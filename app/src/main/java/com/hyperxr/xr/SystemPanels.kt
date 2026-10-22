@@ -65,7 +65,7 @@ class HomePanel(private val a: LauncherActions) : XrPanel(1.15f, 0.42f, title = 
         c.label(dateFmt.format(Date()), c.pad + 4f, 150f, 30f, XrTheme.textDim)
         var x = c.pad
         x += c.chip(a.modeDescription, x, 200f, XrTheme.accent) + 10f
-        c.chip(a.trackingDescription, x, 200f, android.graphics.Color.rgb(60, 60, 96))
+        c.chip(a.trackingDescription, x, 200f, XrTheme.button)
         c.label("Recentes", 560f, 36f, 30f, XrTheme.textDim, bold = true)
         val recents = a.allApps().let { all -> HyperXRApp.instance.settings.current.launcher.recents.mapNotNull { id -> all.firstOrNull { it.id == id } } }.take(4)
         if (recents.isEmpty()) c.label("Nenhum app aberto ainda", 560f, 90f, 26f, XrTheme.textDim)
@@ -219,38 +219,6 @@ class EnvironmentsPanel(private val a: LauncherActions) : XrPanel(1.25f, 1.0f, t
                 .onSuccess { status = "${it.name} instalado (${it.license}, ${it.author})" }
                 .onFailure { status = "Falhou: ${it.message}" }
             dirty = true
-        }
-    }
-}
-
-class FilesPanel : XrPanel(1.2f, 0.95f, title = "Arquivos") {
-    override fun draw(c: PanelCanvas) {
-        val app = HyperXRApp.instance
-        c.heading("Pacotes .hyperx")
-        for (p in app.packages.list()) {
-            val perms = p.grants.granted.joinToString { it.key }.ifEmpty { "nenhuma" }
-            c.row("pkg:${p.manifest.id}", "${p.manifest.name} ${p.manifest.version}", detail = "${p.manifest.id} • permissões: $perms${if (p.bundled) " • embutido" else ""}") {}
-        }
-        c.heading("Armazenamento")
-        fun size(f: File): Long = f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        val files = app.filesDir
-        c.paragraph("Ambientes: ${size(File(files, "environments")) / 1_048_576} MB • Capturas: ${File(files, "captures").listFiles()?.size ?: 0} • " +
-            "Hand tracking: MediaPipe (modelo embutido)")
-        c.paragraph("Instale, remova pacotes e gerencie permissões no app 2D.", 24f)
-    }
-}
-
-class GalleryPanel : XrPanel(1.3f, 0.95f, title = "Galeria") {
-    private val thumbs = LinkedHashMap<String, Bitmap>()
-    override fun draw(c: PanelCanvas) {
-        val dir = File(HyperXRApp.instance.filesDir, "captures")
-        val files = dir.listFiles()?.sortedByDescending { it.lastModified() }?.take(12).orEmpty()
-        if (files.isEmpty()) { c.paragraph("Nenhuma captura ainda. Use o app Captura para salvar o que você está vendo."); return }
-        val tw = (c.w - 2 * c.pad - 3 * 16f) / 4
-        val th = tw * 9 / 16
-        files.forEachIndexed { i, f ->
-            val b = thumbs.getOrPut(f.name) { BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = 4 }) ?: return@forEachIndexed }
-            c.image(b, c.pad + (i % 4) * (tw + 16f), c.y + (i / 4) * (th + 16f), tw, th)
         }
     }
 }

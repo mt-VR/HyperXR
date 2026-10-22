@@ -116,6 +116,30 @@ class EnvironmentRepository(private val context: Context) {
         entry
     }
 
+    /**
+     * Saves the user's own 360 photo as an environment. It never leaves the device, so no licence
+     * check applies; the entry records that it is personal content.
+     */
+    fun importPanorama(name: String, input: java.io.InputStream): EnvironmentEntry {
+        val id = "personal_" + System.currentTimeMillis()
+        val dir = dirOf(id)
+        dir.mkdirs()
+        val out = File(dir, "panorama.jpg")
+        out.outputStream().use { input.copyTo(it, 256 * 1024) }
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(out.path, o)
+        require(o.outWidth > 0) { "A imagem não pôde ser lida" }
+        val entry = EnvironmentEntry(
+            id = id, name = name.ifBlank { "Minha foto 360" }, kind = EnvironmentKind.PANORAMA_360, author = "Você",
+            source = "Galeria do aparelho", sourceUrl = "", license = "Pessoal", licenseUrl = "", format = "jpg",
+            downloadBytes = out.length(), compatibility = "${o.outWidth}x${o.outHeight}", mainFile = out.name,
+        )
+        File(dir, "entry.json").writeText(json.encodeToString(EnvironmentEntry.serializer(), entry))
+        File(dir, "complete").writeText("ok")
+        Diagnostics.log("Environment imported from gallery: ${entry.name}")
+        return entry
+    }
+
     fun delete(entry: EnvironmentEntry) { if (entry.kind != EnvironmentKind.PROCEDURAL) dirOf(entry.id).deleteRecursively() }
 
     /** Loads an installed environment for the renderer (GL thread). */
@@ -125,7 +149,13 @@ class EnvironmentRepository(private val context: Context) {
         return try {
             when (entry.kind) {
                 EnvironmentKind.PANORAMA_360 -> {
-                    val opts = BitmapFactory.Options().apply { inSampleSize = 2 } // 8k JPEG -> 4k keeps memory reasonable
+                    // at most ~4k wide keeps memory reasonable (an 8k HDRI JPEG is halved)
+                    val path = File(dir, entry.mainFile).absolutePath
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(path, bounds)
+                    var sample = 1
+                    while (bounds.outWidth / sample > 4096) sample *= 2
+                    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
                     val bmp = BitmapFactory.decodeFile(File(dir, entry.mainFile).absolutePath, opts) ?: error("Cannot decode panorama")
                     val tex = Gl.uploadBitmap(bmp, mipmap = true)
                     bmp.recycle()

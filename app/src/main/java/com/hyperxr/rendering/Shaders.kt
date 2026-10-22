@@ -225,12 +225,33 @@ void main() {
 precision mediump float;
 in vec3 vDir;
 uniform sampler2D uTex;
+uniform vec4 uRect;
 out vec4 fragColor;
 void main() {
     vec3 d = normalize(vDir);
     float u = 0.5 + atan(d.x, -d.z) / 6.2831853;
     float v = 0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.1415926;
-    fragColor = vec4(texture(uTex, vec2(u, v)).rgb, 1.0);
+    vec2 uv = uRect.xy + vec2(u, v) * uRect.zw;
+    // explicit gradients: the atan seam would otherwise pick the smallest mip level there
+    vec2 g = vec2(1.0 / 6.2831853, 1.0 / 3.1415926) * uRect.zw * length(fwidth(d));
+    fragColor = vec4(textureGrad(uTex, uv, vec2(g.x, 0.0), vec2(0.0, g.y)).rgb, 1.0);
+}"""
+
+    /** Same for a video frame (SurfaceTexture); [uTexMatrix] maps top-left-origin UVs to it. */
+    const val PANO_OES_FS = """#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision mediump float;
+in vec3 vDir;
+uniform samplerExternalOES uTex;
+uniform vec4 uRect;
+uniform mat4 uTexMatrix;
+out vec4 fragColor;
+void main() {
+    vec3 d = normalize(vDir);
+    float u = 0.5 + atan(d.x, -d.z) / 6.2831853;
+    float v = 0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.1415926;
+    vec2 uv = uRect.xy + vec2(u, v) * uRect.zw;
+    fragColor = vec4(texture(uTex, (uTexMatrix * vec4(uv, 0.0, 1.0)).xy).rgb, 1.0);
 }"""
 
     /** Hand aura field: capsule SDF per bone, max-blended into a single-channel target. */

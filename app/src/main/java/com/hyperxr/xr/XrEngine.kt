@@ -309,6 +309,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
                     val tex = xrViews[o + 11].toInt()
                     val w = xrViews[o + 12].toInt(); val h = xrViews[o + 13].toInt()
                     val target = xrTargets.getOrPut(tex) { RenderTarget(w, h, depth = true, externalTexture = tex) }
+                    eyes[eye].index = eye
                     setupEyeFromXr(eyes[eye], o)
                     renderEye(eyes[eye], target, camera)
                 }
@@ -320,6 +321,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
             val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
             for (eye in 0..1) {
+                eyes[eye].index = eye
                 setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2)
                 renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
             }

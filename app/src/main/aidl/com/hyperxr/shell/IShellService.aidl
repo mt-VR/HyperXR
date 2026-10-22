@@ -1,5 +1,6 @@
 package com.hyperxr.shell;
 
+import android.os.ParcelFileDescriptor;
 import android.view.Surface;
 
 // Runs in a Shizuku UserService process with the shell UID.
@@ -29,4 +30,10 @@ interface IShellService {
 
     // Why the last call failed (exception text), "" if it did not.
     String lastError() = 9;
+
+    // Installs the APK read from [apk] ([size] bytes) with `pm install -r`; "" or the error text.
+    String installApk(in ParcelFileDescriptor apk, long size) = 10;
+
+    // Copies [obb] to /sdcard/Android/obb/<pkg>/<name> (shell may write there); "" or the error.
+    String copyObb(in ParcelFileDescriptor obb, String pkg, String name) = 11;
 }

@@ -81,7 +81,7 @@ class AppTile(val app: AppEntry, var size: Float = 0.17f) : InteractionSurface {
  * around the user in 3D and can be grabbed and re-arranged (placements persist). Both modes share
  * the window manager (system panels, spatial web apps) and the pointer stack.
  */
-class SpatialLauncher(private val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost {
+class SpatialLauncher(override val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost, com.hyperxr.files.MediaHost {
     private val app = HyperXRApp.instance
     private val model = LauncherModel { allApps() }
     private lateinit var ctx: XrContext
@@ -197,11 +197,13 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         surfaces.clear()
         val ids = visibleIds(s.launcher.mode)
         visibleTiles.clear()
-        for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
+        // inside a 360 photo/video only the dock and the open panels stay
+        val immersiveMedia = ctx.renderer.immersive != null
+        if (!immersiveMedia) for (t in tiles.values) if (t.app.id in ids) visibleTiles += t
         // New mode: the dimmed icons behind open windows do not catch the pointer
         if (!(s.launcher.mode == LauncherMode.NEW && windowsShown)) surfaces += visibleTiles
         // Dock: the home panel gives way to open windows (they sit above the dock row)
-        val showHome = s.launcher.mode == LauncherMode.DOCK && !windowsShown
+        val showHome = s.launcher.mode == LauncherMode.DOCK && !windowsShown && !immersiveMedia
         if (showHome) surfaces += home
         surfaces += dockControls
         surfaces += windows.filter { it.visible }
@@ -679,7 +681,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
 
     // ---------------------------------------------------------------- windows
     private fun openWindow(w: XrPanel) {
-        windows.removeAll { it.javaClass == w.javaClass && it !is InfoPanel && it !is PermissionPromptPanel }
+        // one panel per kind: the previous one is closed (and its players/bitmaps freed)
+        windows.removeAll { old -> (old.javaClass == w.javaClass && old !is InfoPanel && old !is PermissionPromptPanel).also { if (it) old.release() } }
         windows += w
     }
 
@@ -689,8 +692,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             "settings" -> QuickSettingsPanel(this) { openSystem(it) }
             "library" -> LibraryPanel(this)
             "environments" -> EnvironmentsPanel(this)
-            "files" -> FilesPanel()
-            "gallery" -> GalleryPanel()
+            "files" -> com.hyperxr.files.FilesPanel(this)
+            "gallery" -> com.hyperxr.files.GalleryPanel(this)
             "messages" -> MessagesPanel()
             "help" -> HelpPanel()
             "tv" -> TvPanel(this)
@@ -966,6 +969,20 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         }
     }
     private val pendingClose = ArrayList<SpatialWindow>()
+
+    // ---------------------------------------------------------------- MediaHost (files, gallery, viewers)
+    override fun openPanel(p: XrPanel, distance: Float) {
+        placeAboveDock(p, yawOffsetDeg = (windows.size % 3 - 1) * 8f, distance = distance)
+        openWindow(p)
+    }
+    override fun openKeyboardFor(target: com.hyperxr.windows.KeyTarget) = openKeyboard(target)
+    override fun showImmersive(m: com.hyperxr.rendering.SceneRenderer.Immersive?) { ctx.renderer.immersive = m }
+    override val immersive: com.hyperxr.rendering.SceneRenderer.Immersive? get() = ctx.renderer.immersive
+    override fun headYaw(): Float {
+        val f = ctx.input.head.orientation.rotate(Vec3(0f, 0f, -1f))
+        return kotlin.math.atan2(-f.x, -f.z)
+    }
+    override fun onGl(task: () -> Unit) { glTasks += task }
 
     // ---------------------------------------------------------------- LauncherActions
     override fun launch(app: AppEntry) {

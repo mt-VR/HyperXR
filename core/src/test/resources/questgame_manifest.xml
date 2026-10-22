@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.questgame" android:versionCode="42" android:versionName="1.2.3">
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="32" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+    <application android:label="Quest Game" android:hasCode="false">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

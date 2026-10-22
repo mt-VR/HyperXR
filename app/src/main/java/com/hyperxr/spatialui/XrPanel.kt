@@ -55,7 +55,7 @@ abstract class XrPanel(
     override var widthMeters: Float,
     override var heightMeters: Float,
     private val ppm: Float = 900f,
-    val title: String = "",
+    var title: String = "",
 ) : InteractionSurface {
     override val surfaceId: String = javaClass.simpleName + "@" + System.identityHashCode(this)
     override val pose = Pose()
@@ -65,6 +65,7 @@ abstract class XrPanel(
     override val hitPriority: Int get() = priority
     var priority = 1
     var onClose: (() -> Unit)? = null
+    val pixelsPerMeter: Float get() = ppm
     val pxW get() = (widthMeters * ppm).toInt()
     val pxH get() = (heightMeters * ppm).toInt()
     private var surface: PanelSurface? = null
@@ -89,7 +90,7 @@ abstract class XrPanel(
     fun isPressed(id: String) = pressRegion?.id == id
 
     /** Renders when dirty and submits the quad to the frame (GL thread). */
-    fun submit(scene: FrameScene) {
+    open fun submit(scene: FrameScene) {
         if (!visible) return
         var s = surface
         if (s == null) { s = PanelSurface(pxW, pxH); surface = s }
@@ -111,7 +112,8 @@ abstract class XrPanel(
         p.radius = XrTheme.PANEL_RADIUS_M
     }
 
-    fun release() { surface?.release(); surface = null }
+    /** GL thread. Subclasses holding players/bitmaps free them here too. */
+    open fun release() { surface?.release(); surface = null }
 
     internal fun addRegion(r: Region) { regions += r }
 

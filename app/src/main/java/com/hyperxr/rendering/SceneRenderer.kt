@@ -13,6 +13,7 @@ import com.hyperxr.math.Mat4
 import com.hyperxr.math.Pose
 import com.hyperxr.math.Quat
 import com.hyperxr.math.Vec3
+import com.hyperxr.media.StereoLayout
 
 /** One mesh/model instance to draw this frame. Instances are pooled by [FrameScene]. */
 class DrawItem {
@@ -94,6 +95,8 @@ class EyeView {
     val position = Vec3()
     /** Frustum planes (a,b,c,d) x6 extracted from viewProj. */
     val planes = FloatArray(24)
+    /** 0 = left, 1 = right (picks the half of a stereo 360 frame). */
+    var index = 0
 
     fun update() {
         Matrix.multiplyMM(viewProj, 0, proj, 0, view, 0)
@@ -141,6 +144,7 @@ class SceneRenderer {
     private lateinit var oesProg: Program
     private lateinit var skyProg: Program
     private lateinit var panoProg: Program
+    private lateinit var panoOesProg: Program
     private lateinit var oesFullProg: Program
     private lateinit var guardProg: Program
     private var fullVao = 0
@@ -157,6 +161,15 @@ class SceneRenderer {
     private var whiteTexture = 0
 
     var environment: EnvironmentVisual = EnvironmentVisual.Studio
+
+    /**
+     * A 360 photo or video wrapped around the user (gallery / files). While set it replaces the
+     * environment and the camera image. [yaw] turns the frame centre to where the user looked.
+     */
+    class Immersive(val texture: Int, val oes: Boolean, val texMatrix: FloatArray?, @Volatile var layout: StereoLayout, @Volatile var yaw: Float)
+    @Volatile var immersive: Immersive? = null
+    private val yawRot = FloatArray(16)
+    private val rect = FloatArray(4)
     var visibleDraws = 0; private set
 
     private val mvp = FloatArray(16)
@@ -181,6 +194,7 @@ class SceneRenderer {
         oesProg = Program(Gl.compile(Shaders.OES_VS, Shaders.OES_FS, "oes"))
         skyProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.SKY_FS, "sky"))
         panoProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_FS, "pano"))
+        panoOesProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_OES_FS, "pano-oes"))
         oesFullProg = Program(Gl.compile(Shaders.OES_FULL_VS, Shaders.OES_FS, "oes-full"))
         guardProg = Program(Gl.compile(Shaders.GUARD_VS, Shaders.GUARD_FS, "guard"))
         fullVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
@@ -218,6 +232,7 @@ class SceneRenderer {
         val c = scene.clear
         GLES30.glClearColor(c[0], c[1], c[2], c[3])
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+        immersive?.let { drawImmersive(eye, it); return }
         when (scene.background) {
             Background.PASSTHROUGH -> when {
                 camera == null || !camera.hasFrame -> drawEnvironment(eye, scene)
@@ -242,6 +257,7 @@ class SceneRenderer {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, env.texture)
                 GLES30.glUniform1i(panoProg.u("uTex"), 0)
+                GLES30.glUniform4f(panoProg.u("uRect"), 0f, 0f, 1f, 1f)
                 GLES30.glDepthMask(false)
                 skySphere.draw()
                 GLES30.glDepthMask(true)
@@ -252,6 +268,31 @@ class SceneRenderer {
             }
             EnvironmentVisual.None -> Unit
         }
+    }
+
+    private fun drawImmersive(eye: EyeView, m: Immersive) {
+        val prog = if (m.oes) panoOesProg else panoProg
+        GLES30.glUseProgram(prog.id)
+        skyMatrix(eye)
+        Matrix.setRotateM(yawRot, 0, Math.toDegrees(m.yaw.toDouble()).toFloat(), 0f, 1f, 0f)
+        Matrix.multiplyMM(tmp, 0, mvp, 0, yawRot, 0)
+        GLES30.glUniformMatrix4fv(prog.u("uMvp"), 1, false, tmp, 0)
+        // which part of the frame this eye sees: (offset u, offset v, scale u, scale v)
+        when (m.layout) {
+            StereoLayout.MONO -> { rect[0] = 0f; rect[1] = 0f; rect[2] = 1f; rect[3] = 1f }
+            StereoLayout.TOP_BOTTOM -> { rect[0] = 0f; rect[1] = 0.5f * eye.index; rect[2] = 1f; rect[3] = 0.5f }
+            StereoLayout.LEFT_RIGHT -> { rect[0] = 0.5f * eye.index; rect[1] = 0f; rect[2] = 0.5f; rect[3] = 1f }
+        }
+        GLES30.glUniform4fv(prog.u("uRect"), 1, rect, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        if (m.oes) {
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, m.texture)
+            GLES30.glUniformMatrix4fv(prog.u("uTexMatrix"), 1, false, m.texMatrix ?: identity, 0)
+        } else GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, m.texture)
+        GLES30.glUniform1i(prog.u("uTex"), 0)
+        GLES30.glDepthMask(false)
+        skySphere.draw()
+        GLES30.glDepthMask(true)
     }
 
     private fun skyMatrix(eye: EyeView) {
