@@ -49,31 +49,73 @@ class ImuOrientationFilter(var gravityGain: Float = 0.02f) {
 }
 
 /**
- * Combines a tracked hand position with a controller's relative orientation into a pointing ray.
+ * Low-latency smoothing for pointing rays: One Euro filters on origin and direction (adaptive:
+ * steady when still, responsive when moving) and a short hold when the source disappears, so a
+ * dropped hand-tracking frame does not make the pointer jump.
+ */
+class RayStabilizer(minCutoff: Float = 1.0f, beta: Float = 0.6f, var holdNs: Long = 350_000_000L) {
+    private val f = Array(6) { com.hyperxr.handtracking.OneEuroFilter(minCutoff, beta) }
+    private val last = Ray()
+    private var lastNs = 0L
+    private var has = false
+
+    fun reset() { f.forEach { it.reset() }; has = false }
+
+    /** Returns the smoothed ray, the held ray while [input] is briefly missing, or null. */
+    fun update(input: Ray?, nowNs: Long, out: Ray): Ray? {
+        if (input == null) {
+            if (has && nowNs - lastNs < holdNs) { out.origin.set(last.origin); out.direction.set(last.direction); return out }
+            reset()
+            return null
+        }
+        val dt = if (has) ((nowNs - lastNs) / 1e9f).coerceIn(1e-4f, 0.1f) else 0f
+        out.origin.set(f[0].filter(input.origin.x, dt), f[1].filter(input.origin.y, dt), f[2].filter(input.origin.z, dt))
+        out.direction.set(f[3].filter(input.direction.x, dt), f[4].filter(input.direction.y, dt), f[5].filter(input.direction.z, dt)).normalize()
+        last.origin.set(out.origin); last.direction.set(out.direction)
+        lastNs = nowNs; has = true
+        return out
+    }
+}
+
+/**
+ * Pose of a controller held in a tracked hand.
  *
- * Coordinate frames:
- *  - world: tracking space of the head tracker (-Z forward, +Y up).
- *  - controller IMU frame: arbitrary yaw reference chosen when the filter initialised.
- * A calibration quaternion maps the IMU frame into world space. Calibration happens on recenter:
- * the user points the controller straight ahead and the yaw difference to the head is stored.
+ * Default (hand 6DoF): the pointer comes entirely from hand tracking: origin at the hand, direction
+ * along the shoulder->hand ray, both stabilised. This is absolute (no drift) and works with any
+ * Joy-Con, including drivers that expose no IMU.
+ *
+ * With [useImu] and an IMU available, the IMU orientation drives the ray (lower latency for wrist
+ * rotation) and its drift is pulled continuously towards the hand ray, so it never wanders off.
+ * An IMU alone is never treated as absolute 6DoF.
  */
 class ControllerPoseFusion {
+    var useImu = false
+    /** How fast IMU yaw/pitch drift converges to the hand ray (fraction per second). */
+    var imuCorrectionRate = 0.6f
+
     private val calibration = Quat()
     var calibrated = false
         private set
 
-    /** Fallback grip offset from the head when the hand is not tracked (right hand default). */
+    /** Fallback grip offset from the head when nothing tracks the hand (right hand default). */
     val fallbackOffset = Vec3(0.18f, -0.32f, -0.30f)
 
     val worldOrientation = Quat()
     val gripPosition = Vec3()
     var positionFromHand = false
         private set
+    var orientationSource = "head"
+        private set
 
+    private val stabilizer = RayStabilizer()
+    private val rawRay = Ray()
+    private val handRay = Ray()
     private val tmpV = Vec3()
     private val tmpQ = Quat()
+    private val tmpQ2 = Quat()
+    private val fwd = Vec3()
 
-    /** Aligns the controller's forward direction with the head's yaw (pitch/roll come from gravity). */
+    /** Aligns the IMU's forward direction with the head's yaw (pitch/roll come from gravity). */
     fun recenter(imuOrientation: Quat, headPose: Pose) {
         val headYaw = yawOnly(headPose.orientation, Quat())
         val ctrlYaw = yawOnly(imuOrientation, Quat())
@@ -81,16 +123,40 @@ class ControllerPoseFusion {
         calibrated = true
     }
 
-    fun update(imuOrientation: Quat, handWrist: Vec3?, headPose: Pose, mirrorForLeft: Boolean = false) {
-        calibration.mul(imuOrientation, worldOrientation).normalize()
-        if (handWrist != null) {
-            gripPosition.set(handWrist)
+    fun update(imu: Quat?, hand: com.hyperxr.handtracking.HandState?, headPose: Pose, rightSide: Boolean, nowNs: Long, dtSeconds: Float) {
+        val raw = if (hand != null) HandRay.compute(hand, headPose, rightSide, rawRay) else null
+        val ray = stabilizer.update(raw, nowNs, handRay)
+        val imuActive = useImu && imu != null
+        if (imuActive && !calibrated) recenter(imu!!, headPose)
+
+        if (ray != null) {
+            gripPosition.set(ray.origin).addScaled(ray.direction, ray.origin.distanceTo(hand!!.joints[com.hyperxr.handtracking.HandJoint.INDEX_MCP]).coerceAtMost(0.8f))
             positionFromHand = true
+            if (imuActive) {
+                calibration.mul(imu!!, worldOrientation).normalize()
+                // drift correction: rotate the calibration a little towards the hand ray every frame
+                worldOrientation.rotate(Pose.FORWARD, fwd)
+                Quat.fromTo(fwd, ray.direction, tmpQ)
+                tmpQ2.identity().slerp(tmpQ, (imuCorrectionRate * dtSeconds).coerceIn(0f, 1f), tmpQ)
+                tmpQ.mul(calibration, tmpQ2); calibration.set(tmpQ2).normalize()
+                calibration.mul(imu, worldOrientation).normalize()
+                orientationSource = "imu+hand"
+            } else {
+                lookRotation(ray.direction, worldOrientation)
+                orientationSource = "hand"
+            }
+            return
+        }
+        positionFromHand = false
+        val yaw = yawOnly(headPose.orientation, tmpQ)
+        tmpV.set(if (rightSide) fallbackOffset.x else -fallbackOffset.x, fallbackOffset.y, fallbackOffset.z)
+        yaw.rotate(tmpV, gripPosition).add(headPose.position)
+        if (imuActive) {
+            calibration.mul(imu!!, worldOrientation).normalize()
+            orientationSource = "imu"
         } else {
-            val yaw = yawOnly(headPose.orientation, tmpQ)
-            tmpV.set(if (mirrorForLeft) -fallbackOffset.x else fallbackOffset.x, fallbackOffset.y, fallbackOffset.z)
-            yaw.rotate(tmpV, gripPosition).add(headPose.position)
-            positionFromHand = false
+            worldOrientation.set(headPose.orientation)
+            orientationSource = "head"
         }
     }
 
@@ -106,6 +172,14 @@ class ControllerPoseFusion {
             val f = q.rotate(Vec3(0f, 0f, -1f))
             val yaw = atan2(-f.x, -f.z)
             return Quat.fromAxisAngle(0f, 1f, 0f, yaw, out)
+        }
+
+        /** Orientation whose -Z axis points along [dir] with +Y as close to world up as possible. */
+        fun lookRotation(dir: Vec3, out: Quat): Quat {
+            val yaw = atan2(-dir.x, -dir.z)
+            val pitch = kotlin.math.asin(dir.y.coerceIn(-1f, 1f))
+            Quat.fromAxisAngle(0f, 1f, 0f, yaw, out)
+            return out.mul(Quat.fromAxisAngle(1f, 0f, 0f, pitch), out)
         }
     }
 }

@@ -42,6 +42,15 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     override var fovY = 0.85f; private set
     /** ARCore maps VIEW_NORMALIZED to the display, so quad UVs cover the full-screen aspect. */
     override var imageAspect = 2f; private set
+    /** ARCore crops the camera texture to the display aspect: the visible region's tangents. */
+    override val regionTanX: Float get() {
+        val tx = kotlin.math.tan(fovX / 2); val ty = kotlin.math.tan(fovY / 2)
+        return if (imageAspect > tx / ty) tx else ty * imageAspect
+    }
+    override val regionTanY: Float get() {
+        val tx = kotlin.math.tan(fovX / 2); val ty = kotlin.math.tan(fovY / 2)
+        return if (imageAspect > tx / ty) tx / imageAspect else ty
+    }
     override val hasFrame: Boolean get() = lastFrame != null && lastFrame!!.timestamp != 0L
 
     private val headPose = Pose()

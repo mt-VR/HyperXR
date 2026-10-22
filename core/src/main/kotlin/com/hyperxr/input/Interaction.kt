@@ -11,6 +11,12 @@ interface InteractionSurface {
     val widthMeters: Float
     val heightMeters: Float
     val interactive: Boolean get() = true
+    /**
+     * 0 for flat surfaces. Otherwise the surface is a cylinder section curved towards the viewer:
+     * its axis is vertical, [curvatureRadius] in front of the pose (local +Z), and [widthMeters]
+     * is the arc length.
+     */
+    val curvatureRadius: Float get() = 0f
 
     /** u,v in [0,1] with v=0 at the top edge. */
     fun onPointerEvent(event: PointerEvent)
@@ -37,10 +43,22 @@ object SurfaceMath {
     private val tmpLocal = ThreadLocal.withInitial { Vec3() }
     private val tmpInv = ThreadLocal.withInitial { Pose() }
 
-    /** Converts a world point into surface-local coordinates (x right, y up, z towards viewer). */
+    /**
+     * Converts a world point into surface-local coordinates (x right, y up, z towards viewer).
+     * For curved surfaces the coordinates are "unrolled": x is the arc length along the surface
+     * and z the distance in front of it, so touch and drag logic is identical for both shapes.
+     */
     fun toLocal(s: InteractionSurface, world: Vec3, out: Vec3): Vec3 {
         val inv = s.pose.inverse(tmpInv.get())
-        return inv.transformPoint(world, out)
+        inv.transformPoint(world, out)
+        val r = s.curvatureRadius
+        if (r > 0f) {
+            val dz = r - out.z
+            val rho = kotlin.math.sqrt(out.x * out.x + dz * dz)
+            val theta = kotlin.math.atan2(out.x, dz)
+            out.set(r * theta, out.y, r - rho)
+        }
+        return out
     }
 
     fun localToUv(s: InteractionSurface, local: Vec3, out: FloatArray): Boolean {
@@ -49,8 +67,9 @@ object SurfaceMath {
         return out[0] in 0f..1f && out[1] in 0f..1f
     }
 
-    /** Ray/plane intersection. Returns hit distance or NaN. */
+    /** Ray/surface intersection. Returns hit distance or NaN. */
     fun raycast(s: InteractionSurface, ray: Ray, uvOut: FloatArray): Float {
+        if (s.curvatureRadius > 0f) return raycastCurved(s, ray, uvOut)
         val n = s.pose.orientation.rotate(Vec3(0f, 0f, 1f))
         val denom = n.dot(ray.direction)
         if (denom > -1e-5f) return Float.NaN // parallel or hitting the back face
@@ -60,6 +79,35 @@ object SurfaceMath {
         val hit = ray.pointAt(t)
         val local = toLocal(s, hit, tmpLocal.get())
         return if (localToUv(s, local, uvOut)) t else Float.NaN
+    }
+
+    /** Ray vs the inner (concave) side of the cylinder section. */
+    private fun raycastCurved(s: InteractionSurface, ray: Ray, uvOut: FloatArray): Float {
+        val r = s.curvatureRadius
+        val inv = s.pose.inverse(tmpInv.get())
+        val o = inv.transformPoint(ray.origin, Vec3())
+        val d = inv.orientation.rotate(ray.direction, Vec3())
+        // cylinder axis: vertical line through (0, *, r) in local space
+        val ox = o.x; val oz = o.z - r
+        val a = d.x * d.x + d.z * d.z
+        if (a < 1e-9f) return Float.NaN
+        val b = 2f * (ox * d.x + oz * d.z)
+        val c = ox * ox + oz * oz - r * r
+        val disc = b * b - 4f * a * c
+        if (disc < 0f) return Float.NaN
+        val sq = kotlin.math.sqrt(disc)
+        val local = tmpLocal.get()
+        for (t in floatArrayOf((-b - sq) / (2f * a), (-b + sq) / (2f * a))) {
+            if (t <= 0f) continue
+            val hx = o.x + d.x * t; val hy = o.y + d.y * t; val hz = o.z + d.z * t
+            // must hit the side facing the axis (moving away from it) and inside the arc/height
+            val inwardX = -hx; val inwardZ = r - hz
+            if (d.x * inwardX + d.z * inwardZ >= 0f) continue
+            val theta = kotlin.math.atan2(hx, r - hz)
+            local.set(r * theta, hy, 0f)
+            if (localToUv(s, local, uvOut)) return t
+        }
+        return Float.NaN
     }
 }
 

@@ -143,6 +143,9 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         joyCons.onAction = { side, ev -> pendingActions += Triple(ev.action, ev.pressed, side) }
         joyCons.start()
         hands.configure(settings.handTracking, settings.performance.handInferenceHz)
+        hands.onPalmMeasured = { palm ->
+            app.settings.update { it.copy(handTracking = it.handTracking.copy(calibratedPalmMm = palm * 1000f)) }
+        }
         if (settings.performance.sustainedPerformanceMode) {
             activity.window.setSustainedPerformanceMode(true)
         }
@@ -249,7 +252,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
 
         // 2. hands + controllers
         hands.snapshot(input.hands[0], input.hands[1])
-        updateControllers()
+        updateControllers(dt)
         input.tapDown = tap.next()
         while (true) {
             val a = pendingActions.poll() ?: break
@@ -280,7 +283,10 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
             }
             OpenXrNative.nativeEndFrame(openXrSession, xrFrame == 1)
         } else {
-            val ipd = settings.graphics.ipdMm / 1000f
+            // Over a mono camera image, per-eye offsets would make virtual hands/panels double up
+            // against the real ones; MR renders both eyes from the camera viewpoint unless asked.
+            val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
+            val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
             for (eye in 0..1) {
                 setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2)
                 renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
@@ -327,9 +333,22 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         head.orientation.rotate(eyeOffset.set(offsetX, 0f, 0f), eye.position).add(head.position)
         Mat4.compose(eye.position, head.orientation, 1f, 1f, 1f, headMatrix)
         Mat4.invertRigid(headMatrix, eye.view)
-        val t = compositor.tanHalfFov(settings.graphics)
         val a = compositor.aspect()
-        Mat4.frustumTan(-t * a, t * a, -t, t, 0.05f, 200f, eye.proj)
+        val cam: CameraImageSource? = arCore ?: passthrough
+        val tv: Float
+        val th: Float
+        if (renderer.passthroughFill && scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && cam != null && cam.hasFrame) {
+            // Render with exactly the field of view the camera image is shown with, so virtual
+            // content (hands, panels) keeps its real size and position over the passthrough.
+            val (cu, cv) = SceneRenderer.fillCrop(a, cam)
+            th = cam.regionTanX * cu
+            tv = cam.regionTanY * cv
+        } else {
+            tv = compositor.tanHalfFov(settings.graphics)
+            th = tv * a
+        }
+        compositor.eyeTanH = th; compositor.eyeTanV = tv
+        Mat4.frustumTan(-th, th, -tv, tv, 0.05f, 200f, eye.proj)
         eye.update()
     }
 
@@ -354,32 +373,23 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         } finally { depth?.second?.invoke() }
     }
 
-    private fun updateControllers() {
+    private fun updateControllers(dt: Float) {
         for (i in 0..1) input.controllers[i].connected = false
-        val list = joyCons.controllers.values.toList()
-        for (jc in list) {
+        val now = System.nanoTime()
+        for (jc in joyCons.controllers.values) {
             val idx = when (jc.side) { JoyConSide.LEFT -> 0; else -> 1 }
             val c = input.controllers[idx]
             c.connected = true
             c.buttons = jc.buttons
             c.stickX = jc.stickX; c.stickY = jc.stickY
             c.hasImu = jc.hasImu
-            val hand = input.hands[idx]
-            val wrist = if (hand.isUsable) hand.joints[com.hyperxr.handtracking.HandJoint.MIDDLE_MCP] else null
-            if (jc.hasImu) {
-                jc.orientationSnapshot(imuQ)
-                if (!fusions[idx].calibrated) fusions[idx].recenter(imuQ, input.head)
-                fusions[idx].update(imuQ, wrist, input.head, mirrorForLeft = idx == 0)
-                c.pose.orientation.set(fusions[idx].worldOrientation)
-                c.pose.position.set(fusions[idx].gripPosition)
-                c.positionFromHand = fusions[idx].positionFromHand
-            } else {
-                // No IMU exposed by the driver: point with the head direction from the hand/grip position.
-                fusions[idx].update(input.head.orientation, wrist, input.head, mirrorForLeft = idx == 0)
-                c.pose.position.set(fusions[idx].gripPosition)
-                c.pose.orientation.set(input.head.orientation)
-                c.positionFromHand = fusions[idx].positionFromHand
-            }
+            // 6DoF comes from the hand holding the controller; the IMU is optional and drift-corrected.
+            fusions[idx].useImu = settings.controllers.pointerUsesImu && jc.hasImu
+            val imu = if (fusions[idx].useImu) { jc.orientationSnapshot(imuQ); imuQ } else null
+            fusions[idx].update(imu, input.hands[idx], input.head, rightSide = idx == 1, nowNs = now, dtSeconds = dt)
+            c.pose.orientation.set(fusions[idx].worldOrientation)
+            c.pose.position.set(fusions[idx].gripPosition)
+            c.positionFromHand = fusions[idx].positionFromHand
         }
     }
 

@@ -36,7 +36,9 @@ import com.hyperxr.settings.ControllerAction
 import com.hyperxr.settings.LauncherMode
 import com.hyperxr.spatialui.XrPanel
 import com.hyperxr.ui2d.MainActivity
-import com.hyperxr.webapps.SpatialWebPanel
+import com.hyperxr.windows.AndroidAppWindow
+import com.hyperxr.windows.SpatialWindow
+import com.hyperxr.windows.WebWindow
 import com.hyperxr.webapps.WebAppConfig
 import java.io.File
 import java.io.FileOutputStream
@@ -85,8 +87,9 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private lateinit var ctx: XrContext
     private val tiles = LinkedHashMap<String, AppTile>()
     private val windows = ArrayList<XrPanel>()
-    private val webPanels = ArrayList<SpatialWebPanel>()
-    private val webControls = HashMap<SpatialWebPanel, XrPanel>()
+    private val appWindows = ArrayList<SpatialWindow>()
+    private val windowControls = HashMap<SpatialWindow, WindowControls>()
+    private var keyboard: KeyboardPanel? = null
     private lateinit var home: HomePanel
     private lateinit var dockControls: DockControls
     private val gaze = RayPointer(0, PointerSource.GAZE)
@@ -146,7 +149,9 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         tiles.values.forEach { Gl.deleteTexture(it.texture); Gl.deleteTexture(it.labelTexture) }
         tiles.clear()
         (windows + home + dockControls).forEach { it.release() }
-        webPanels.forEach { it.releaseGl(); it.close() }
+        appWindows.forEach { it.close(); it.screen.release() }
+        windowControls.values.forEach { it.release() }
+        keyboard?.release()
         Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex)
     }
 
@@ -154,7 +159,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         if (!pressed) return
         when (action) {
             ControllerAction.BACK -> windows.lastOrNull { it.visible && it.closable }?.let { it.visible = false }
-                ?: webPanels.lastOrNull()?.let { closeWeb(it) }
+                ?: appWindows.lastOrNull()?.back()
             ControllerAction.MENU -> openSystem("settings")
             else -> Unit
         }
@@ -176,8 +181,9 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         surfaces += visibleTiles
         if (s.launcher.mode == LauncherMode.DOCK) { surfaces += home; surfaces += dockControls } else surfaces += dockControls
         surfaces += windows.filter { it.visible }
-        surfaces += webPanels.filter { it.visible }
-        surfaces += webControls.values.filter { it.visible }
+        for (w in appWindows) if (w.visible) surfaces += w
+        surfaces += windowControls.values
+        keyboard?.let { if (it.visible) surfaces += it }
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
         handleTileEvents(visibleTiles)
@@ -188,8 +194,8 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         dockControls.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
         for (w in windows) { w.update(dt); w.submit(ctx.scene) }
-        for (wp in webPanels) wp.submit(ctx.scene)
-        for ((wp, c) in webControls) { placeBelow(c, wp); c.submit(ctx.scene) }
+        for ((w, c) in windowControls) { placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene) }
+        keyboard?.let { k -> if (k.visible) k.submit(ctx.scene) else { k.release(); keyboard = null } }
         submitPointerVisuals()
     }
 
@@ -294,6 +300,10 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private val hitPoints = ArrayList<Vec3>()
 
     private val handRays = arrayOf(RayPointer(5, PointerSource.HAND_RAY), RayPointer(6, PointerSource.HAND_RAY))
+    private val handStabilizers = arrayOf(com.hyperxr.input.RayStabilizer(), com.hyperxr.input.RayStabilizer())
+    private val handRayOut = arrayOf(Ray(), Ray())
+    private val handRayVisible = BooleanArray(2)
+    private val pinchStrength = FloatArray(2)
     private val dwell = com.hyperxr.input.DwellClick()
     private var gazeHit: Vec3? = null
 
@@ -317,9 +327,13 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         // hands: far rays clicked with a pinch, plus direct touch with the fingertip
         for (i in 0..1) {
             val h = input.hands[i]
-            val handRay = if (!anyController) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
-            val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
+            val raw = if (!anyController) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
+            val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
+            // pinch is the click; it is read from the (held) state so a lost frame does not release it
+            val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
             handRays[i].update(handRay, pinch, surfaces, now)
+            handRayVisible[i] = handRay != null
+            pinchStrength[i] = if (h.isUsable) h.pinchStrength else 0f
             if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch) }
             val tip = if (directTouch && !anyController && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
@@ -405,6 +419,20 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             p.width = 0.018f; p.height = 0.018f; p.radius = 0f
             p.overlay = true
         }
+        // hand ray beams: brighter and thinner as the pinch closes
+        for (i in 0..1) {
+            if (!handRayVisible[i]) continue
+            val r = handRayOut[i]
+            val len = (handRays[i].hitDistance.takeIf { !it.isNaN() } ?: 2.0f).coerceAtMost(4f)
+            val d = ctx.scene.addDraw()
+            d.mesh = ctx.renderer.cylinder
+            d.unlit = true; d.transparent = true
+            val k = pinchStrength[i]
+            d.color[0] = 0.75f + 0.25f * k; d.color[1] = 0.7f + 0.3f * k; d.color[2] = 1f; d.color[3] = 0.25f + 0.5f * k
+            val mid = r.pointAt(len / 2)
+            val q = Quat.fromTo(Vec3(0f, 1f, 0f), r.direction)
+            com.hyperxr.math.Mat4.compose(mid, q, 0.005f - 0.002f * k, len, 0.005f - 0.002f * k, d.matrix)
+        }
         // controller beams
         for (i in 0..1) {
             val c = ctx.input.controllers[i]
@@ -457,6 +485,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             "help" -> HelpPanel()
             "tv" -> TvPanel(this)
             "xrapps" -> XrAppsPanel(this)
+            "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
@@ -464,43 +493,63 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
         openWindow(w)
     }
 
-    private fun placeBelow(c: XrPanel, wp: SpatialWebPanel) {
-        c.pose.orientation.set(wp.pose.orientation)
-        val down = wp.pose.orientation.rotate(Vec3(0f, -1f, 0f))
-        c.pose.position.set(wp.pose.position).addScaled(down, wp.heightMeters / 2 + c.heightMeters / 2 + 0.02f)
+    /** The control bar is the window's handle: dragging it moves the window placed right above it. */
+    private fun placeAbove(w: SpatialWindow, c: XrPanel) {
+        w.pose.orientation.set(c.pose.orientation)
+        val up = c.pose.orientation.rotate(Vec3(0f, 1f, 0f))
+        w.pose.position.set(c.pose.position).addScaled(up, c.heightMeters / 2 + w.heightMeters / 2 + 0.02f)
+        if (w.curved) w.radius = ctx.input.head.position.distanceTo(w.pose.position).coerceIn(0.8f, 3f)
+    }
+
+    private fun openWindow(w: SpatialWindow) {
+        val c = WindowControls(w)
+        val head = ctx.input.head
+        val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
+        val yaw = kotlin.math.atan2(-f.x, -f.z) + Math.toRadians(((appWindows.size % 3) - 1) * 12.0).toFloat()
+        c.pose.position.set(head.position.x - sin(yaw) * 1.6f, head.position.y - 0.55f, head.position.z - cos(yaw) * 1.6f)
+        Quat.fromAxisAngle(0f, 1f, 0f, yaw, c.pose.orientation)
+        appWindows += w
+        windowControls[w] = c
+    }
+
+    private fun closeWindow(w: SpatialWindow) {
+        appWindows.remove(w)
+        windowControls.remove(w)?.release()
+        if (keyboard?.target === w) { keyboard?.release(); keyboard = null }
+        w.close()
+        w.screen.release()
     }
 
     private fun openWeb(a: AppEntry) {
         val desktop = app.settings.current.network.webAppsDesktopMode || a.id == "web:whatsapp"
-        val wp = SpatialWebPanel(activity, root, a.target, a.title, desktop = desktop)
-        wp.pose.set(Pose().also { p ->
-            val head = ctx.input.head
-            val f = head.orientation.rotate(Vec3(0f, 0f, -1f))
-            val yaw = kotlin.math.atan2(-f.x, -f.z)
-            p.position.set(head.position.x - sin(yaw) * 1.6f, head.position.y + 0.05f, head.position.z - cos(yaw) * 1.6f)
-            Quat.fromAxisAngle(0f, 1f, 0f, yaw, p.orientation)
-        })
-        webPanels += wp
-        webControls[wp] = WebControls(wp)
+        openWindow(WebWindow(activity, a.target, a.title, desktop))
     }
 
-    private fun closeWeb(wp: SpatialWebPanel) {
-        webPanels.remove(wp)
-        webControls.remove(wp)?.release()
-        wp.releaseGl(); wp.close()
+    fun openAndroidApp(pkg: String, component: String, title: String) {
+        openWindow(AndroidAppWindow(activity, pkg, component, title))
     }
 
-    private inner class WebControls(private val wp: SpatialWebPanel) : XrPanel(1.2f, 0.12f, title = "") {
+    /** Control bar under a window: title + status, back/reload/keyboard/curve/external/close. */
+    private inner class WindowControls(val w: SpatialWindow) : XrPanel(1.4f, 0.2f, title = w.title) {
         init { closable = false }
+        private var lastStatus: String? = null
+        override fun update(dt: Float) { if (w.status != lastStatus) { lastStatus = w.status; dirty = true } }
         override fun draw(c: com.hyperxr.spatialui.PanelCanvas) {
-            val bw = (c.w - 2 * c.pad - 3 * 14f) / 4
-            c.button("back", "Voltar", c.pad, 12f, bw, 80f) { wp.back() }
-            c.button("reload", "Recarregar", c.pad + bw + 14f, 12f, bw, 80f) { wp.reload() }
-            c.button("ext", "Navegador externo", c.pad + 2 * (bw + 14f), 12f, bw, 80f) { WebAppConfig.openExternal(activity, wp.url) }
-            c.button("close", "Fechar", c.pad + 3 * (bw + 14f), 12f, bw, 80f, accent = true) { pendingClose += wp }
+            w.status?.let { c.label(it, 420f, 34f, 24f, com.hyperxr.spatialui.XrTheme.accent2, maxWidth = c.w - 560f) }
+            val n = if (w.supportsReload) 6 else 5
+            val bw = (c.w - 2 * c.pad - (n - 1) * 12f) / n
+            var x = c.pad
+            val y = c.y
+            fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 70f, accent = accent) { act() }; x += bw + 12f }
+            b("back", "Voltar") { w.back() }
+            if (w.supportsReload) b("reload", "Recarregar") { w.reload() }
+            b("kbd", "Teclado") { keyboard = KeyboardPanel(w).also { k -> k.placeInFront(ctx.input.head, 0.9f, -0.35f) } }
+            b("curve", if (w.curved) "Plano" else "Curvar") { w.curved = !w.curved; dirty = true }
+            b("ext", if (w is WebWindow) "Navegador externo" else "Tela cheia 2D") { w.openExternally() }
+            b("close", "Fechar", accent = true) { pendingClose += w }
         }
     }
-    private val pendingClose = ArrayList<SpatialWebPanel>()
+    private val pendingClose = ArrayList<SpatialWindow>()
 
     // ---------------------------------------------------------------- LauncherActions
     override fun launch(app: AppEntry) {
@@ -561,7 +610,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     /** Close requests from web controls are applied at the start of the next frame (GL thread). */
     private fun processPendingCloses() {
         if (pendingClose.isEmpty()) return
-        pendingClose.toList().forEach { closeWeb(it) }
+        pendingClose.toList().forEach { closeWindow(it) }
         pendingClose.clear()
     }
 }

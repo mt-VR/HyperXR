@@ -37,6 +37,8 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
     override var fovX = 1.1f; private set
     override var fovY = 0.85f; private set
     override var imageAspect = 16f / 9f; private set
+    override val regionTanX: Float get() = kotlin.math.tan(fovX / 2)
+    override val regionTanY: Float get() = kotlin.math.tan(fovY / 2)
     @Volatile override var hasFrame = false; private set
 
     var error: String? = null; private set

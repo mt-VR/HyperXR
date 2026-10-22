@@ -294,3 +294,82 @@ class PermissionPromptPanel(private val app: AppEntry, private val packageId: St
         c.row("cancel", "Cancelar") { onDone(false); visible = false }
     }
 }
+
+/** Spatial keyboard typing into a window (web field or Android app). */
+class KeyboardPanel(val target: com.hyperxr.windows.SpatialWindow) : XrPanel(1.3f, 0.55f, title = "Teclado") {
+    private var shift = false
+    private var symbols = false
+    override fun draw(c: PanelCanvas) {
+        val rows = if (symbols) listOf("1234567890", "@#$%&*-+()", "!?/:;'\",.", "") else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm", "")
+        val keyW = (c.w - 2 * c.pad - 9 * 8f) / 10
+        rows.forEachIndexed { r, row ->
+            val offset = c.pad + (10 - row.length) * (keyW + 8f) / 2
+            row.forEachIndexed { i, ch ->
+                val label = if (shift) ch.uppercaseChar().toString() else ch.toString()
+                c.button("k$r$i", label, offset + i * (keyW + 8f), c.y + r * 84f, keyW, 74f) {
+                    target.typeText(label); if (shift) { shift = false; dirty = true }
+                }
+            }
+        }
+        val y = c.y + 3 * 84f
+        val w4 = (c.w - 2 * c.pad - 4 * 8f) / 5
+        c.button("shift", "Shift", c.pad, y, w4, 74f, accent = shift) { shift = !shift; dirty = true }
+        c.button("sym", if (symbols) "abc" else "?123", c.pad + (w4 + 8f), y, w4, 74f) { symbols = !symbols; dirty = true }
+        c.button("space", "Espaço", c.pad + 2 * (w4 + 8f), y, w4, 74f) { target.typeText(" ") }
+        c.button("bksp", "Apagar", c.pad + 3 * (w4 + 8f), y, w4, 74f) { target.sendKey(android.view.KeyEvent.KEYCODE_DEL) }
+        c.button("enter", "Enter", c.pad + 4 * (w4 + 8f), y, w4, 74f, accent = true) { target.sendKey(android.view.KeyEvent.KEYCODE_ENTER) }
+    }
+}
+
+/** Installed launchable apps that can open in an XR window through Shizuku. */
+class AndroidAppsPanel(
+    private val activity: android.app.Activity,
+    private val open: (pkg: String, component: String, title: String) -> Unit,
+) : XrPanel(1.3f, 1.0f, title = "Apps Android") {
+    private data class Launchable(val pkg: String, val component: String, val label: String, val icon: Bitmap?)
+    private val apps: List<Launchable> by lazy {
+        val pm = activity.packageManager
+        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION")
+        pm.queryIntentActivities(intent, 0).filter { it.activityInfo.packageName != activity.packageName }.map { ri ->
+            val d = ri.loadIcon(pm)
+            val b = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { bmp -> d.setBounds(0, 0, 96, 96); d.draw(android.graphics.Canvas(bmp)) }
+            Launchable(ri.activityInfo.packageName, "${ri.activityInfo.packageName}/${ri.activityInfo.name}", ri.loadLabel(pm).toString(), b)
+        }.sortedBy { it.label.lowercase() }
+    }
+    private var page = 0
+    @Volatile private var message: String? = null
+
+    override fun draw(c: PanelCanvas) {
+        when (com.hyperxr.shell.ShellBridge.state(activity)) {
+            com.hyperxr.shell.ShizukuState.NOT_INSTALLED -> {
+                c.paragraph("Para abrir apps Android em janelas no XR, instale o Shizuku e inicie-o (depuração sem fio ou root).", 28f, XrTheme.text)
+                c.paragraph("O Shizuku permite ao HyperXR criar uma tela virtual e abrir o app nela, como o scrcpy faz.")
+                return
+            }
+            com.hyperxr.shell.ShizukuState.NOT_RUNNING -> { c.paragraph("O Shizuku está instalado mas não está rodando. Abra o app Shizuku e inicie o serviço.", 28f, XrTheme.text); return }
+            com.hyperxr.shell.ShizukuState.NO_PERMISSION -> {
+                c.paragraph("Conceda ao HyperXR a permissão do Shizuku.", 28f, XrTheme.text)
+                c.row("grant", "Conceder permissão do Shizuku", accent = true) {
+                    activity.runOnUiThread { com.hyperxr.shell.ShellBridge.requestPermission { ok -> message = if (ok) null else "Permissão negada"; dirty = true } }
+                }
+                message?.let { c.paragraph(it, 26f, XrTheme.danger) }
+                return
+            }
+            com.hyperxr.shell.ShizukuState.READY -> Unit
+        }
+        val perPage = 10
+        val pages = maxOf(1, (apps.size + perPage - 1) / perPage)
+        page = page.coerceIn(0, pages - 1)
+        val colW = (c.w - 2 * c.pad - 20f) / 2
+        apps.drop(page * perPage).take(perPage).forEachIndexed { i, a ->
+            c.button("app:${a.component}", a.label, c.pad + (i % 2) * (colW + 20f), c.y + (i / 2) * 104f, colW, 92f, icon = a.icon) {
+                open(a.pkg, a.component, a.label); visible = false; onClose?.invoke()
+            }
+        }
+        val by = c.h - 110f
+        c.button("prev", "‹ Anterior", c.pad, by, 220f, 80f, enabled = page > 0) { page--; dirty = true }
+        c.label("Página ${page + 1} de $pages", c.w / 2 - 100f, by + 22f, 28f, XrTheme.textDim)
+        c.button("next", "Próxima ›", c.w - c.pad - 220f, by, 220f, 80f, enabled = page < pages - 1) { page++; dirty = true }
+    }
+}

@@ -54,11 +54,20 @@ class HandTrackingService(private val context: Context) {
     private var pendingSubmitNs = 0L
     private val converter = YuvToBitmap()
 
+    private val scaleEstimator = HandScaleEstimator()
+    private var autoCalibrate = false
+    /** Called once when auto calibration measured the palm (metres), to persist it. */
+    var onPalmMeasured: ((Float) -> Unit)? = null
+    val calibrationProgress: Float get() = scaleEstimator.progress
+
     fun configure(s: HandTrackingSettings, inferenceHz: Int) {
+        fusion.palmLengthMeters = HandScale.palmLength(s.calibratedPalmMm, s.handLengthCm)
+        autoCalibrate = s.autoCalibrateHandSize && s.calibratedPalmMm == 0f
+        if (autoCalibrate) scaleEstimator.reset()
         minIntervalNs = 1_000_000_000L / inferenceHz.coerceIn(5, 60)
         trackers.values.forEach {
             it.setFilterParams(s.filterMinCutoff, s.filterBeta)
-            it.pinchThreshold = s.pinchThreshold
+            it.pinchRatio = s.pinchRatio
             it.predictionSeconds = s.predictionMs / 1000f
         }
     }
@@ -152,6 +161,12 @@ class HandTrackingService(private val context: Context) {
                 obs.image[j * 3] = p.x(); obs.image[j * 3 + 1] = p.y(); obs.image[j * 3 + 2] = p.z()
             }
             if (fusion.fuse(obs, intr, depth, pendingPose, fusionResult)) {
+                if (autoCalibrate) scaleEstimator.add(fusionResult.cameraSpace, fusionResult.depthSource, fusionResult.confidence)?.let { palm ->
+                    autoCalibrate = false
+                    fusion.palmLengthMeters = palm
+                    Diagnostics.log("Hand size measured with ARCore Depth: palm ${"%.1f".format(palm * 100)} cm")
+                    onPalmMeasured?.invoke(palm)
+                }
                 trackers.getValue(side).update(fusionResult.cameraSpace, obs.score, fusionResult.depthSource, t0)
                 seen += side
             }

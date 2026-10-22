@@ -9,6 +9,7 @@ coreKtx = "1.17.0"
 lifecycle = "2.9.4"
 arcore = "1.50.0"
 mediapipe = "1.0.0"
+shizuku = "13.1.5"
 openxrLoader = "1.1.49"
 webkit = "1.14.0"
 browser = "1.9.0"
@@ -26,6 +27,8 @@ activity-compose = { module = "androidx.activity:activity-compose", version.ref 
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 arcore = { module = "com.google.ar:core", version.ref = "arcore" }
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 mediapipe-tasks-vision = { module = "com.google.mediapipe:tasks-vision", version.ref = "mediapipe" }
 openxr-loader = { module = "org.khronos.openxr:openxr_loader_for_android", version.ref = "openxrLoader" }
 webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }

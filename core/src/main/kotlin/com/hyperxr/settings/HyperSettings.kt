@@ -36,6 +36,8 @@ data class GraphicsSettings(
     val fovDegrees: Float = 95f,
     /** Camera image fills each eye completely (centre crop). Off = true angular size (smaller image). */
     val passthroughFill: Boolean = true,
+    /** Stereo (IPD) for virtual content over the mono camera image. Off keeps it aligned with reality. */
+    val stereoInMixedReality: Boolean = false,
     val theme: String = "aurora",
 )
 
@@ -65,7 +67,14 @@ data class HandTrackingSettings(
     val showAura: Boolean = true,
     val auraOpacity: Float = 0.45f,
     val directTouch: Boolean = true,
-    val pinchThreshold: Float = 0.025f,
+    /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
+    val pinchRatio: Float = 0.25f,
+    /** Your hand length, wrist crease to middle fingertip, in cm (measure with a ruler). */
+    val handLengthCm: Float = 18.5f,
+    /** Measure the palm with ARCore Depth and use it instead of [handLengthCm]. */
+    val autoCalibrateHandSize: Boolean = true,
+    /** Palm length (wrist to middle-finger base) measured by auto calibration, mm; 0 = not measured yet. */
+    val calibratedPalmMm: Float = 0f,
     val filterMinCutoff: Float = 1.2f,
     val filterBeta: Float = 0.02f,
     val predictionMs: Float = 20f,
@@ -83,6 +92,8 @@ data class ControllerSettings(
     val screenTapSelects: Boolean = true,
     /** Look at a button for [dwellMs] to click it (works without touching the screen). */
     val dwellClick: Boolean = true,
+    /** Use the Joy-Con IMU for pointer rotation (drift-corrected by the hand). Off: hand 6DoF only. */
+    val pointerUsesImu: Boolean = false,
     val dwellMs: Int = 1100,
 )
 

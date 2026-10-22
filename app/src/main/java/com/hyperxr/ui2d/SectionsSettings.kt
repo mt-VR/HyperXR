@@ -104,6 +104,9 @@ fun GraphicsSection(a: MainActivity) {
         ToggleRow("Câmera em tela cheia (MR)", g.passthroughFill, "Preenche cada olho com a câmera. Desligado: tamanho angular real, com bordas") { v ->
             a.update { it.copy(graphics = it.graphics.copy(passthroughFill = v)) }
         }
+        ToggleRow("Profundidade estéreo no conteúdo virtual em MR", g.stereoInMixedReality, "Desligado: mãos e painéis ficam exatamente sobre a imagem da câmera (que é mono)") { v ->
+            a.update { it.copy(graphics = it.graphics.copy(stereoInMixedReality = v)) }
+        }
         ChoiceRow("Taxa alvo", listOf(60, 72, 90, 120), g.targetFps, { "$it fps" }) { v -> a.update { it.copy(graphics = it.graphics.copy(targetFps = v)) } }
         Note("A taxa real é limitada pela tela (vsync) e pela GPU; veja Diagnóstico para medições.")
     }
@@ -165,7 +168,16 @@ fun HandsSection(a: MainActivity) {
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
         ToggleRow("Mostrar aura preta das mãos", h.showAura, "Oculta automaticamente quando Joy-Cons estão conectados") { v -> a.update { it.copy(handTracking = it.handTracking.copy(showAura = v)) } }
         SliderRow("Opacidade da aura", h.auraOpacity, 0.1f..0.9f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
-        SliderRow("Limiar de pinça", h.pinchThreshold * 1000, 10f..50f, { "%.0f mm".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(pinchThreshold = v / 1000)) } }
+        SliderRow("Comprimento da sua mão (punho até a ponta do dedo médio)", h.handLengthCm, 14f..23f, { "%.1f cm".format(it) }) { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(handLengthCm = v)) }
+        }
+        ToggleRow("Medir a mão automaticamente com ARCore Depth", h.autoCalibrateHandSize,
+            if (h.calibratedPalmMm > 0) "Palma medida: %.1f cm".format(h.calibratedPalmMm / 10) else "Ainda não medida: mostre a mão aberta de frente para a câmera") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(autoCalibrateHandSize = v)) }
+        }
+        if (h.calibratedPalmMm > 0) OutlinedButton(onClick = { a.update { it.copy(handTracking = it.handTracking.copy(calibratedPalmMm = 0f)) } }) { Text("Medir de novo") }
+        Note("O tamanho da mão define a que distância ela está da câmera. Sem ARCore Depth, meça a mão com uma régua e ajuste acima.")
+        SliderRow("Sensibilidade da pinça", h.pinchRatio, 0.12f..0.40f, { "%.0f%% da palma".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(pinchRatio = v)) } }
         SliderRow("Filtro: corte mínimo", h.filterMinCutoff, 0.2f..4f, { "%.2f Hz".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterMinCutoff = v)) } }
         SliderRow("Filtro: beta (resposta a velocidade)", h.filterBeta, 0f..0.2f, { "%.3f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(filterBeta = v)) } }
         SliderRow("Predição", h.predictionMs, 0f..50f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(predictionMs = v)) } }
@@ -192,7 +204,10 @@ fun ControlsSection(a: MainActivity) {
         ToggleRow("Usar Joy-Cons", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
         if (connected.isEmpty()) Note("Nenhum Joy-Con conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
-        Note("Sem IMU exposta pelo driver, o apontamento usa a direção da cabeça a partir da posição da mão.")
+        Note("O apontamento do Joy-Con vem da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão.")
+        ToggleRow("Usar o IMU do Joy-Con na rotação", c.pointerUsesImu, "Menor latência ao girar o pulso; o drift é corrigido pela mão. Só funciona se o driver expõe o IMU") { v ->
+            a.update { it.copy(controllers = it.controllers.copy(pointerUsesImu = v)) }
+        }
         val actions = ControllerAction.entries
         fun name(x: ControllerAction) = when (x) {
             ControllerAction.SELECT -> "Selecionar"; ControllerAction.BACK -> "Voltar"; ControllerAction.MENU -> "Menu"

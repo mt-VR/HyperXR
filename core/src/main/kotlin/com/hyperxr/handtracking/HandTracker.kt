@@ -29,7 +29,8 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         filters.forEach { it.minCutoff = minCutoff; it.beta = beta }
     }
 
-    var pinchThreshold: Float
+    /** Pinch closes when thumb-index distance / palm length drops below this ratio (scale-free). */
+    var pinchRatio: Float
         get() = gestures.pinchOn
         set(v) { gestures.pinchOn = v; gestures.pinchOff = v * 1.6f }
 
@@ -132,18 +133,21 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
 
 /** Gesture classification from 3D joints, with hysteresis so states do not flicker. */
 class GestureRecognizer {
-    var pinchOn = 0.025f
-    var pinchOff = 0.04f
+    // Thresholds are ratios to the palm length, so pinch works the same whatever the estimated
+    // hand scale or distance (an absolute millimetre threshold breaks when depth is off).
+    var pinchOn = 0.25f
+    var pinchOff = 0.40f
     private val pinch = Hysteresis(pinchOn, pinchOff, activeWhenBelow = true)
 
     fun reset() = pinch.reset()
 
     fun update(s: HandState) {
         val j = s.joints
-        val pinchDist = j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP])
+        val palm = j[HandJoint.WRIST].distanceTo(j[HandJoint.MIDDLE_MCP]).coerceAtLeast(1e-4f)
+        val ratio = j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) / palm
         pinch.onThreshold = pinchOn; pinch.offThreshold = pinchOff
-        pinch.update(pinchDist)
-        s.pinchStrength = (1f - (pinchDist - pinchOn) / (0.09f - pinchOn)).coerceIn(0f, 1f)
+        pinch.update(ratio)
+        s.pinchStrength = (1f - (ratio - pinchOn) / (1.0f - pinchOn)).coerceIn(0f, 1f)
 
         val index = extended(j, HandJoint.INDEX_MCP, HandJoint.INDEX_PIP, HandJoint.INDEX_TIP)
         val middle = extended(j, HandJoint.MIDDLE_MCP, HandJoint.MIDDLE_PIP, HandJoint.MIDDLE_TIP)

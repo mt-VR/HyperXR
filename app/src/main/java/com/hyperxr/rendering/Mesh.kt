@@ -133,6 +133,28 @@ class GpuMesh(vertices: FloatArray, indices: IntArray) {
             return b.build()
         }
 
+        /**
+         * Cylinder section curved towards the viewer: arc length [w], height [h], radius [r];
+         * the axis is at local (0, *, r). UV origin top-left like [quad].
+         */
+        fun curved(w: Float, h: Float, r: Float, segments: Int = 48): GpuMesh {
+            val b = Builder()
+            val span = w / r
+            for (i in 0..segments) {
+                val u = i.toFloat() / segments
+                val th = (u - 0.5f) * span
+                val x = r * kotlin.math.sin(th); val z = r * (1f - kotlin.math.cos(th))
+                val nx = -kotlin.math.sin(th); val nz = kotlin.math.cos(th)
+                b.vert(x, -h / 2, z, nx, 0f, nz, u, 1f)
+                b.vert(x, h / 2, z, nx, 0f, nz, u, 0f)
+            }
+            for (i in 0 until segments) {
+                val a = i * 2
+                b.i.addAll(listOf(a, a + 2, a + 1, a + 1, a + 2, a + 3))
+            }
+            return b.build()
+        }
+
         /** Cylinder of radius 0.5, height 1, along Y. */
         fun cylinder(segments: Int = 24): GpuMesh {
             val b = Builder()

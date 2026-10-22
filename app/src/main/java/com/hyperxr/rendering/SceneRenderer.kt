@@ -39,6 +39,8 @@ class PanelItem {
     var glow = 0f
     val tint = floatArrayOf(1f, 1f, 1f, 1f)
     var overlay = false
+    /** 0 = flat quad; otherwise a cylinder section of this radius curved towards the viewer. */
+    var curvature = 0f
 }
 
 enum class Background { COLOR, ENVIRONMENT, PASSTHROUGH }
@@ -61,7 +63,7 @@ class FrameScene {
     }
     fun addPanel(): PanelItem {
         if (panelCount == panelPool.size) panelPool += PanelItem()
-        return panelPool[panelCount++].also { it.oes = false; it.alpha = 1f; it.glow = 0f; it.radius = 0.06f; it.overlay = false; it.tint.fill(1f) }
+        return panelPool[panelCount++].also { it.oes = false; it.alpha = 1f; it.glow = 0f; it.radius = 0.06f; it.overlay = false; it.tint.fill(1f); it.curvature = 0f }
     }
     fun draw(i: Int) = drawPool[i]
     fun panel(i: Int) = panelPool[i]
@@ -109,6 +111,10 @@ interface CameraImageSource {
     val fovY: Float
     /** Width/height of the area that quad UVs 0..1 cover through [texMatrix]. */
     val imageAspect: Float
+    /** Tangent of the half field of view (horizontal) of that area, from the real camera intrinsics. */
+    val regionTanX: Float
+    /** Tangent of the half field of view (vertical) of that area. */
+    val regionTanY: Float
     val hasFrame: Boolean
 }
 
@@ -281,11 +287,7 @@ class SceneRenderer {
 
     /** Camera image stretched over the whole eye with a centre crop that preserves its aspect. */
     private fun drawCameraFull(eye: EyeView, camera: CameraImageSource) {
-        val eyeAspect = eye.proj[5] / eye.proj[0]
-        val ratio = eyeAspect / camera.imageAspect
-        // crop the dimension that overflows so the image covers the viewport without distortion
-        val cropU = if (ratio < 1f) ratio else 1f
-        val cropV = if (ratio < 1f) 1f else 1f / ratio
+        val (cropU, cropV) = fillCrop(eye.proj[5] / eye.proj[0], camera)
         GLES30.glUseProgram(oesFullProg.id)
         GLES30.glUniformMatrix4fv(oesFullProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
         GLES30.glUniform2f(oesFullProg.u("uCrop"), cropU, cropV)
@@ -388,7 +390,9 @@ class SceneRenderer {
         for (i in 0 until scene.panelCount) {
             val p = scene.panel(i)
             if (p.overlay != overlayPass || p.texture == 0) continue
-            Mat4.compose(p.pose.position, p.pose.orientation, p.width, p.height, 1f, panelModel)
+            val mesh = if (p.curvature > 0f) curvedMesh(p.width, p.height, p.curvature) else quad
+            if (p.curvature > 0f) Mat4.compose(p.pose.position, p.pose.orientation, 1f, 1f, 1f, panelModel)
+            else Mat4.compose(p.pose.position, p.pose.orientation, p.width, p.height, 1f, panelModel)
             Matrix.multiplyMM(mvp, 0, eye.viewProj, 0, panelModel, 0)
             if (p.oes) {
                 GLES30.glUseProgram(oesProg.id)
@@ -410,11 +414,18 @@ class SceneRenderer {
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, p.texture)
                 GLES30.glUniform1i(quadProg.u("uTex"), 0)
             }
-            quad.draw()
+            mesh.draw()
         }
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glEnable(GLES30.GL_CULL_FACE)
         GLES30.glDisable(GLES30.GL_BLEND)
+    }
+
+    private val curvedCache = HashMap<Long, GpuMesh>()
+    /** Cylinder-section meshes are cached per (width, height, radius) in centimetres. */
+    private fun curvedMesh(w: Float, h: Float, r: Float): GpuMesh {
+        val key = ((w * 100).toLong() shl 40) or ((h * 100).toLong() shl 20) or (r * 100).toLong()
+        return curvedCache.getOrPut(key) { GpuMesh.curved(w, h, r) }
     }
 
     /** Vertical flip for SurfaceTexture-backed panels (web views): quad UV is top-left origin. */
@@ -422,6 +433,12 @@ class SceneRenderer {
 
     companion object {
         private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
+
+        /** Centre crop (u, v scale) that makes the camera image cover an eye of [eyeAspect]. */
+        fun fillCrop(eyeAspect: Float, camera: CameraImageSource): Pair<Float, Float> {
+            val ratio = eyeAspect / camera.imageAspect
+            return if (ratio < 1f) ratio to 1f else 1f to 1f / ratio
+        }
 
         /** Gradient used for placeholder icon tiles (no glyph, see docs/ICONS.md). */
         fun placeholderTile(size: Int): Bitmap {

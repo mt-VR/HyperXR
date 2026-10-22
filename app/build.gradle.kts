@@ -38,6 +38,8 @@ android {
     buildFeatures {
         compose = true
         prefab = true
+        aidl = true
+        buildConfig = true
     }
 
     externalNativeBuild {
@@ -83,6 +85,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.arcore)
     implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
     implementation(libs.openxr.loader)
     implementation(libs.webkit)
     implementation(libs.browser)

@@ -107,6 +107,34 @@ class InputAndTrackingTest {
         assertTrue(t3.state.gesture == Gesture.FIST || t3.state.gesture == Gesture.GRAB)
     }
 
+    @Test fun pinchIsScaleFree() {
+        // the same pinch seen with a half-size skeleton (wrong depth scale) still pinches
+        for (scale in listOf(1f, 0.5f, 1.6f)) {
+            val t = HandTracker(Handedness.RIGHT)
+            val joints = openHand(Vec3(0f, 0f, -0.4f), pinch = true).map { it.copy().scale(scale) }.toTypedArray()
+            t.update(joints, 0.9f, DepthSource.DEPTH_MAP, 0)
+            if (scale in 0.6f..1.4f) assertEquals("scale $scale", Gesture.PINCH, t.state.gesture)
+            val open = HandTracker(Handedness.RIGHT)
+            open.update(openHand(Vec3(0f, 0f, -0.4f)).map { it.copy().scale(scale) }.toTypedArray(), 0.9f, DepthSource.DEPTH_MAP, 0)
+            assertTrue(open.state.gesture != Gesture.PINCH)
+        }
+    }
+
+    @Test fun handScaleEstimatorMeasuresThePalm() {
+        val est = com.hyperxr.handtracking.HandScaleEstimator(needed = 20)
+        val hand = openHand(Vec3(0f, 0f, -0.4f))
+        // every sample measures the same synthetic palm, so the estimate equals its length
+        var r: Float? = null
+        repeat(20) { r = est.add(hand, DepthSource.DEPTH_MAP, 0.9f) }
+        assertEquals(hand[HandJoint.WRIST].distanceTo(hand[HandJoint.MIDDLE_MCP]), r!!, 1e-5f)
+        // estimates from the size prior are never used for calibration
+        val est2 = com.hyperxr.handtracking.HandScaleEstimator(needed = 5)
+        repeat(10) { est2.add(hand, DepthSource.HAND_SIZE_PRIOR, 0.9f) }
+        assertEquals(null, est2.result)
+        assertEquals(0.1036f, com.hyperxr.handtracking.HandScale.palmFromHandLength(18.5f), 1e-4f)
+        assertEquals(0.095f, com.hyperxr.handtracking.HandScale.palmLength(95f, 18.5f), 1e-6f)
+    }
+
     @Test fun depthFusionUsesDepthMapThenHandSizePrior() {
         val intr = CameraIntrinsics(500f, 500f, 320f, 240f, 640, 480)
         val obs = LandmarkObservation(Handedness.RIGHT).apply { score = 0.9f }
@@ -184,6 +212,63 @@ class InputAndTrackingTest {
         assertTrue(panel.events.any { it.phase == PointerPhase.MOVE && it.u > 1f })
     }
 
+    private fun trackedHand(at: Vec3): com.hyperxr.handtracking.HandState {
+        val h = com.hyperxr.handtracking.HandState(Handedness.RIGHT)
+        h.state = TrackingState.TRACKING
+        val joints = openHand(at)
+        for (i in joints.indices) h.joints[i].set(joints[i])
+        return h
+    }
+
+    @Test fun handDrivesControllerPoseWithoutImu() {
+        val fusion = ControllerPoseFusion()
+        val head = Pose(Vec3(0f, 1.6f, 0f))
+        val hand = trackedHand(Vec3(0.25f, 1.35f, -0.45f))
+        var t = 0L
+        repeat(30) { fusion.update(null, hand, head, rightSide = true, nowNs = t, dtSeconds = 0.016f); t += 16_000_000L }
+        assertEquals("hand", fusion.orientationSource)
+        assertTrue(fusion.positionFromHand)
+        val r = fusion.ray()
+        // the ray points away from the shoulder through the hand: forward and slightly down/right
+        assertTrue(r.direction.z < -0.8f)
+        assertTrue(r.direction.x > 0f)
+        // hand lost for one frame: pose is held, not snapped to the head fallback
+        val before = r.direction.copy()
+        fusion.update(null, com.hyperxr.handtracking.HandState(Handedness.RIGHT), head, true, t, 0.016f)
+        assertTrue(fusion.positionFromHand)
+        assertEquals(before.x, fusion.ray().direction.x, 1e-4f)
+    }
+
+    @Test fun rayStabilizerRemovesJitter() {
+        val s = com.hyperxr.input.RayStabilizer()
+        val rnd = java.util.Random(3)
+        val out = Ray()
+        var t = 0L
+        var maxDev = 0f
+        repeat(240) { i ->
+            val noisy = Ray(Vec3((rnd.nextFloat() - 0.5f) * 0.01f, 1.3f, -0.4f), Vec3((rnd.nextFloat() - 0.5f) * 0.04f, 0f, -1f).normalize())
+            s.update(noisy, t, out)
+            if (i > 60) maxDev = maxOf(maxDev, kotlin.math.abs(out.direction.x))
+            t += 16_000_000L
+        }
+        assertTrue("direction jitter $maxDev", maxDev < 0.012f)
+    }
+
+    @Test fun imuDriftIsPulledTowardsTheHandRay() {
+        val fusion = ControllerPoseFusion().apply { useImu = true; imuCorrectionRate = 2f }
+        val head = Pose(Vec3(0f, 1.6f, 0f))
+        val hand = trackedHand(Vec3(0.2f, 1.38f, -0.5f))
+        // IMU says the controller points 40 degrees to the left (accumulated drift)
+        val drifted = Quat.fromAxisAngle(0f, 1f, 0f, 0.7f)
+        fusion.recenter(Quat(), head)
+        var t = 0L
+        repeat(300) { fusion.update(drifted, hand, head, true, t, 0.016f); t += 16_000_000L }
+        val handDir = Vec3.sub(hand.joints[HandJoint.INDEX_MCP], Vec3(0.17f, 1.38f, 0.05f)).normalize()
+        val d = fusion.ray().direction
+        assertTrue("converged: ${d.dot(handDir)}", d.dot(handDir) > 0.99f)
+        assertEquals("imu+hand", fusion.orientationSource)
+    }
+
     @Test fun buttonMapperNoRepeatsAndReleasesOnDisconnect() {
         val m = ButtonMapper(mapOf(ControllerButton.R to ControllerAction.SELECT, ControllerButton.A to ControllerAction.SELECT, ControllerButton.L to ControllerAction.BACK))
         assertEquals(true, m.onButton(ControllerButton.R, true)?.pressed)
@@ -205,18 +290,15 @@ class InputAndTrackingTest {
         val fwd = f.orientation.rotate(Vec3(0f, 0f, -1f))
         assertEquals(-1f, fwd.x, 0.02f)
 
-        val fusion = ControllerPoseFusion()
+        // IMU mode without hand: calibrated so the controller points where the head looks
+        val fusion = ControllerPoseFusion().apply { useImu = true }
         val head = Pose(Vec3(0f, 1.6f, 0f), Quat.fromAxisAngle(0f, 1f, 0f, -0.3f))
-        fusion.recenter(f.orientation, head)
-        fusion.update(f.orientation, Vec3(0.2f, 1.2f, -0.3f), head)
+        fusion.update(f.orientation, null, head, rightSide = true, nowNs = 0, dtSeconds = 0.016f)
         val ray = fusion.ray()
         val headFwd = head.forward()
         assertEquals(headFwd.x, ray.direction.x, 1e-3f)
         assertEquals(headFwd.z, ray.direction.z, 1e-3f)
-        assertTrue(fusion.positionFromHand)
-        assertEquals(0.2f, ray.origin.x, 0f)
-        // without hand tracking we fall back to a head-relative grip, flagged as such
-        fusion.update(f.orientation, null, head)
         assertFalse(fusion.positionFromHand)
+        assertEquals("imu", fusion.orientationSource)
     }
 }

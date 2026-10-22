@@ -53,6 +53,10 @@ class StereoCompositor {
 
     fun aspect(): Float = eyeW.toFloat() / eyeH
 
+    /** Tangents the eye textures were rendered with this frame (set by the engine). */
+    var eyeTanH = 1f
+    var eyeTanV = 1f
+
     fun composite(g: GraphicsSettings) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, screenW, screenH)
@@ -65,8 +69,8 @@ class StereoCompositor {
         // Lens centre offset from the half-screen centre, in output UV units.
         val pxPerMm = xdpi / 25.4f
         val lensOffsetPx = (g.lensSeparationMm / 2f) * pxPerMm
-        val tanV = tanHalfFov(g)
-        val tanH = tanV * aspect()
+        val tanV = eyeTanV
+        val tanH = eyeTanH
         for (eye in 0..1) {
             GLES30.glViewport(eye * halfW, 0, halfW, screenH)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)

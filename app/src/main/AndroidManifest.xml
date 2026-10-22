@@ -43,6 +43,12 @@
         </intent>
         <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
         <package android:name="com.google.ar.core" />
+        <package android:name="moe.shizuku.privileged.api" />
+        <!-- Launchable apps for XR windows (Shizuku). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -95,6 +101,15 @@
             android:launchMode="singleTask"
             android:resizeableActivity="false"
             android:theme="@style/Theme.HyperXR.Immersive" />
+
+        <!-- Shizuku: lets the shell-level UserService host other apps on HyperXR virtual displays. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <activity
             android:name=".webapps.WebAppActivity"
