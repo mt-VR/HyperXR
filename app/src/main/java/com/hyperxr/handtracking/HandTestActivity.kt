@@ -44,7 +44,7 @@ class HandTestActivity : Activity() {
         setContentView(view)
         val s = HyperXRApp.instance.settings.current
         hands.configure(s.handTracking, s.performance.handInferenceHz)
-        hands.start(if (s.handTracking.backend == InferenceBackend.CPU) InferenceBackend.CPU else InferenceBackend.GPU)
+        hands.start(s.handTracking.backend)
         hands.debugListener = { bmp, lms -> view.post(bmp, lms) }
     }
 

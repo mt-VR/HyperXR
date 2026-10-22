@@ -94,3 +94,53 @@ aparelho (quadro sintético sem mão: mede o detector de palma).
 - **Watchdog**: se um resultado de inferência nunca chega, a fila é liberada após 600 ms.
 - **Teste fora do visor**: Configurações > Hand tracking > *Testar detecção* mostra o quadro
   analisado, o esqueleto, o estado de cada mão e a taxa de quadros com mão.
+
+## Motor NPU (HyperXR) e verificador de mão
+
+Em **Hand tracking > Motor** há três opções:
+
+- **NPU (HyperXR):** rastreador próprio.
+- **GPU (MediaPipe):** o padrão.
+- **CPU (MediaPipe).**
+
+### Motor NPU (`NpuHandEngine`)
+
+- **Modelos:** os mesmos modelos abertos de palma e de landmarks do MediaPipe (Apache-2.0, já
+  dentro do APK). Rodam com o LiteRT, que entrega o grafo inteiro à NPU pelo NNAPI.
+- **Escolha do acelerador:** pelo nome, entre os que o NNAPI do celular lista (Samsung Eden,
+  MediaTek APU/MDLA, Qualcomm HTA/HTP/DSP, EdgeTPU...).
+  - Com fp16, agendamento de velocidade sustentada e sem a CPU de referência do NNAPI.
+  - O modelo compilado fica guardado em cache, então a segunda abertura não recompila.
+  - Se falhar, tenta o NNAPI escolhendo o dispositivo sozinho e depois a CPU (XNNPACK). O status
+    diz qual está rodando.
+- **Pipeline próprio** (`core/.../handtracking/npu/PalmDecoder.kt`):
+  - decodifica as 2016 âncoras do detector e faz NMS ponderado;
+  - recorta para cada mão um quadrado girado alinhado ao punho, para o modelo ver a mão em pé;
+  - rastreia cada mão pelos landmarks do quadro anterior, sem detector;
+  - roda o detector de palma só quando falta uma mão: em todo quadro sem nenhuma, e a cada 6
+    quadros quando há uma.
+- **Modelos em fp16:** NPUs que só aceitam int8 acabam rodando parte do grafo fora da NPU.
+
+### Verificador (`HandVerifier`, vale para os dois motores)
+
+Medido em fotos reais, forçando o modelo de landmarks sobre recortes de cada imagem:
+
+| Imagem | Presença de mão (modelo) | Palma métrica |
+|---|---|---|
+| Mãos reais | 0,96 a 0,99 | 4 a 10 cm |
+| Cortinas | no máximo 0,06 | — |
+| Sola do pé | até 0,73 | 17 a 19 cm |
+
+O limiar antigo de rastreamento do MediaPipe (0,35) deixava passar o pé. Agora:
+
+1. **Presença com histerese:** uma mão nova precisa de 0,8 em 2 quadros seguidos. Uma vez
+   confirmada, fica com 0,5, para não piscar em borrões.
+2. **Tamanho e proporção:** palma métrica entre 3,5 e 13,5 cm, dedos e largura dos nós dentro da
+   proporção humana. Barra os pés e os ajustes absurdos sobre tecido.
+3. **Alcance:** a mão precisa estar a até 1 m da câmera. Barra os pés vistos de pé e outras
+   pessoas.
+
+No motor MediaPipe, os limiares subiram para 0,55 (detecção) e 0,5 (presença e rastreamento).
+
+A última rejeição aparece no status do teste de mãos, por exemplo "grande demais para uma mão
+(pé?)". Testes: `HandVerifierTest`, com landmarks reais de uma mão e do pé como fixtures.

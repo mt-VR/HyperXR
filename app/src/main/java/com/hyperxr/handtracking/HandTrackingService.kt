@@ -21,8 +21,9 @@ import com.hyperxr.settings.InferenceBackend
 import java.nio.ByteBuffer
 
 /**
- * Camera frames -> MediaPipe Hand Landmarker (GPU delegate, CPU fallback) -> HyperXR depth fusion
- * -> temporal tracking (One Euro, loss/recovery, prediction) -> gestures.
+ * Camera frames -> hand engine (HyperXR's own tracker on the NPU, or MediaPipe on GPU/CPU) ->
+ * HandVerifier (is it really a hand?) -> HyperXR depth fusion -> temporal tracking (One Euro,
+ * loss/recovery, prediction) -> gestures.
  *
  * Latency choices: only the newest frame is processed (a frame arriving while inference runs is
  * dropped instead of queued), the YUV->RGB conversion writes into reused buffers at a reduced
@@ -33,6 +34,10 @@ class HandTrackingService(private val context: Context) {
     private val handler = Handler(thread.looper)
 
     private var landmarker: HandLandmarker? = null
+    /** HyperXR's own NPU engine (backend NNAPI), or null when MediaPipe runs. */
+    @Volatile private var npu: NpuHandEngine? = null
+    /** Rejects what is not the user's hand (feet, curtains, other people), for both engines. */
+    val verifier = HandVerifier()
     @Volatile var status: String = "parado"; private set
     @Volatile var backendInUse: String = "-"; private set
 
@@ -114,20 +119,38 @@ class HandTrackingService(private val context: Context) {
         }
     }
 
-    /** Creates the landmarker on the worker thread. Returns false only if the model asset is missing. */
+    /**
+     * Creates the engine on the worker thread: NNAPI = HyperXR's own tracker on the NPU, otherwise
+     * MediaPipe (GPU, CPU fallback). Returns false only if the model asset is missing.
+     */
     fun start(backend: InferenceBackend): Boolean {
         backendRequested = backend
         val hasModel = try { context.assets.openFd(MODEL_ASSET).close(); true } catch (t: Throwable) { false }
         if (!hasModel) { status = "Modelo $MODEL_ASSET ausente do APK"; return false }
         handler.post {
-            landmarker?.close()
-            landmarker = null
+            landmarker?.close(); landmarker = null
+            npu?.close(); npu = null
+            verifier.reset()
+            if (backend == InferenceBackend.NNAPI) {
+                val e = NpuHandEngine(context)
+                val ok = runCatching { e.start() }.getOrDefault(false)
+                if (ok) {
+                    npu = e
+                    backendInUse = "HyperXR NPU · ${e.device}"
+                    status = "rodando"
+                    synchronized(slotLock) { inflight = null; queued = null; restarting = false }
+                    Diagnostics.log("Hand tracking: HyperXR engine on ${e.device}")
+                    return@post
+                }
+                Diagnostics.log("Hand tracking: HyperXR NPU engine unavailable, using MediaPipe")
+            }
             val order = if (backend == InferenceBackend.CPU) listOf(Delegate.CPU) else listOf(Delegate.GPU, Delegate.CPU)
             val failures = mutableListOf<String>()
+            if (backend == InferenceBackend.NNAPI) failures += "NPU indisponível"
             for (d in order) {
                 try {
                     landmarker = create(d, RunningMode.LIVE_STREAM)
-                    backendInUse = (if (d == Delegate.GPU) "GPU" else "CPU") + if (failures.isEmpty()) "" else " (fallback: ${failures.joinToString()})"
+                    backendInUse = "MediaPipe " + (if (d == Delegate.GPU) "GPU" else "CPU") + if (failures.isEmpty()) "" else " (fallback: ${failures.joinToString()})"
                     status = "rodando"
                     break
                 } catch (t: Throwable) {
@@ -149,9 +172,11 @@ class HandTrackingService(private val context: Context) {
             .setNumHands(2)
             // Lower presence/tracking thresholds keep MediaPipe on its cheap ROI tracking through
             // blur and partial occlusion instead of dropping the hand and re-running the detector.
-            .setMinHandDetectionConfidence(0.45f)
-            .setMinHandPresenceConfidence(0.35f)
-            .setMinTrackingConfidence(0.35f)
+            // Presence at 0.5 (was 0.35): measured on photos, the sole of a foot scores up to 0.73 and
+            // curtains under 0.1, so a low threshold tracked feet; HandVerifier checks the rest.
+            .setMinHandDetectionConfidence(0.55f)
+            .setMinHandPresenceConfidence(0.5f)
+            .setMinTrackingConfidence(0.5f)
         if (mode == RunningMode.LIVE_STREAM) {
             opts.setResultListener { result, _ -> onResult(result) }
             opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; finishInflight() }
@@ -159,7 +184,7 @@ class HandTrackingService(private val context: Context) {
         return HandLandmarker.createFromOptions(context, opts.build())
     }
 
-    fun stop() { handler.post { landmarker?.close(); landmarker = null; status = "parado" } }
+    fun stop() { handler.post { landmarker?.close(); landmarker = null; npu?.close(); npu = null; status = "parado" } }
 
     /** True when a new frame would be used now (lets callers skip acquiring camera images). */
     fun wantsFrame(): Boolean {
@@ -172,7 +197,7 @@ class HandTrackingService(private val context: Context) {
                 Diagnostics.log("Hand tracking: no result for 1.5 s, restarting MediaPipe")
                 start(backendRequested)
             }
-            return landmarker != null && !restarting && converting == null && now - lastSubmitNs >= minIntervalNs
+            return (landmarker != null || npu != null) && !restarting && converting == null && now - lastSubmitNs >= minIntervalNs
         }
     }
 
@@ -215,9 +240,18 @@ class HandTrackingService(private val context: Context) {
     private fun launch(slot: Slot) { handler.post { launchNow(slot) } }
 
     private fun launchNow(slot: Slot) {
-        val lm = landmarker ?: run { finishInflight(); return }
         val bmp = slot.bitmap ?: run { finishInflight(); return }
         slot.submitNs = System.nanoTime()
+        npu?.let { engine ->
+            // the NPU call is synchronous on this thread; post-processing follows right away
+            val hands = try { engine.process(bmp) } catch (t: Throwable) { status = "NPU falhou: ${t.message}"; finishInflight(); return }
+            val t0 = System.nanoTime()
+            synchronized(slotLock) { processing = slot }
+            finishInflight()
+            try { processHands(hands, slot, t0) } finally { synchronized(slotLock) { if (processing === slot) processing = null } }
+            return
+        }
+        val lm = landmarker ?: run { finishInflight(); return }
         var ts = SystemClock.uptimeMillis()
         if (ts <= lastTimestampMs) ts = lastTimestampMs + 1 // MediaPipe needs strictly increasing timestamps
         lastTimestampMs = ts
@@ -252,7 +286,26 @@ class HandTrackingService(private val context: Context) {
         try { process(result, slot, t0) } finally { synchronized(slotLock) { if (processing === slot) processing = null } }
     }
 
+    /** MediaPipe's result in the engine-neutral form (MediaPipe filters presence itself). */
     private fun process(result: HandLandmarkerResult, slot: Slot, t0: Long) {
+        val hands = ArrayList<RawHand>(2)
+        for (i in result.landmarks().indices) {
+            val lms = result.landmarks()[i]
+            if (lms.size < HandJoint.COUNT) continue
+            val cat = result.handedness().getOrNull(i)?.firstOrNull()
+            val image = FloatArray(63)
+            for (j in 0 until HandJoint.COUNT) { val p = lms[j]; image[j * 3] = p.x(); image[j * 3 + 1] = p.y(); image[j * 3 + 2] = p.z() }
+            val world = result.worldLandmarks().getOrNull(i)?.takeIf { it.size >= HandJoint.COUNT }?.let { wl ->
+                FloatArray(63).also { w -> for (j in 0 until HandJoint.COUNT) { val p = wl[j]; w[j * 3] = p.x(); w[j * 3 + 1] = p.y(); w[j * 3 + 2] = p.z() } }
+            }
+            hands += RawHand(cat?.categoryName() ?: "Right", cat?.score() ?: 0.8f, Float.NaN, image, world)
+        }
+        processHands(hands, slot, t0)
+    }
+
+    private val presenceOf = FloatArray(2)
+
+    private fun processHands(hands: List<RawHand>, slot: Slot, t0: Long) {
         Diagnostics.record(Stage.HAND_INFERENCE, t0 - slot.submitNs)
         val intr = slot.intr ?: return
         val depth = if (slot.depth.valid) slot.depth else null
@@ -260,33 +313,30 @@ class HandTrackingService(private val context: Context) {
         var n = 0
         val debug = debugListener
         val debugLms = if (debug != null) ArrayList<FloatArray>(2) else null
-        for (i in result.landmarks().indices) {
+        for (h in hands) {
             if (n == 2) break
-            val lms = result.landmarks()[i]
-            if (lms.size < HandJoint.COUNT) continue
-            val cat = result.handedness().getOrNull(i)?.firstOrNull()
-            // MediaPipe labels assume a mirrored (selfie) image; the back camera is not mirrored.
-            val label = if (cat?.categoryName() == "Left") Handedness.RIGHT else Handedness.LEFT
+            // the models' labels assume a mirrored (selfie) image; the back camera is not mirrored
+            val label = if (h.modelLabel == "Left") Handedness.RIGHT else Handedness.LEFT
+            // size and proportions first: a foot or a fold of cloth never reaches the trackers
+            if (h.world != null && verifier.shape(h.world) != null) continue
             val obs = observations.getValue(label)[n]
-            obs.hasWorld = false
-            obs.score = cat?.score() ?: 0.8f
-            for (j in 0 until HandJoint.COUNT) {
-                val p = lms[j]
-                obs.image[j * 3] = p.x(); obs.image[j * 3 + 1] = p.y(); obs.image[j * 3 + 2] = p.z()
-            }
-            result.worldLandmarks().getOrNull(i)?.takeIf { it.size >= HandJoint.COUNT }?.let { wl ->
-                for (j in 0 until HandJoint.COUNT) { val p = wl[j]; obs.world[j * 3] = p.x(); obs.world[j * 3 + 1] = p.y(); obs.world[j * 3 + 2] = p.z() }
-                obs.hasWorld = true
-            }
+            obs.score = h.labelScore
+            h.image.copyInto(obs.image)
+            obs.hasWorld = h.world != null
+            h.world?.copyInto(obs.world)
             debugLms?.add(obs.image.copyOf())
             if (fusion.fuse(obs, intr, depth, slot.pose, fused[n])) {
-                fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); n++
+                val w = fused[n].cameraSpace[HandJoint.WRIST]
+                if (verifier.reach(w.x, w.y, w.z) != null) continue
+                fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); presenceOf[n] = h.presence; n++
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
         seen.clear()
         for (k in 0 until n) {
             val side = assign[k]
+            // confirmation over frames: a confident first sighting, then kept through blur
+            if (!verifier.gate(if (side == Handedness.LEFT) 0 else 1, presenceOf[k])) continue
             val r = fused[k]
             if (autoCalibrate) scaleEstimator.add(r.cameraSpace, r.depthSource, r.confidence)?.let { palm ->
                 autoCalibrate = false
@@ -297,10 +347,13 @@ class HandTrackingService(private val context: Context) {
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k])
             seen += side
         }
-        for ((side, tracker) in trackers) if (side !in seen) tracker.update(null, 0f, DepthSource.NONE, t0)
+        for ((side, tracker) in trackers) if (side !in seen) {
+            tracker.update(null, 0f, DepthSource.NONE, t0)
+            verifier.missing(if (side == Handedness.LEFT) 0 else 1)
+        }
         synchronized(lock) { for ((side, tracker) in trackers) copy(tracker.state, published.getValue(side)) }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
-        updateStats(t0, n, t0 - slot.submitNs, t0 - slot.captureNs)
+        updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
         if (debug != null) slot.bitmap?.let { runCatching { debug(it, debugLms!!) } }
     }
 
@@ -316,10 +369,11 @@ class HandTrackingService(private val context: Context) {
         if (span >= 1_000_000_000L) {
             val fps = statFrames * 1e9f / span
             val f = statFrames.coerceAtLeast(1)
-            stats = "%.0f quadros/s · mão em %d%% · GPU %.0f ms · câmera→pose %.0f ms · %s · %dx%d".format(
-                fps, statWithHands * 100 / f, statInferNs / 1e6f / f, statLatencyNs / 1e6f / f,
+            val engine = npu?.let { "palma %.1f ms · landmarks %.1f ms".format(it.detectorMs, it.landmarkMs) } ?: "inferência %.0f ms".format(statInferNs / 1e6f / f)
+            stats = "%.0f quadros/s · mão em %d%% · %s · câmera→pose %.0f ms · %s · %dx%d".format(
+                fps, statWithHands * 100 / f, engine, statLatencyNs / 1e6f / f,
                 backendInUse, lastAnalysed?.bitmap?.width ?: 0, lastAnalysed?.bitmap?.height ?: 0,
-            )
+            ) + if (verifier.rejections > 0) " · rejeitado: ${verifier.lastRejection}" else ""
             statFrames = 0; statWithHands = 0; statInferNs = 0; statLatencyNs = 0; statStartNs = now
         }
     }
@@ -364,6 +418,22 @@ class HandTrackingService(private val context: Context) {
                 out += "${d.name}: indisponível (${t.message})"
             }
         }
+        // HyperXR's own engine on the NPU (same synthetic frame: palm detector every frame)
+        try {
+            val e = NpuHandEngine(context)
+            if (e.start()) {
+                try {
+                    val stats = LatencyStats("HyperXR NPU (${e.device}, detector de palma)", iterations)
+                    repeat(5) { e.process(bmp) }
+                    repeat(iterations) {
+                        val t0 = System.nanoTime()
+                        e.process(bmp)
+                        stats.record(System.nanoTime() - t0)
+                    }
+                    out += stats.snapshot().format()
+                } finally { e.close() }
+            } else out += "HyperXR NPU: indisponível"
+        } catch (t: Throwable) { out += "HyperXR NPU: indisponível (${t.message})" }
         return out
     }
 

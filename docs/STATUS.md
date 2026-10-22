@@ -62,6 +62,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Assistente com IA no celular (MediaPipe LLM + Qwen 2.5): estado do runtime, conhecimento do HyperXR, ações, voz ou texto | ✅ protocolo e filtros (testes) · 🟡 aparelho |
 | Compartilhar tela 16:9: vídeo MP4, capturas, navegador (MJPEG), telas externas, gravação externa em 16:9 (Android 15+) | 🟡 |
 | SteamVR: driver do PC (display virtual, H.264 na GPU, Quest 3 Touch emulado), app HyperXR PC, cliente no celular com reprojeção — docs/STEAMVR.md | ✅ protocolo e mapeamento (testes) · ✅ compila para Windows · 🟡 nunca rodou com SteamVR |
+| Hand tracking próprio na NPU (LiteRT + NNAPI, rastreio por ROI, detector só quando falta mão) e verificador mão vs pé/cortina/outra pessoa (presença com histerese, tamanho, proporção, alcance) | ✅ decodificador e verificador (testes com landmarks reais) · 🟡 NPU no aparelho |
 | Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |

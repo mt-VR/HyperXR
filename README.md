@@ -122,6 +122,7 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - GeckoView (Mozilla) — MPL-2.0 (dependência Maven `org.mozilla.geckoview:geckoview-arm64-v8a`)
 - Shizuku API — Apache-2.0
 - `openvr_driver.h` (Valve) — BSD-3-Clause (`pc/third_party/openvr/LICENSE`)
+- LiteRT (TensorFlow Lite) — Apache-2.0
 - MediaPipe Tasks GenAI — Apache-2.0; modelos Qwen 2.5 (baixados pelo usuário no app) — Apache-2.0
 - Modelo MediaPipe Hand Landmarker — Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Ambientes Poly Haven — CC0 (licença registrada por ambiente baixado, com `ATTRIBUTION.txt`)

@@ -114,6 +114,7 @@ dependencies {
     implementation(libs.arcore)
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.litert)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
     implementation(libs.openxr.loader)

@@ -177,11 +177,15 @@ fun HandsSection(a: MainActivity) {
         ToggleRow("Ativado", h.enabled) { v -> a.update { it.copy(handTracking = it.handTracking.copy(enabled = v)) } }
         Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.handtracking.HandTestActivity::class.java)) }) { Text("Testar detecção (câmera + esqueleto)") }
         Note("Segure o celular com a câmera para as mãos: o teste mostra o quadro analisado, o esqueleto encontrado e quantos quadros têm mão. Se aqui a mão some, o problema é luz, distância ou a câmera coberta pelo visor.")
-        ChoiceRow("Backend de inferência", listOf(InferenceBackend.GPU, InferenceBackend.CPU), if (h.backend == InferenceBackend.CPU) InferenceBackend.CPU else InferenceBackend.GPU, {
-            if (it == InferenceBackend.CPU) "CPU" else "GPU (recomendado)" }) { v ->
+        val npuDevices = remember { runCatching { com.hyperxr.diagnostics.NnapiNative.devices() }.getOrDefault(emptyList()).filter { it.contains("|accelerator|") }.map { it.substringBefore('|') } }
+        ChoiceRow("Motor de hand tracking", listOf(InferenceBackend.NNAPI, InferenceBackend.GPU, InferenceBackend.CPU),
+            when (h.backend) { InferenceBackend.CPU -> InferenceBackend.CPU; InferenceBackend.NNAPI -> InferenceBackend.NNAPI; else -> InferenceBackend.GPU }, {
+            when (it) { InferenceBackend.NNAPI -> "NPU (HyperXR)"; InferenceBackend.CPU -> "CPU (MediaPipe)"; else -> "GPU (MediaPipe)" } }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(backend = v)) }
         }
-        Note("Se a GPU não puder rodar o modelo, o HyperXR usa a CPU e informa qual backend está em uso.")
+        Note("NPU: o rastreador próprio do HyperXR roda na NPU do celular via NNAPI " +
+            (if (npuDevices.isEmpty()) "(nenhum acelerador NNAPI encontrado neste celular: ele usaria a CPU)" else "(acelerador: ${npuDevices.joinToString()})") +
+            ", deixando a GPU livre para o VR. GPU: MediaPipe. Os dois passam pelo verificador que descarta pés, cortinas e outras pessoas.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
         ChoiceRow("Visual das mãos", com.hyperxr.settings.HandVisual.values().toList(), h.handVisual, {
