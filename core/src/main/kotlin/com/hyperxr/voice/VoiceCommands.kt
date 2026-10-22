@@ -17,6 +17,8 @@ sealed class VoiceCommand {
     object ShowWindows : VoiceCommand()
     object Library : VoiceCommand()
     object RealityWindow : VoiceCommand()
+    /** A setting change asked of the assistant ("fps" to "60"); keys in AssistantBrain.SETTINGS. */
+    data class Setting(val key: String, val value: String) : VoiceCommand()
     data class Unknown(val heard: String) : VoiceCommand()
 }
 

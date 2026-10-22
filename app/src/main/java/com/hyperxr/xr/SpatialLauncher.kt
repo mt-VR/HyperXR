@@ -134,6 +134,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override fun onGlRelease() {
         (windows + library + taskbar).forEach { it.release() }
+        assistantOrNull?.release()
         if (::appWorld.isInitialized) appWorld.release()
         appWindows.forEach { it.close(); it.screen.release() }
         windowControls.values.forEach { it.release() }
@@ -567,6 +568,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)
+            "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
         }
@@ -842,7 +844,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     @Volatile private var voiceUntil = 0L
     @Volatile private var listening = false
 
-    override fun voiceStatus(): String = if (listening || System.currentTimeMillis() < voiceUntil) voiceText else ""
+    override fun voiceStatus(): String { followAssistant(); return if (listening || System.currentTimeMillis() < voiceUntil) voiceText else "" }
 
     private fun voiceSay(text: String) { voiceText = text; voiceUntil = System.currentTimeMillis() + 4000 }
 
@@ -852,12 +854,74 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         dictate { heard ->
             listening = false
             if (heard.isNullOrBlank()) { voiceSay("Não ouvi nada (permita o microfone)"); return@dictate }
-            val cmd = com.hyperxr.voice.VoiceCommands.parse(heard,
-                allApps().filter { it.kind != AppKind.UNAVAILABLE }.map { com.hyperxr.voice.VoiceCommands.Named(it.id, it.title) },
-                app.environments.installed().map { com.hyperxr.voice.VoiceCommands.Named(it.id, it.name) },
-                workspaces.list())
-            voiceSay(if (cmd is com.hyperxr.voice.VoiceCommand.Unknown) "Não entendi: $heard" else "Entendi: $heard")
-            glTasks += { runVoice(cmd) }
+            voiceSay(heard)
+            glTasks += { assistant.ask(heard) }
+        }
+    }
+
+    // ---------------------------------------------------------------- assistant
+    private var assistantSeen = -1
+    private val assistant by lazy {
+        assistantMade = true
+        com.hyperxr.assistant.Assistant(activity, object : com.hyperxr.assistant.AssistantHost {
+            override fun snapshot() = runtimeSnapshot()
+            override fun run(cmd: com.hyperxr.voice.VoiceCommand) { glTasks += { runVoice(cmd) } }
+        })
+    }
+
+    /** The taskbar shows "Pensando…" and then the assistant's answer for a few seconds. */
+    private fun followAssistant() {
+        val a = assistantOrNull ?: return
+        if (a.busy) { voiceText = a.status; voiceUntil = System.currentTimeMillis() + 1000; return }
+        if (a.version != assistantSeen) {
+            assistantSeen = a.version
+            synchronized(a.messages) { a.messages.lastOrNull() }?.takeIf { !it.fromUser }?.let { voiceText = it.text; voiceUntil = System.currentTimeMillis() + 6000 }
+        }
+    }
+    private val assistantOrNull get() = if (assistantMade) assistant else null
+    private var assistantMade = false
+
+    private fun runtimeSnapshot(): com.hyperxr.assistant.RuntimeSnapshot {
+        val s = app.settings.current
+        val named = { e: AppEntry -> com.hyperxr.voice.VoiceCommands.Named(e.id, e.title) }
+        return com.hyperxr.assistant.RuntimeSnapshot(
+            xrMode = modeDescription, tracking = trackingDescription, hands = handStatus,
+            background = when (backgroundChoice()) { "camera" -> "câmera"; "dim" -> "câmera escurecida"; else -> app.environments.installed().firstOrNull { it.id == currentEnvId }?.name ?: currentEnvId },
+            launcherMode = if (mode() == LauncherMode.DOCK) "dock" else "new",
+            battery = batteryText(),
+            windows = appWindows.map { w -> if (w is com.hyperxr.browser.BrowserWindow) "${w.title} (${w.tabs.size} abas)" else w.title },
+            windowsHidden = windowsMinimized,
+            apps = (pinnedApps() + allApps()).filter { it.kind != AppKind.UNAVAILABLE }.distinct().map(named),
+            environments = app.environments.installed().map { com.hyperxr.voice.VoiceCommands.Named(it.id, it.name) },
+            workspaces = workspaces.list(),
+            joyCons = runCatching { com.hyperxr.joycon.JoyConManager.connectedJoyCons() }.getOrDefault(emptyList()),
+            settings = linkedMapOf(
+                "hand_tracking" to if (s.handTracking.enabled) "sim" else "nao",
+                "toque_direto" to if (s.handTracking.directTouch) "sim" else "nao",
+                "fps" to s.graphics.targetFps.toString(),
+                "escala_render" to "%.2f".format(java.util.Locale.ROOT, s.graphics.renderScale),
+                "ipd" to s.graphics.ipdMm.toInt().toString(),
+                "fov" to s.graphics.fovDegrees.toInt().toString(),
+                "volume" to (s.audio.masterVolume * 100).toInt().toString(),
+            ),
+            time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+        )
+    }
+
+    private fun applySetting(key: String, value: String) {
+        val on = value == "sim"
+        val n = value.toFloatOrNull() ?: 0f
+        app.settings.update { s ->
+            when (key) {
+                "hand_tracking" -> s.copy(handTracking = s.handTracking.copy(enabled = on))
+                "toque_direto" -> s.copy(handTracking = s.handTracking.copy(directTouch = on))
+                "fps" -> s.copy(graphics = s.graphics.copy(targetFps = n.toInt()))
+                "escala_render" -> s.copy(graphics = s.graphics.copy(renderScale = n))
+                "ipd" -> s.copy(graphics = s.graphics.copy(ipdMm = n))
+                "fov" -> s.copy(graphics = s.graphics.copy(fovDegrees = n))
+                "volume" -> s.copy(audio = s.audio.copy(masterVolume = n / 100f))
+                else -> s
+            }
         }
     }
 
@@ -876,6 +940,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             com.hyperxr.voice.VoiceCommand.ShowWindows -> { windowsMinimized = false; libraryShown = false }
             com.hyperxr.voice.VoiceCommand.Library -> toggleLibrary()
             com.hyperxr.voice.VoiceCommand.RealityWindow -> openSystem("reality")
+            is com.hyperxr.voice.VoiceCommand.Setting -> applySetting(cmd.key, cmd.value)
             is com.hyperxr.voice.VoiceCommand.Unknown -> Unit
         }
         taskbar.dirty = true
