@@ -156,7 +156,8 @@ fun HeadSection(a: MainActivity) {
     SectionCard("Rastreamento de cabeça") {
         ChoiceRow("Fonte", HeadTrackingSource.entries, h.source, { when (it) {
             HeadTrackingSource.AUTO -> "Automática"; HeadTrackingSource.ARCORE_6DOF -> "ARCore (6DoF)"
-            HeadTrackingSource.ROTATION_VECTOR_3DOF -> "Sensores (3DoF)"; HeadTrackingSource.OPENXR_RUNTIME -> "Runtime OpenXR" } }) { v ->
+            HeadTrackingSource.ROTATION_VECTOR_3DOF -> "Sensores (3DoF)"; HeadTrackingSource.OPENXR_RUNTIME -> "Runtime OpenXR"
+            HeadTrackingSource.VISUAL_GYRO -> "Giroscópio computacional (câmera)" } }) { v ->
             a.update { it.copy(headTracking = it.headTracking.copy(source = v)) }
         }
         SliderRow("Predição de movimento", h.predictionMs, 0f..40f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(headTracking = it.headTracking.copy(predictionMs = v)) } }
@@ -165,6 +166,7 @@ fun HeadSection(a: MainActivity) {
         CapabilityRow("Giroscópio", caps.gyroscope)
         CapabilityRow("ARCore (6DoF)", caps.arCore)
         Note("6DoF só é anunciado quando o ARCore rastreia de fato. Sem ARCore o rastreamento é 3DoF com modelo de pescoço.")
+        Note("Giroscópio computacional: para celulares sem giroscópio. A câmera mede a rotação da cabeça (pontos da cena seguidos quadro a quadro, mãos e pessoas descartadas) e guarda um mapa das direções já vistas para corrigir o desvio; o acelerômetro mantém o horizonte. No Automático ele liga sozinho quando o celular não tem giroscópio. Precisa de luz e de um ambiente com detalhes (parede lisa não serve).")
     }
 }
 

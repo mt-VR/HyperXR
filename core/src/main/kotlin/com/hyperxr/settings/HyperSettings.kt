@@ -11,7 +11,7 @@ enum class LauncherMode { DOCK, NEW }
 enum class XrModePreference { AUTO, MIXED_REALITY, VR_SBS, OPENXR_RUNTIME }
 
 @Serializable
-enum class HeadTrackingSource { AUTO, ARCORE_6DOF, ROTATION_VECTOR_3DOF, OPENXR_RUNTIME }
+enum class HeadTrackingSource { AUTO, ARCORE_6DOF, ROTATION_VECTOR_3DOF, OPENXR_RUNTIME, VISUAL_GYRO }
 
 @Serializable
 enum class InferenceBackend { AUTO, CPU, GPU, NNAPI }

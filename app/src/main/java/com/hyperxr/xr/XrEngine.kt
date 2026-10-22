@@ -165,6 +165,7 @@ class XrEngine(
     /** Fence of the previous frame: the CPU waits for it so it never runs a frame ahead of the GPU. */
     private var frameFence = 0L
     private var refreshPeriodNs = 16_666_667L
+    private var useVisualGyro = false
     val share = com.hyperxr.share.ScreenShare(activity)
     private val spectatorEye = EyeView()
     private var lastFrameNs = 0L
@@ -207,7 +208,10 @@ class XrEngine(
             else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats}"
         }
 
-        val forced3Dof = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.ROTATION_VECTOR_3DOF
+        // the computational gyroscope: chosen, or automatic on phones without a gyroscope
+        useVisualGyro = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.VISUAL_GYRO ||
+            (settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.AUTO && !com.hyperxr.headtracking.VisualGyroTracker.hasGyroscope(activity))
+        val forced3Dof = settings.headTracking.source == com.hyperxr.settings.HeadTrackingSource.ROTATION_VECTOR_3DOF || useVisualGyro
         when (decision.mode) {
             XrMode.MIXED_REALITY_ARCORE -> if (forced3Dof) startCameraPassthrough() else {
                 val ar = ArCoreSession(activity).also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }
@@ -252,7 +256,7 @@ class XrEngine(
                     }
                 }
                 if (arCore == null) {
-                    if (settings.handTracking.enabled && cameraOk) startCameraPassthrough()
+                    if ((settings.handTracking.enabled || useVisualGyro) && cameraOk) startCameraPassthrough()
                     else tracker = RotationVectorTracker(activity, displayRotation(), gyroHistory()).also { it.start() }
                 }
             }
@@ -270,13 +274,16 @@ class XrEngine(
     private fun startCameraPassthrough() {
         val cam = CameraPassthrough(activity)
         cam.displayRotation = displayRotation()
+        val visual = if (useVisualGyro) com.hyperxr.headtracking.VisualGyroTracker(activity, displayRotation()) else null
         cam.onCpuFrame = { img, intr ->
+            // the computational gyroscope reads the frame first (hand tracking closes it)
+            visual?.submit(img, intr)
             val camPose = Pose().also { p -> synchronized(input) { p.set(input.head) } }
             hands.submit(img, intr, camPose, null, rotation180 = displayRotation() == android.view.Surface.ROTATION_270)
         }
         cam.start()
         passthrough = cam
-        tracker = RotationVectorTracker(activity, displayRotation(), gyroHistory()).also { it.start() }
+        tracker = (visual ?: RotationVectorTracker(activity, displayRotation(), gyroHistory())).also { it.start() }
     }
 
     @Suppress("DEPRECATION")
@@ -662,6 +669,7 @@ class XrEngine(
         passthrough?.shutdown()
         arCore?.close()
         (tracker as? RotationVectorTracker)?.shutdown()
+        (tracker as? com.hyperxr.headtracking.VisualGyroTracker)?.shutdown()
         gyro.shutdown()
         audio.release()
     }

@@ -68,3 +68,40 @@ LOD, carregamento assíncrono de glTF fora do thread GL, reação ao `PowerManag
   o trabalho do conteúdo (interface, física, mãos) não entra na latência.
 - **Sincronia com a GPU:** um fence faz a CPU esperar a GPU terminar o quadro anterior, e nenhum
   quadro fica na fila atrás de outro.
+
+## Giroscópio computacional (celulares sem giroscópio)
+
+Em Head tracking > Fonte, a opção **Giroscópio computacional (câmera)** liga isso. No modo
+Automático ela liga sozinha quando o celular não tem giroscópio. Um celular sem giroscópio
+também não tem ARCore, então o rastreamento fica em 3DoF.
+
+`VisualGyro` (core, com testes) faz um SLAM rotacional:
+
+- **Quadro a quadro:**
+  - Pega o melhor canto de cada célula de uma grade 8x6 (Shi-Tomasi) numa imagem cinza de 160
+    px.
+  - Segue cada canto por casamento de patches com média removida, em 2 níveis de pirâmide, com
+    subpixel. A busca parte de onde a última velocidade angular diz que o ponto foi parar.
+  - Calcula a rotação pelos vetores de direção: RANSAC de 2 pontos e depois o método de Horn nos
+    inliers. Mãos e pessoas em movimento ficam de fora como outliers.
+- **Mapa:** guarda quadros-chave a cada 20° de vista, cada um com a sua orientação. Ao olhar de
+  novo para perto de um deles (a cada 3 quadros), o casamento com ele dá a orientação absoluta e
+  puxa o desvio acumulado de volta.
+- **Gravidade:** o acelerômetro, só quando |a| está perto de 1 g, corrige pitch e roll aos poucos.
+- **Entre quadros da câmera:** a orientação é levada adiante pela velocidade angular medida, até
+  o momento em que a imagem chega aos olhos.
+
+Medido em imagens sintéticas de rotação conhecida (`VisualGyroTest`):
+
+| Caso | Erro |
+|---|---|
+| Virada de 62,7° a 75°/s com pitch | pior erro 0,24° |
+| 180°/s | pior erro 0,25° |
+| Cabeça parada com uma "mão" atravessando a imagem | 0,08° |
+| Olhar 40° para o lado e voltar | volta a menos de 1° |
+
+Limites:
+
+- precisa de luz e de um ambiente com detalhes (parede lisa ou escuro não dão pontos);
+- a taxa é a da câmera (30 a 60 Hz), com previsão entre os quadros;
+- o desvio de yaw só é corrigido quando o usuário olha de novo para uma direção já vista.
