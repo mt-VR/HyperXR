@@ -354,6 +354,7 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
     private val radialAspect = FloatArray(4)
     private val pinchPoint = Vec3()
     private val pinchBall = arrayOf(Vec3(), Vec3())
+    private val ballPointers = arrayOf(com.hyperxr.input.BallPointer(), com.hyperxr.input.BallPointer())
     private val pinchBallVisible = BooleanArray(2)
     private val identityQ = Quat()
     private val MICRO_SCROLL_SCREENS = 1.5f
@@ -421,14 +422,15 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
             // a hand working on the lab bench (holding or reaching an object) does not point at the UI
             val labBusy = lab?.handBusy?.get(i) == true
-            val raw = if (!menuOpen && !labBusy) com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray) else null
-            if (raw != null) {
-                // the (invisible) ray starts at the pinch ball; same line, so the hit point does not move
-                pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
-                val along = (pinchBall[i].x - raw.origin.x) * raw.direction.x + (pinchBall[i].y - raw.origin.y) * raw.direction.y + (pinchBall[i].z - raw.origin.z) * raw.direction.z
-                if (along > 0f) raw.origin.addScaled(raw.direction, along)
+            // The pinch ball is the pointer: what is under the ball, as seen from the eyes, is what a
+            // pinch clicks (no beam). The shoulder ray remains available in Settings.
+            if (h.isUsable) pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+            val raw = when {
+                menuOpen || labBusy || !h.isUsable -> { ballPointers[i].reset(); null }
+                app.settings.current.handTracking.ballPointer -> ballPointers[i].update(pinchBall[i], pinching, input.head.position, now, ray)
+                else -> com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray)
             }
-            pinchBallVisible[i] = raw != null
+            pinchBallVisible[i] = h.isUsable && !labBusy
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
             // pinch is the click; it is read from the (held) state so a lost frame does not release it
             val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)

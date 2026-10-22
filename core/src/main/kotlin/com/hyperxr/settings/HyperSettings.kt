@@ -71,6 +71,8 @@ data class HandTrackingSettings(
     /** How tracked hands are drawn. */
     val handVisual: HandVisual = HandVisual.SKELETON,
     val auraOpacity: Float = 0.45f,
+    /** Point with the pinch ball (what is under it, seen from the eyes); false = shoulder ray. */
+    val ballPointer: Boolean = true,
     /** Upward tilt of the hand ray (degrees) so a relaxed hand reaches eye-level windows. */
     val rayPitchDeg: Float = 25f,
     /** Kalman process noise (m/s²)²: higher follows fast motion, lower smooths more. */
