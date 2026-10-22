@@ -265,9 +265,7 @@ class SceneRenderer {
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, env.texture)
                 GLES30.glUniform1i(panoProg.u("uTex"), 0)
                 GLES30.glUniform4f(panoProg.u("uRect"), 0f, 0f, 1f, 1f)
-                GLES30.glDepthMask(false)
-                skySphere.draw()
-                GLES30.glDepthMask(true)
+                drawSkySphere()
             }
             is EnvironmentVisual.Model -> {
                 drawSky(eye, floatArrayOf(0.45f, 0.6f, 0.85f), floatArrayOf(0.8f, 0.85f, 0.9f), floatArrayOf(0.3f, 0.3f, 0.3f))
@@ -297,8 +295,19 @@ class SceneRenderer {
             GLES30.glUniformMatrix4fv(prog.u("uTexMatrix"), 1, false, m.texMatrix ?: identity, 0)
         } else GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, m.texture)
         GLES30.glUniform1i(prog.u("uTex"), 0)
+        drawSkySphere()
+    }
+
+    /**
+     * The sky sphere is projected onto the far plane (depth exactly 1.0, see SKY_VS), so it needs
+     * LEQUAL against the cleared depth: with the default LESS every fragment was rejected, which
+     * left 360 environments and 360 photos black.
+     */
+    private fun drawSkySphere() {
         GLES30.glDepthMask(false)
+        GLES30.glDepthFunc(GLES30.GL_LEQUAL)
         skySphere.draw()
+        GLES30.glDepthFunc(GLES30.GL_LESS)
         GLES30.glDepthMask(true)
     }
 
@@ -317,11 +326,7 @@ class SceneRenderer {
         GLES30.glUniform3fv(skyProg.u("uHorizon"), 1, horizon, 0)
         GLES30.glUniform3fv(skyProg.u("uBottom"), 1, bottom, 0)
         GLES30.glUniform3f(skyProg.u("uSunDir"), -0.3f, -0.4f, 0.8f)
-        GLES30.glDepthMask(false)
-        GLES30.glDepthFunc(GLES30.GL_LEQUAL)
-        skySphere.draw()
-        GLES30.glDepthFunc(GLES30.GL_LESS)
-        GLES30.glDepthMask(true)
+        drawSkySphere()
     }
 
     /**

@@ -122,7 +122,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         reticleTex = Gl.uploadBitmap(reticleBitmap())
         ringTex = Gl.uploadBitmap(ringBitmap())
         val env = app.environments.installed().firstOrNull { it.id == app.settings.current.launcher.environmentId } ?: PolyHavenCatalog.STUDIO
-        selectEnvironment(env)
+        loadEnvironment(env)
         File(app.filesDir, "crash").listFiles()?.forEach { Diagnostics.log("Package crash report: ${it.nameWithoutExtension}: ${it.readText().take(160)}") }
     }
 
@@ -833,7 +833,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override fun setBackgroundChoice(id: String) {
         background = id
-        if (id != "camera" && id != "dim") app.environments.installed().firstOrNull { it.id == id }?.let { selectEnvironment(it) }
+        if (id != "camera" && id != "dim") app.environments.installed().firstOrNull { it.id == id }?.let { loadEnvironment(it) }
     }
 
     /** Camera (optionally darkened behind the UI) or the chosen 3D environment. */
@@ -925,7 +925,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
     override fun currentEnvironmentId(): String = currentEnvId
 
+    /** Picking an environment (library tab, Environments panel, gallery) also shows it in MR. */
     override fun selectEnvironment(entry: EnvironmentEntry) {
+        loadEnvironment(entry)
+        background = entry.id
+    }
+
+    private fun loadEnvironment(entry: EnvironmentEntry) {
         val old = ctx.renderer.environment
         ctx.renderer.environment = app.environments.loadVisual(entry)
         when (old) {
