@@ -34,6 +34,7 @@ class HandSkeletonRenderer {
                 Quat.fromTo(up, dir, q)
                 val d = scene.addDraw()
                 d.mesh = renderer.cylinder
+                d.late = true
                 d.color[0] = 0.86f; d.color[1] = 0.87f; d.color[2] = 0.95f; d.color[3] = alpha
                 d.gloss = 0.35f
                 d.castShadow = alpha == 1f
@@ -43,6 +44,7 @@ class HandSkeletonRenderer {
             for (j in 0 until HandJoint.COUNT) {
                 val d = scene.addDraw()
                 d.mesh = renderer.sphere
+                d.late = true
                 val tip = j == HandJoint.THUMB_TIP || j == HandJoint.INDEX_TIP || j == HandJoint.MIDDLE_TIP || j == HandJoint.RING_TIP || j == HandJoint.PINKY_TIP
                 when {
                     pinched && (j == HandJoint.THUMB_TIP || j == HandJoint.INDEX_TIP) -> { d.color[0] = 0.94f; d.color[1] = 0.36f; d.color[2] = 0.75f }

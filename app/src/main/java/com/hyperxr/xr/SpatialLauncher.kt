@@ -647,10 +647,11 @@ class SpatialLauncher(private val activity: android.app.Activity, private val ro
             val pinched = handRays[i].captured != null || ctx.input.hands[i].gesture == com.hyperxr.handtracking.Gesture.PINCH
             val ball = ctx.scene.addDraw()
             ball.mesh = ctx.renderer.sphere
-            ball.unlit = true; ball.transparent = true
+            ball.unlit = true
+            ball.late = true // over icons and windows, which are farther away
             if (pinched) { ball.color[0] = 0.94f; ball.color[1] = 0.36f; ball.color[2] = 0.75f }
             else { ball.color[0] = 1f - 0.4f * k; ball.color[1] = 1f - 0.45f * k; ball.color[2] = 1f }
-            ball.color[3] = 0.55f + 0.45f * k
+            ball.color[3] = 1f
             val r = if (pinched) 0.008f else 0.011f - 0.002f * k
             com.hyperxr.math.Mat4.compose(pinchBall[i], identityQ, 2 * r, 2 * r, 2 * r, ball.matrix) // unit sphere mesh has radius 0.5
         }

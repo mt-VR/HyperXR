@@ -30,6 +30,12 @@ class DrawItem {
     var metal = 0f
     /** Drawn into the shadow map when the scene has a shadow region. */
     var castShadow = false
+    /**
+     * Drawn after the UI panels (hands, the pinch ball): the panels are blended quads drawn after
+     * the 3D scene, so anything in the normal pass that is transparent (or simply drawn before
+     * them) would end up covered by icons and windows even when it is closer to the eyes.
+     */
+    var late = false
     val matrix = FloatArray(16)
 }
 
@@ -70,7 +76,7 @@ class FrameScene {
     fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f }
     fun addDraw(): DrawItem {
         if (drawCount == drawPool.size) drawPool += DrawItem()
-        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false }
+        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false; it.late = false }
     }
     fun addPanel(): PanelItem {
         if (panelCount == panelPool.size) panelPool += PanelItem()
@@ -362,6 +368,7 @@ class SceneRenderer {
             }
             for (i in 0 until scene.drawCount) {
                 val d = scene.draw(i)
+                if (d.late) continue
                 val isTransparent = d.transparent || d.color[3] < 0.999f
                 if ((pass == 1) != isTransparent) continue
                 val model = d.model
@@ -378,6 +385,27 @@ class SceneRenderer {
             }
         }
         GLES30.glDepthMask(true)
+        GLES30.glDisable(GLES30.GL_BLEND)
+    }
+
+    /** Hands and other [DrawItem.late] items, after the non-overlay panels, depth-tested. */
+    fun renderLate(scene: FrameScene, eye: EyeView) {
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glEnable(GLES30.GL_CULL_FACE)
+        for (pass in 0..1) {
+            if (pass == 1) {
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            }
+            for (i in 0 until scene.drawCount) {
+                val d = scene.draw(i)
+                if (!d.late) continue
+                val isTransparent = d.transparent || d.color[3] < 0.999f
+                if ((pass == 1) != isTransparent) continue
+                val mesh = d.mesh ?: continue
+                drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal)
+            }
+        }
         GLES30.glDisable(GLES30.GL_BLEND)
     }
 

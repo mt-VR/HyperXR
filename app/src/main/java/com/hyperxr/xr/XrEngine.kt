@@ -348,6 +348,7 @@ class XrEngine(private val activity: Activity, private val content: XrContent) :
         renderer.renderBackground(scene, eye, camera, input.head)
         renderer.renderScene(scene, eye)
         renderer.renderPanels(scene, eye, overlayPass = false)
+        renderer.renderLate(scene, eye)
         if (boundaryActive && camera != null) {
             val ar = arCore!!
             renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)
