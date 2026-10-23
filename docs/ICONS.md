@@ -34,8 +34,32 @@ explorador de arquivos removido por preenchimento a partir da borda + recuperaç
 | tv | TV (hub de vídeo) |
 | whatsapp | WhatsApp Web |
 
-## Sem ícone fornecido (espaço reservado neutro, sem símbolo)
+## Apps sem ícone do autor: bibliotecas abertas de ícones
 
-Hand Physics Lab, YouTube, Twitch, TikTok e pacotes `.hyperx` de terceiros
-(que podem trazer seu próprio `icon` no manifesto — exibição dele é pendente). Para esses, o launcher
-mostra um bloco gradiente neutro e o nome do app.
+Para os apps que não têm ícone na folha do autor, os símbolos vêm de bibliotecas de ícones
+estabelecidas (não foram desenhados pelo assistente), brancos sobre um degradê no estilo da folha:
+- apps do HyperXR: **Material Symbols** do Google (Rounded, preenchido), licença Apache-2.0;
+- marcas: o logo oficial pelo **Simple Icons** (CC0) — YouTube, Twitch, TikTok.
+
+Gerados por `tools/make_icons.py` (SVG → PNG 216 px, camadas `bg`/`fg` como as do autor).
+
+| Ícone | Símbolo | App |
+|---|---|---|
+| importapk | build (Material) | Corrigir APK |
+| opengames | sports_esports (Material) | Jogos open source |
+| youtube | YouTube (Simple Icons) | YouTube XR, YouTube (web) |
+| emulators | videogame_asset (Material) | Emuladores |
+| androidapps | android (Material) | Apps Android |
+| handlab | back_hand (Material) | Hand Physics Lab |
+| appworld | view_in_ar (Material) | App-to-World |
+| assistant | auto_awesome (Material) | Assistente |
+| screenshare | screen_share (Material) | Compartilhar tela |
+| workspaces | dashboard (Material) | Espaços de trabalho |
+| reality | visibility (Material) | Mundo real |
+| catgame | pets (Material) | Gato vs. Vovó |
+| twitch | Twitch (Simple Icons) | Twitch |
+| tiktok | TikTok (Simple Icons) | TikTok |
+| hyperx_package | extension (Material) | Pacotes .hyperx sem ícone próprio |
+
+Apps Android instalados usam o ícone do próprio app. Para trocar qualquer um destes por arte do
+autor, basta substituir os dois PNGs com o mesmo nome.

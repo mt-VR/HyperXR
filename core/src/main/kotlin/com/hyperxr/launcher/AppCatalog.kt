@@ -49,7 +49,17 @@ object IconLibrary {
 
     fun bgResource(key: String) = "ic_app_${key}_bg"
     fun fgResource(key: String) = "ic_app_${key}_fg"
-    fun isProvided(key: String?) = key != null && key in PROVIDED
+    /**
+     * Icons for apps the author has not drawn one for: established open icon sets, not drawn by
+     * the assistant. HyperXR's own apps use Google's Material Symbols (Apache-2.0) and brands
+     * their official logo from Simple Icons (CC0), white on a gradient like the provided icons.
+     */
+    val LIBRARY = listOf(
+        "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
+        "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package",
+    )
+
+    fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
 }
 
 object BuiltinApps {
@@ -69,49 +79,49 @@ object BuiltinApps {
         AppEntry("hx:help_center", "Central de ajuda", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "help_center", "help"),
         AppEntry("hx:tv", "TV", AppKind.SYSTEM_PANEL, AppCategory.WEB, "tv", "tv"),
         AppEntry("hx:xrapps", "Apps XR", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "remote_desktop", "xrapps"),
-        AppEntry("hx:importapk", "Corrigir APK", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "importapk",
+        AppEntry("hx:importapk", "Corrigir APK", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "importapk", "importapk",
             runtime = "HyperXR", compatibility = "Jogos OpenXR, de Quest e apps Daydream/Cardboard",
             limitations = "Escolha um APK do celular; o HyperXR diz se roda e corrige para o runtime HyperXR"),
-        AppEntry("hx:opengames", "Jogos open source", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "opengames",
+        AppEntry("hx:opengames", "Jogos open source", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "opengames", "opengames",
             runtime = "OpenXR (via Corrigir APK) ou Cardboard", compatibility = "Busca no GitHub e no itch.io, só licenças open source",
             limitations = "Jogos feitos para o Quest podem usar recursos que o HyperXR ainda não tem"),
-        AppEntry("hx:youtube", "YouTube XR", AppKind.SYSTEM_PANEL, AppCategory.WEB, null, "youtube",
+        AppEntry("hx:youtube", "YouTube XR", AppKind.SYSTEM_PANEL, AppCategory.WEB, "youtube", "youtube",
             runtime = "HyperXR (nativo, sem página web)", compatibility = "Busca, categorias, vídeos até 4K/8K 60 fps, ao vivo e 360",
             limitations = "Sem login: sem inscrições, histórico ou comentários da sua conta"),
-        AppEntry("hx:emulators", "Emuladores", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "emulators",
+        AppEntry("hx:emulators", "Emuladores", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "emulators", "emulators",
             runtime = "Núcleos libretro open source embutidos", compatibility = "NES (QuickNES), Game Boy/Color (Gambatte), GBA (mGBA)",
             limitations = "Nenhum jogo incluído: use as suas próprias ROMs"),
-        AppEntry("hx:androidapps", "Apps Android", AppKind.SYSTEM_PANEL, AppCategory.ANDROID, null, "androidapps",
+        AppEntry("hx:androidapps", "Apps Android", AppKind.SYSTEM_PANEL, AppCategory.ANDROID, "androidapps", "androidapps",
             limitations = "Abre qualquer app instalado numa janela plana ou curva; requer o Shizuku"),
         AppEntry("hx:clock", "Relógio", AppKind.HYPERX_PACKAGE, AppCategory.SYSTEM, "clock", "com.hyperxr.clock"),
         AppEntry("hx:calculator", "Calculadora", AppKind.HYPERX_PACKAGE, AppCategory.SYSTEM, "calculator", "com.hyperxr.calculator"),
         AppEntry("hx:calendar", "Calendário", AppKind.HYPERX_PACKAGE, AppCategory.SYSTEM, "calendar", "com.hyperxr.calendar"),
         AppEntry("hx:remote_desktop", "Área de trabalho remota", AppKind.UNAVAILABLE, AppCategory.SYSTEM, "remote_desktop",
             limitations = "Not implemented yet: needs a streaming protocol (e.g. VNC/RDP client) and a host component"),
-        AppEntry("game:handlab", "Hand Physics Lab", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "handlab",
+        AppEntry("game:handlab", "Hand Physics Lab", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "handlab", "handlab",
             runtime = "HyperXR (nativo)", compatibility = "Realidade mista ou VR",
             limitations = "Física de corpos rígidos numa bancada à sua frente; use as mãos (ou o cursor do Joy-Con)"),
-        AppEntry("hx:appworld", "App-to-World", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "appworld",
+        AppEntry("hx:appworld", "App-to-World", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "appworld", "appworld",
             runtime = "HyperXR", compatibility = "Apps Android como objetos no espaço",
             limitations = "Música e notificações precisam do acesso às notificações; arquivos, do acesso ao armazenamento"),
-        AppEntry("hx:assistant", "Assistente", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "assistant",
+        AppEntry("hx:assistant", "Assistente", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "assistant", "assistant",
             runtime = "IA no celular (MediaPipe LLM)", compatibility = "Voz (reconhecimento do Google) ou texto",
             limitations = "Baixa um modelo Qwen 2.5 uma vez (550 MB ou 1,6 GB); depois funciona offline"),
-        AppEntry("hx:share", "Compartilhar tela", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "share",
+        AppEntry("hx:share", "Compartilhar tela", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "screenshare", "share",
             runtime = "HyperXR", compatibility = "Vídeo 16:9, navegador, telas externas",
             limitations = "Gravação de outros apps em 16:9 só no Android 15 ou mais novo"),
-        AppEntry("hx:workspaces", "Espaços de trabalho", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "workspaces",
+        AppEntry("hx:workspaces", "Espaços de trabalho", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "workspaces", "workspaces",
             runtime = "HyperXR", compatibility = "Salva e reabre conjuntos de janelas",
             limitations = "Guarda abas do navegador, apps Android e web apps; não guarda o estado dentro dos apps"),
-        AppEntry("hx:reality", "Mundo real", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "reality",
+        AppEntry("hx:reality", "Mundo real", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "reality", "reality",
             runtime = "HyperXR", compatibility = "Janela com a câmera dentro do VR",
             limitations = "Precisa da câmera ligada (hand tracking ou realidade mista)"),
-        AppEntry("game:catgame", "Gato vs. Vovó", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "catgame",
+        AppEntry("game:catgame", "Gato vs. Vovó", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "catgame", "catgame",
             runtime = "HyperXR (nativo)", compatibility = "VR com Joy-Cons",
             limitations = "Você é um gato na casa da vovó: atrapalhe as tarefas e acerte-a com objetos antes que ela termine"),
-        AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, null, "https://m.youtube.com"),
-        AppEntry("web:twitch", "Twitch", AppKind.WEB, AppCategory.WEB, null, "https://m.twitch.tv"),
-        AppEntry("web:tiktok", "TikTok", AppKind.WEB, AppCategory.WEB, null, "https://www.tiktok.com"),
+        AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, "youtube", "https://m.youtube.com"),
+        AppEntry("web:twitch", "Twitch", AppKind.WEB, AppCategory.WEB, "twitch", "https://m.twitch.tv"),
+        AppEntry("web:tiktok", "TikTok", AppKind.WEB, AppCategory.WEB, "tiktok", "https://www.tiktok.com"),
         AppEntry("web:whatsapp", "WhatsApp Web", AppKind.WEB, AppCategory.WEB, "whatsapp", "https://web.whatsapp.com",
             limitations = "WhatsApp Web targets desktop browsers; may require desktop mode or the external browser"),
         AppEntry("web:facebook", "Facebook", AppKind.WEB, AppCategory.WEB, "facebook", "https://m.facebook.com"),

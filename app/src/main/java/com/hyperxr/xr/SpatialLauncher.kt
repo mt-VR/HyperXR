@@ -106,7 +106,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     private fun refreshInstalled() {
         val pkgs = app.packages.list().filter { p -> BuiltinApps.all.none { it.target == p.manifest.id } }.map { p ->
-            AppEntry("pkg:${p.manifest.id}", p.manifest.name, AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, null, p.manifest.id,
+            AppEntry("pkg:${p.manifest.id}", p.manifest.name, AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, "hyperx_package", p.manifest.id,
                 runtime = "HyperXR SDK ${p.manifest.sdk}", compatibility = p.manifest.mode)
         }
         val xr = try { app.xrApps.discover().map { it.entry } } catch (t: Throwable) { emptyList() }
