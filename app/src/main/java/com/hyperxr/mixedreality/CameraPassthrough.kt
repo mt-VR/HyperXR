@@ -72,9 +72,19 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         val ch = cm.getCameraCharacteristics(id)
         realtimeTimestamps = ch.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
         val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
-        val previewSize = map.getOutputSizes(SurfaceTexture::class.java)
+        // Prefer the steadiest range reaching 60 fps (lower camera-to-photon latency), else the fastest one.
+        val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty()
+        val fpsRange = ranges.filter { it.upper >= 60 }.maxByOrNull { it.lower } ?: ranges.maxByOrNull { it.upper * 1000 + it.lower } ?: Range(30, 30)
+        // Video mode at the phone's best: the largest picture the camera delivers at that frame
+        // rate (4K60 where the phone records 4K60), widescreen first. If the phone refuses it
+        // together with the small hand-tracking stream, the next size down is tried.
+        val maxFrameNs = (1_000_000_000L / fpsRange.upper) * 102 / 100
+        sizes = map.getOutputSizes(SurfaceTexture::class.java)
             .filter { it.width * 9 == it.height * 16 || it.width * 3 == it.height * 4 }
-            .minByOrNull { kotlin.math.abs(it.width - 1280) } ?: Size(1280, 720)
+            .filter { sz -> runCatching { map.getOutputMinFrameDuration(SurfaceTexture::class.java, sz) }.getOrDefault(0L).let { it == 0L || it <= maxFrameNs } }
+            .sortedWith(compareBy({ -(it.width * it.height) }, { if (it.width * 9 == it.height * 16) 0 else 1 }))
+            .ifEmpty { listOf(Size(1280, 720)) }
+        val previewSize = sizes.first()
         imageAspect = previewSize.width.toFloat() / previewSize.height
         val cpu = map.getOutputSizes(ImageFormat.YUV_420_888).minByOrNull { kotlin.math.abs(it.width - cpuSize.width) + kotlin.math.abs(it.height - cpuSize.height) } ?: cpuSize
 
@@ -102,33 +112,47 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
                 if (cb != null && intr != null) cb(img, intr) else img.close()
             }, handler)
         }
-        // Prefer the steadiest range reaching 60 fps (lower camera-to-photon latency), else the fastest one.
-        val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty()
-        val fpsRange = ranges.filter { it.upper >= 60 }.maxByOrNull { it.lower } ?: ranges.maxByOrNull { it.upper * 1000 + it.lower } ?: Range(30, 30)
         cm.openCamera(id, object : CameraDevice.StateCallback() {
             override fun onOpened(d: CameraDevice) {
                 device = d
-                val targets = listOf(surface!!, reader!!.surface)
-                @Suppress("DEPRECATION")
-                d.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(s: CameraCaptureSession) {
-                        session = s
-                        val req = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                            targets.forEach { addTarget(it) }
-                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
-                            set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-                            set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
-                            // the camera's own image clean-up in its quickest form: no frame of delay inside the ISP
-                            set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
-                            set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
-                        }
-                        s.setRepeatingRequest(req.build(), null, handler)
-                    }
-                    override fun onConfigureFailed(s: CameraCaptureSession) { error = "Camera session configuration failed" }
-                }, handler)
+                openSession(d, fpsRange, 0)
             }
             override fun onDisconnected(d: CameraDevice) { d.close(); device = null }
             override fun onError(d: CameraDevice, e: Int) { error = "Camera error $e"; d.close(); device = null }
+        }, handler)
+    }
+
+    private var sizes: List<Size> = emptyList()
+    /** The picture size the camera actually runs at (for diagnostics). */
+    @Volatile var runningSize: Size? = null; private set
+
+    private fun openSession(d: CameraDevice, fpsRange: Range<Int>, attempt: Int) {
+        val size = sizes.getOrNull(attempt) ?: run { error = "Camera session configuration failed"; return }
+        surfaceTexture?.setDefaultBufferSize(size.width, size.height)
+        imageAspect = size.width.toFloat() / size.height
+        val targets = listOf(surface!!, reader!!.surface)
+        @Suppress("DEPRECATION")
+        d.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(s: CameraCaptureSession) {
+                session = s
+                runningSize = size
+                Diagnostics.log("Passthrough camera: ${size.width}x${size.height} @ ${fpsRange.upper} fps (video mode)")
+                // video template: steady frame rate and the full video pipeline quality
+                val req = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                    targets.forEach { addTarget(it) }
+                    set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
+                    set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                    set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                    // the camera's own image clean-up in its quickest form: no frame of delay inside the ISP
+                    set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
+                    set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
+                }
+                s.setRepeatingRequest(req.build(), null, handler)
+            }
+            override fun onConfigureFailed(s: CameraCaptureSession) {
+                Diagnostics.log("Passthrough camera: ${size.width}x${size.height} refused, trying smaller")
+                handler.post { openSession(d, fpsRange, attempt + 1) }
+            }
         }, handler)
     }
 
