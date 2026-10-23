@@ -35,6 +35,7 @@ import com.hyperxr.windows.KeyTarget
  */
 class TableKeyboardView(
     private val target: KeyTarget,
+    private val handService: com.hyperxr.handtracking.HandTrackingService?,
     private val click: () -> Unit,
     private val onClose: () -> Unit,
     private val onFloating: () -> Unit,
@@ -49,6 +50,7 @@ class TableKeyboardView(
     private var typed = StringBuilder()
     private var status = ""
     private var startNs = 0L
+    private var aiStatus = ""
 
     // depth search
     private val points = FloatArray(3 * 2400)
@@ -133,7 +135,14 @@ class TableKeyboardView(
                 val dt = if (lastFrameNs == 0L) 0f else ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.1f)
                 val step = (heightTarget - heightOffset) * (1f - kotlin.math.exp(-dt / 0.8f))
                 heightOffset += step; placement.center.y += step
-                typing.enabled = com.hyperxr.HyperXRApp.instance.settings.current.handTracking.tableFingers
+                val ht = com.hyperxr.HyperXRApp.instance.settings.current.handTracking
+                typing.enabled = ht.tableFingers
+                typing.useAiDepth = ht.aiDepth
+                // the AI depth network runs while the keyboard lies on a table (and is wanted)
+                handService?.aiDepthTableY = if (ht.aiDepth) placement.center.y else Float.NaN
+                aiStatus = if (ht.aiDepth) handService?.aiDepth?.let { e ->
+                    if (e.ready) "Profundidade IA: ${e.status}" else "Profundidade IA: ${e.status}" + if (e.progress > 0f && e.progress < 1f) " %.0f%%".format(e.progress * 100) else ""
+                } ?: "" else ""
                 for (key in typing.update(arrayOf(hands[0], hands[1]), placement, now)) press(key, now)
                 if (surface.signature() != surface.drawn) surface.dirty = true
             }
@@ -141,7 +150,7 @@ class TableKeyboardView(
         lastFrameNs = now
         flashes.entries.removeAll { now - it.value > FLASH_NS }
         controls.place(head)
-        controls.dirty = controls.dirty || controls.shownStatus != status
+        controls.dirty = controls.dirty || controls.shownStatus != status + aiStatus
     }
 
     /** The table height under the user from the Depth API (points ahead, within reach), or null. */
@@ -194,6 +203,7 @@ class TableKeyboardView(
     /** Searches again (depth) or waits for a finger calibration. */
     fun recalibrate() {
         state = State.SEARCHING; placement.valid = false; candidate = Float.NaN; startNs = 0L; typing.reset()
+        handService?.aiDepthTableY = Float.NaN
         anchor?.detach(); anchor = null; pendingAnchor = false
         stillTips.forEach { it.clear() }; controls.dirty = true
     }
@@ -234,7 +244,7 @@ class TableKeyboardView(
         surface.submit(scene)
     }
 
-    fun release() { anchor?.detach(); anchor = null; surface.release(); controls.release() }
+    fun release() { handService?.aiDepthTableY = Float.NaN; anchor?.detach(); anchor = null; surface.release(); controls.release() }
 
     // ------------------------------------------------------------------ keys texture
     private inner class KeySurface : XrPanel(layout.width + 0.016f, layout.depth + 0.016f, title = "", ppm = 2200f) {
@@ -288,8 +298,9 @@ class TableKeyboardView(
         }
 
         override fun draw(c: PanelCanvas) {
-            shownStatus = status
+            shownStatus = status + aiStatus
             c.paragraph(status, 24f, XrTheme.textDim)
+            if (aiStatus.isNotEmpty()) c.paragraph(aiStatus, 22f, XrTheme.accent2)
             if (state == State.PLACED) {
                 val preview = typed.toString().takeLast(34)
                 c.paragraph(if (preview.isEmpty()) "(o texto digitado aparece aqui)" else preview, 28f, XrTheme.text)

@@ -195,6 +195,14 @@ class TableTyping(val layout: TableKeyLayout) {
     var tipRadius = 0.007f
     /** The depth map sees the top of the finger: about this far above the pad. */
     var fingerThickness = 0.012f
+    /**
+     * AI depth (HandState.nnTipHeight): when fresh, a tap found by the motion is only typed once
+     * the network confirms the fingertip is on the table, whose top is then below [nnContactM].
+     */
+    var useAiDepth = true
+    var nnContactM = 0.022f
+    /** How long a tap may wait for the network's verdict before it is dropped. */
+    var nnWaitNs = 350_000_000L
     /** Fingers that type (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */
     var enabled: Set<Int> = setOf(1, 2)
 
@@ -203,11 +211,13 @@ class TableTyping(val layout: TableKeyLayout) {
         var down = false; var peak = Float.NaN; var key: TableKeyLayout.Key? = null; var over: TableKeyLayout.Key? = null
         /** Model-only taps wait for the next result to confirm the finger stays on the table. */
         var pending = false
+        /** A tap waiting for the AI depth verdict, found on the result of [impactNs]. */
+        var waitNn = false; var impactNs = 0L
         fun push(ts: Long, height: Float) {
             for (i in 3 downTo 1) { t[i] = t[i - 1]; h[i] = h[i - 1] }
             t[0] = ts; h[0] = height; if (n < 4) n++
         }
-        fun clear() { n = 0; down = false; peak = Float.NaN; key = null; over = null; pending = false }
+        fun clear() { n = 0; down = false; peak = Float.NaN; key = null; over = null; pending = false; waitNn = false }
     }
     private val state = Array(2) { Array(5) { Finger() } }
     private val lastResult = LongArray(2)
@@ -250,10 +260,22 @@ class TableTyping(val layout: TableKeyLayout) {
                 if (fs.down) fs.key?.let { held += it.id }
                 else if (fs.over != null && local.y - tipRadius < hoverH) hovered += fs.over!!.id
             }
+            var cand = -1; var candH = Float.MAX_VALUE
+            // taps waiting for the AI depth verdict: the network's frame is the tap's or newer
+            for (f in 0 until 5) {
+                val fs = st[f]
+                if (!fs.waitNn) continue
+                if (hand.nnNs >= fs.impactNs - 20_000_000L) {
+                    fs.waitNn = false
+                    val nh = hand.nnTipHeight[f]
+                    if (!nh.isNaN() && nh < nnContactM && fs.over != null && nh < candH) { cand = f; candH = nh }
+                } else if (hand.resultNs - fs.impactNs > nnWaitNs) fs.waitNn = false
+            }
+            if (cand >= 0) { press(st, cand, hand, now, out); cand = -1; candH = Float.MAX_VALUE }
             // contact and impact are judged once per camera result
             if (hand.resultNs == 0L || hand.resultNs == lastResult[hi]) continue
             lastResult[hi] = hand.resultNs
-            var cand = -1; var candH = Float.MAX_VALUE
+            val nnFresh = useAiDepth && hand.nnNs > 0L && hand.resultNs - hand.nnNs < 400_000_000L
             for (f in 0 until 5) {
                 if (f !in enabled) continue
                 val fs = st[f]
@@ -265,7 +287,9 @@ class TableTyping(val layout: TableKeyLayout) {
                 }
                 fs.peak = if (fs.peak.isNaN()) h else maxOf(fs.peak, h)
                 if (fs.over == null || fs.n < 3) { fs.pending = false; continue }
-                val contact = h < if (measured) contactMeasuredM else contactModelM
+                if (fs.waitNn) continue
+                // with AI depth the motion only has to look roughly like a touch: the network decides
+                val contact = h < if (measured) contactMeasuredM else if (nnFresh) contactModelM * 2 else contactModelM
                 if (fs.pending) {
                     // confirmation of a model-only tap: still on the table and not moving away
                     fs.pending = false
@@ -281,24 +305,31 @@ class TableTyping(val layout: TableKeyLayout) {
                 // coming down fast one result earlier, (nearly) stopped now
                 val impact = vBefore < -descentSpeed && vNow > vBefore * stopFraction
                 if (contact && dropped && impact) {
-                    // measured by the Depth API: typed now; estimated by the hand model (noisier):
-                    // one more camera result must show the finger staying on the table
-                    if (measured) { if (h < candH) { cand = f; candH = h } } else fs.pending = true
+                    when {
+                        // AI depth: the network's next verdict on this finger decides
+                        nnFresh -> { fs.waitNn = true; fs.impactNs = hand.resultNs }
+                        // measured by the Depth API: typed now
+                        measured -> if (h < candH) { cand = f; candH = h }
+                        // estimated by the hand model (noisier): one more result must confirm
+                        else -> fs.pending = true
+                    }
                 }
             }
-            if (cand >= 0) {
-                val fs = st[cand]
-                val key = fs.over!!
-                fs.down = true; fs.key = key; fs.peak = Float.NaN
-                if (!(key === lastKey && now - lastKeyNs < sameKeyNs)) { out += key; lastKey = key; lastKeyNs = now }
-                held += key.id
-                // the other fingers of this hand that are on the table too do not type from this touch
-                for (f in 0 until 5) if (f != cand && f in enabled) {
-                    val o = st[f]
-                    if (!o.down && o.n > 0 && o.h[0] < contactModelM) { o.down = true; o.key = null; o.peak = Float.NaN }
-                }
-            }
+            if (cand >= 0) press(st, cand, hand, now, out)
         }
         return out
+    }
+
+    private fun press(st: Array<Finger>, cand: Int, hand: HandState, now: Long, out: MutableList<TableKeyLayout.Key>) {
+        val fs = st[cand]
+        val key = fs.over ?: return
+        fs.down = true; fs.key = key; fs.peak = Float.NaN; fs.waitNn = false
+        if (!(key === lastKey && now - lastKeyNs < sameKeyNs)) { out += key; lastKey = key; lastKeyNs = now }
+        held += key.id
+        // the other fingers of this hand that are on the table too do not type from this touch
+        for (f in 0 until 5) if (f != cand && f in enabled) {
+            val o = st[f]
+            if (!o.down && o.n > 0 && o.h[0] < contactModelM) { o.down = true; o.key = null; o.peak = Float.NaN; o.waitNn = false }
+        }
     }
 }

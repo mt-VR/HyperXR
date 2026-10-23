@@ -165,6 +165,26 @@ class TableKeyboardTest {
         }
     }
 
+    /** Taps with the AI depth verdict for the index fingertip ([nnTop] = its top above the table). */
+    private fun typeWithAi(heights: List<Float>, nnTop: Float): List<String> {
+        val t = TableTyping(layout)
+        val typed = ArrayList<String>()
+        for (hgt in heights) {
+            val h = hand("g", hgt, measured = false)
+            // the network answers on every frame, about one frame late
+            h.nnTipHeight.fill(Float.NaN); h.nnTipHeight[1] = if (hgt < 0.01f) nnTop else 0.05f
+            h.nnNs = h.resultNs
+            t.update(arrayOf(null, h), place, resultNs).forEach { typed += it.label }
+        }
+        return typed
+    }
+
+    @Test fun aiDepthConfirmsARealTapAndRejectsATapInTheAir() {
+        val tap = listOf(0.05f, 0.045f, 0.03f, 0.015f, 0.005f, 0.005f, 0.005f, 0.03f)
+        assertEquals(listOf("g"), typeWithAi(tap, nnTop = 0.012f))      // finger top 1.2 cm: on the table
+        assertEquals(emptyList<String>(), typeWithAi(tap, nnTop = 0.045f)) // the network sees it 4.5 cm up
+    }
+
     @Test fun hoverHighlightsTheKeyUnderTheFingertip() {
         val t = TableTyping(layout)
         t.update(arrayOf(null, hand("k", 0.03f)), place, 0L)

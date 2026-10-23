@@ -96,6 +96,8 @@ class XrContext(
     lateinit var share: com.hyperxr.share.ScreenShare
     /** While set (an emulator window has focus), controller keys and sticks go to it first. */
     @Volatile var gameInput: GameInput? = null
+    /** The hand tracking service (AI depth for table typing is switched on through it). */
+    var hands: com.hyperxr.handtracking.HandTrackingService? = null
 }
 
 /** Takes raw controller/keyboard input (emulators); return false to let HyperXR handle the event. */
@@ -208,6 +210,7 @@ class XrEngine(
         aura.opacity = settings.handTracking.auraOpacity
         ctx = XrContext(activity, settings, decision, renderer, images, icons, audio, scene, input)
         ctx.share = share
+        ctx.hands = hands
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"

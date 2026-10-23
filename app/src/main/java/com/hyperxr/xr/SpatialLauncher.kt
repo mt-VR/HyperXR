@@ -755,6 +755,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         tableKeyboardTarget = target
         tableKeyboard = TableKeyboardView(
             target,
+            ctx.hands,
             click = { if (keyClickSound != 0) runCatching { ctx.audio.play(keyClickSound, 0.5f, 1f, false, null, null) } },
             onClose = { glTasks += { closeKeyboard() } },
             onFloating = { glTasks += { closeTableKeyboard(); openKeyboard(target) } },

@@ -349,6 +349,108 @@ class HandTrackingService(private val context: Context) {
     private val presenceOf = FloatArray(2)
     private val nearEdge = BooleanArray(2)
     private val fusedImage = Array(2) { FloatArray(HandJoint.COUNT * 3) }
+    private val sideImage = mapOf(Handedness.LEFT to FloatArray(HandJoint.COUNT * 3), Handedness.RIGHT to FloatArray(HandJoint.COUNT * 3))
+
+    // ------------------------------------------------------------------ AI depth (table typing)
+    /**
+     * Table height (tracking space) while the table keyboard wants AI depth; NaN = off. The
+     * network then runs on the newest analysed frames, one at a time, on its own thread.
+     */
+    @Volatile var aiDepthTableY = Float.NaN
+    val aiDepth by lazy { MonoDepthEngine(context) }
+    private val depthThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-ai-depth") }
+    private val depthBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var depthPreparing = false
+    private var lastDepthNs = 0L
+
+    private class DepthJob(val bmp: Bitmap, val intr: CameraIntrinsics, val pose: Pose, val captureNs: Long, val tableY: Float,
+                           val sides: List<Pair<Handedness, FloatArray>>)
+
+    private fun maybeRunAiDepth(slot: Slot, intr: CameraIntrinsics) {
+        val tableY = aiDepthTableY
+        if (tableY.isNaN() || seen.isEmpty()) return
+        val pose = slot.pose ?: return
+        if (!aiDepth.ready) {
+            if (!depthPreparing) { depthPreparing = true; depthThread.execute { aiDepth.prepare(); depthPreparing = false } }
+            return
+        }
+        val now = System.nanoTime()
+        if (now - lastDepthNs < 60_000_000L || !depthBusy.compareAndSet(false, true)) return
+        lastDepthNs = now
+        val src = slot.bitmap ?: run { depthBusy.set(false); return }
+        // scaled copy now: the slot's bitmap is reused for the next camera frame
+        val small = Bitmap.createScaledBitmap(src, MonoDepthEngine.SIZE, MonoDepthEngine.SIZE, true)
+        val job = DepthJob(small, intr, pose.copy(), slot.captureNs, tableY, seen.map { it to sideImage.getValue(it).copyOf() })
+        depthThread.execute {
+            try { runDepthJob(job) } catch (t: Throwable) { Diagnostics.log("AI depth run failed: ${t.message}") } finally { small.recycle(); depthBusy.set(false) }
+        }
+    }
+
+    private val calDisp = FloatArray(6000)
+    private val calInv = FloatArray(6000)
+
+    /**
+     * Fingertip heights from the network's depth: calibrated on the table around each hand
+     * (MonoDepthCalibration), read on each fingertip (the nearest of a 3x3 patch, i.e. the finger
+     * itself and not the table next to it).
+     */
+    private fun runDepthJob(job: DepthJob) {
+        if (!aiDepth.run(job.bmp)) return
+        val n = MonoDepthEngine.SIZE
+        val disp = aiDepth.disparity
+        val dir = Vec3()
+        for ((side, img) in job.sides) {
+            var minX = 1f; var minY = 1f; var maxX = 0f; var maxY = 0f
+            for (j in 0 until HandJoint.COUNT) {
+                minX = minOf(minX, img[j * 3]); maxX = maxOf(maxX, img[j * 3]); minY = minOf(minY, img[j * 3 + 1]); maxY = maxOf(maxY, img[j * 3 + 1])
+            }
+            val w = maxX - minX; val h = maxY - minY
+            // table samples: around the hand (2.5x its size), not on any hand (1.25x)
+            var count = 0
+            var gy = 2
+            while (gy < n && count < calDisp.size) {
+                var gx = 2
+                while (gx < n && count < calDisp.size) {
+                    val nx = (gx + 0.5f) / n; val ny = (gy + 0.5f) / n
+                    val near = nx > minX - w * 0.75f && nx < maxX + w * 0.75f && ny > minY - h * 0.75f && ny < maxY + h * 0.75f
+                    val onHand = job.sides.any { (_, im) -> inBox(im, nx, ny, 0.125f) }
+                    if (near && !onHand) {
+                        val z = MonoDepthCalibration.tableDepth(nx, ny, job.intr, job.pose, job.tableY, dir)
+                        if (!z.isNaN()) { calDisp[count] = disp[gy * n + gx]; calInv[count] = 1f / z; count++ }
+                    }
+                    gx += 6
+                }
+                gy += 6
+            }
+            val fit = MonoDepthCalibration.fit(calDisp, calInv, count)
+            val heights = FloatArray(5) { Float.NaN }
+            if (fit != null) for (f in 0 until 5) {
+                val tip = 4 + f * 4
+                val nx = img[tip * 3] * 0.8f + img[(tip - 1) * 3] * 0.2f
+                val ny = img[tip * 3 + 1] * 0.8f + img[(tip - 1) * 3 + 1] * 0.2f
+                val cx = (nx * n).toInt().coerceIn(1, n - 2); val cy = (ny * n).toInt().coerceIn(1, n - 2)
+                var d = Float.NEGATIVE_INFINITY
+                for (dy in -1..1) for (dx in -1..1) d = maxOf(d, disp[(cy + dy) * n + cx + dx])
+                val inv = fit.a * d + fit.b
+                if (inv <= 0.2f) continue
+                heights[f] = MonoDepthCalibration.heightAt(nx, ny, 1f / inv, job.intr, job.pose, job.tableY, dir)
+            }
+            synchronized(lock) {
+                for (st in listOf(trackers.getValue(side).state, published.getValue(side))) {
+                    heights.copyInto(st.nnTipHeight); st.nnNs = job.captureNs
+                }
+            }
+        }
+    }
+
+    private fun inBox(img: FloatArray, nx: Float, ny: Float, grow: Float): Boolean {
+        var minX = 1f; var minY = 1f; var maxX = 0f; var maxY = 0f
+        for (j in 0 until HandJoint.COUNT) {
+            minX = minOf(minX, img[j * 3]); maxX = maxOf(maxX, img[j * 3]); minY = minOf(minY, img[j * 3 + 1]); maxY = maxOf(maxY, img[j * 3 + 1])
+        }
+        val gw = (maxX - minX) * grow; val gh = (maxY - minY) * grow
+        return nx > minX - gw && nx < maxX + gw && ny > minY - gh && ny < maxY + gh
+    }
     private val tipCam = Vec3()
 
     /**
@@ -425,6 +527,7 @@ class HandTrackingService(private val context: Context) {
             trackers.getValue(side).lostTimeoutNs = HandHold.timeoutNs(nearEdge[k])
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k], slot.pose?.position ?: ORIGIN)
             measureTips(trackers.getValue(side).state, r, fusedImage[k], intr, depth, slot)
+            fusedImage[k].copyInto(sideImage.getValue(side))
             seen += side
         }
         verifier.endFrame()
@@ -437,6 +540,7 @@ class HandTrackingService(private val context: Context) {
                 motions.getValue(side).set(tracker.motion)
             }
         }
+        maybeRunAiDepth(slot, intr)
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
         // the trackers predict across the measured age of the image (exposure -> result), so a
@@ -500,6 +604,7 @@ class HandTrackingService(private val context: Context) {
         dst.pinchStrength = src.pinchStrength; dst.pinchRatio = src.pinchRatio; dst.gesture = src.gesture; dst.timestampNs = src.timestampNs
         for (f in 0 until 5) { dst.rawTips[f].set(src.rawTips[f]); dst.measuredTips[f].set(src.measuredTips[f]); dst.measuredTipValid[f] = src.measuredTipValid[f] }
         dst.resultNs = src.resultNs
+        src.nnTipHeight.copyInto(dst.nnTipHeight); dst.nnNs = src.nnNs
     }
 
     /**

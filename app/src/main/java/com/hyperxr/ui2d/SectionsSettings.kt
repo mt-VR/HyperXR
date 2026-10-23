@@ -203,6 +203,10 @@ fun HandsSection(a: MainActivity) {
                     if (next.isEmpty()) s else s.copy(handTracking = s.handTracking.copy(tableFingers = next)) }
             }
         }
+        ToggleRow("Profundidade por IA no teclado de mesa", h.aiDepth,
+            "Depth Anything V2 na NPU confirma cada toque na mesa (o modelo, ~92 MB, é baixado uma vez)") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(aiDepth = v)) }
+        }
         ToggleRow("Câmera a 60 fps acima da Depth API", h.prefer60FpsOverDepth,
             "Ligado: menos latência nas mãos; a Depth API só fica se o celular a oferecer a 60 fps. Desligado: Depth API mesmo a 30 fps") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(prefer60FpsOverDepth = v)) }

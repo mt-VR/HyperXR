@@ -76,6 +76,13 @@ class HandState(val handedness: Handedness) {
     val measuredTips: Array<Vec3> = Array(5) { Vec3() }
     val measuredTipValid = BooleanArray(5)
     var resultNs: Long = 0L
+    /**
+     * Fingertip heights above the table (top of the fingertip, metres) from the AI depth network
+     * (Depth Anything V2, calibrated on the table), NaN where unknown; [nnNs] is the capture time
+     * of the camera frame they were measured on (0 = never).
+     */
+    val nnTipHeight = FloatArray(5) { Float.NaN }
+    var nnNs: Long = 0L
 
     /** Includes the short coasting phase after a missed detection (gesture and position are held). */
     val isUsable: Boolean get() = state != TrackingState.NOT_TRACKED

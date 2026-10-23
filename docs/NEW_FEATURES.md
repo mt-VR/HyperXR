@@ -301,3 +301,22 @@ No teclado flutuante, o botão **Mesa** deita o teclado sobre uma mesa de verdad
 Limites: precisão de ~1 cm do hand tracking de celular (por isso as teclas grandes); dedos
 escondidos atrás da mão (vistos de cima pela câmera) podem não ser detectados; sem Depth API a
 altura das pontas dos dedos é estimada e a calibração manual é necessária.
+
+## Profundidade por IA (Depth Anything V2)
+Para o teclado de mesa, além (ou no lugar) da Depth API do ARCore, o HyperXR usa uma rede de
+profundidade monocular: **Depth Anything V2** (versão Small exportada para celular pela Qualcomm
+AI Hub, licença MIT), rodando na NPU pelo NNAPI (CPU como último recurso).
+- O modelo (~99 MB) não vai dentro do APK: é baixado uma vez, na primeira vez que o teclado de
+  mesa é usado com a opção ligada, para o armazenamento privado do app.
+- A rede devolve profundidade **relativa** (sem escala). Ela vira métrica com a própria mesa como
+  régua: a cada quadro, os pixels da mesa em volta da mão (cuja distância real é conhecida pelo
+  plano da mesa) ajustam `1/z = a·d + b`, com rejeição de pontos fora (objetos em cima da mesa).
+  A ponta do dedo é lida no mapa (o ponto mais próximo de um 3x3, ou seja, o próprio dedo) e
+  vira altura acima da mesa em centímetros.
+- Uso: o detector de toque continua exigindo o "baque" do dedo; quando a IA está ativa, a decisão
+  final é dela (topo da ponta do dedo a menos de 2,2 cm da mesa no quadro do toque ou seguinte).
+  Sem resposta em 350 ms, o toque é descartado.
+- Roda só enquanto o teclado está deitado numa mesa, um quadro por vez, no máximo ~16 por segundo.
+- Comparada à do ARCore: nítida nas bordas de mãos e dedos, por quadro (sem a suavização no
+  tempo do ARCore) e funciona em qualquer celular; em troca é mais pesada (34 ms num Snapdragon
+  8 Gen 3, 72 ms num 8 Gen 1 pelos números da Qualcomm) e divide a NPU com o hand tracking.

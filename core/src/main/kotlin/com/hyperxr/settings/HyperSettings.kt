@@ -86,6 +86,8 @@ data class HandTrackingSettings(
     val clickGesture: ClickGesture = ClickGesture.PINCH,
     /** Fingers that type on the table keyboard (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */
     val tableFingers: Set<Int> = setOf(1, 2),
+    /** AI depth (Depth Anything V2 on the NPU) confirms table taps; the model is downloaded once. */
+    val aiDepth: Boolean = true,
     /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
     /** Pinch closes below this thumb–index distance / palm length (model landmarks). Renamed so old 0.25 values reset. */
     val pinchClose: Float = 0.38f,
