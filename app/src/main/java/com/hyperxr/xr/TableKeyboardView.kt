@@ -95,8 +95,11 @@ class TableKeyboardView(
         usingDepth = ar != null && ar.depthEnabled
         when (state) {
             State.SEARCHING -> {
-                status = if (usingDepth) "Olhe para a mesa para encontrá-la, ou toque nela com o indicador e segure parado"
-                    else "Toque a mesa com a ponta do indicador e segure parado por 1 segundo"
+                status = when {
+                    usingDepth -> "Olhe para a mesa para encontrá-la, ou toque nela com o indicador e segure parado"
+                    ar == null -> "Sem ARCore neste modo (a Depth API só funciona na realidade mista com ARCore). Toque a mesa com o indicador e segure parado por 1 segundo"
+                    else -> "Este celular não oferece a Depth API do ARCore. Toque a mesa com o indicador e segure parado por 1 segundo"
+                }
                 if (usingDepth && now - lastDetectNs > 250_000_000L) {
                     lastDetectNs = now
                     detectTable(ar!!, head)?.let { h ->

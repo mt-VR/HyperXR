@@ -81,40 +81,66 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
                 planeFindingMode = if (lightweight) Config.PlaneFindingMode.DISABLED else Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 lightEstimationMode = Config.LightEstimationMode.DISABLED
             }
-            val depthSupported = s.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
+            // Camera configuration. The Depth API is only offered with some of them (often not
+            // with the 60 fps ones), so when depth is wanted it wins over 60 fps: the first
+            // configuration that supports it, 60 fps and the sharpest image first.
+            val fpsFilter = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(
+                com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30, com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_60))
+            val candidates = runCatching { s.getSupportedCameraConfigs(fpsFilter) }.getOrDefault(emptyList())
+                .sortedWith(if (lightweight) compareBy({ -it.fpsRange.upper }, { it.imageSize.width * it.imageSize.height })
+                    else compareBy({ -it.fpsRange.upper }, { -(it.textureSize.width * it.textureSize.height) }))
+            var chosen: com.google.ar.core.CameraConfig? = null
+            var depthSupported = false
+            if (useDepth && !lightweight) {
+                for (c in candidates) {
+                    val ok = runCatching { s.cameraConfig = c; s.isDepthModeSupported(Config.DepthMode.AUTOMATIC) }.getOrDefault(false)
+                    if (ok) { chosen = c; depthSupported = true; break }
+                }
+                if (chosen == null) Diagnostics.log("ARCore Depth API: not offered with any of the ${candidates.size} camera configurations of this phone")
+                else Diagnostics.log("ARCore Depth API: on, camera ${chosen.imageSize.width}x${chosen.imageSize.height} @ ${chosen.fpsRange.upper} fps")
+            }
+            if (chosen == null) chosen = candidates.firstOrNull()
+            chosen?.let { runCatching { s.cameraConfig = it } }
+            if (!depthSupported) depthSupported = runCatching { s.isDepthModeSupported(Config.DepthMode.AUTOMATIC) }.getOrDefault(false)
+            var chosen60 = (chosen?.fpsRange?.upper ?: 30) >= 60
             if (useDepth && depthSupported) config.depthMode = Config.DepthMode.AUTOMATIC
             depthEnabled = useDepth && depthSupported
-            // 60 fps camera where ARCore offers it: twice the pose and hand updates, half the age
-            var chosen60 = false
-            runCatching {
-                val f60 = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_60))
-                val c60 = s.getSupportedCameraConfigs(f60)
-                val pool = if (c60.isNotEmpty()) c60 else if (lightweight)
-                    s.getSupportedCameraConfigs(com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30))) else emptyList()
-                // streaming: smallest CPU image; otherwise the sharpest passthrough texture
-                val pick = if (lightweight) pool.minByOrNull { it.imageSize.width * it.imageSize.height }
-                else pool.maxByOrNull { it.textureSize.width * it.textureSize.height }
-                pick?.let { s.cameraConfig = it; chosen60 = it.fpsRange.upper >= 60 }
-            }
             try { s.configure(config) } catch (t: Throwable) {
-                if (!chosen60) throw t
-                // 60 fps and this configuration (e.g. depth) do not mix on this phone: back to 30
-                Diagnostics.log("ARCore 60 fps refused (${t.message}); using 30 fps")
-                s.getSupportedCameraConfigs(com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30)))
-                    .firstOrNull()?.let { s.cameraConfig = it }
-                chosen60 = false
-                s.configure(config)
+                if (depthEnabled) {
+                    // depth and this camera do not mix after all: keep the camera, drop depth
+                    Diagnostics.log("ARCore with depth refused (${t.message}); continuing without depth")
+                    config.depthMode = Config.DepthMode.DISABLED; depthEnabled = false
+                    try { s.configure(config) } catch (t2: Throwable) {
+                        if (!chosen60) throw t2
+                        fallback30(s); chosen60 = false; s.configure(config)
+                    }
+                } else {
+                    if (!chosen60) throw t
+                    // 60 fps and this configuration do not mix on this phone: back to 30
+                    Diagnostics.log("ARCore 60 fps refused (${t.message}); using 30 fps")
+                    fallback30(s); chosen60 = false; s.configure(config)
+                }
             }
             fps60 = chosen60
             textureId = Gl.externalTexture()
             s.setCameraTextureName(textureId)
             session = s
-            if (depthSupported) Capability.yes("ARCore Depth API supported") else Capability.no("ARCore Depth API not supported on this device")
+            when {
+                depthEnabled -> Capability.yes("ARCore Depth API supported")
+                !useDepth -> Capability.no("ARCore Depth API off in the settings")
+                depthSupported -> Capability.no("ARCore Depth API refused by this camera configuration")
+                else -> Capability.no("ARCore Depth API not offered by this phone (Google's list of depth-capable devices)")
+            }
         } catch (t: Throwable) {
             error = "${t.javaClass.simpleName}: ${t.message}"
             Diagnostics.log("ARCore session failed: $error")
             Capability.no("ARCore session failed: ${t.message}")
         }
+    }
+
+    private fun fallback30(s: Session) {
+        s.getSupportedCameraConfigs(com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30)))
+            .firstOrNull()?.let { s.cameraConfig = it }
     }
 
     fun setDisplayGeometry(rotation: Int, width: Int, height: Int) {
