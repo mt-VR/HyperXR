@@ -16,7 +16,6 @@ import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.nnapi.NnApiDelegate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 import java.nio.channels.FileChannel
 
 /**
@@ -39,16 +38,33 @@ class RtmHandEngine(private val context: Context) : HandEngine {
 
     private val n = RtmHand.INPUT
     private val poseIn = ByteBuffer.allocateDirect(n * n * 3 * 4).order(ByteOrder.nativeOrder())
-    private val simX = Array(1) { Array(HandJoint.COUNT) { FloatArray(RtmHand.BINS) } }
-    private val simY = Array(1) { Array(HandJoint.COUNT) { FloatArray(RtmHand.BINS) } }
+    private val poseFloats = FloatArray(n * n * 3)
+    // outputs straight into direct buffers: LiteRT copies into nested Java arrays row by row
+    private val outX = ByteBuffer.allocateDirect(HandJoint.COUNT * RtmHand.BINS * 4).order(ByteOrder.nativeOrder())
+    private val outY = ByteBuffer.allocateDirect(HandJoint.COUNT * RtmHand.BINS * 4).order(ByteOrder.nativeOrder())
     private val flatX = FloatArray(HandJoint.COUNT * RtmHand.BINS)
     private val flatY = FloatArray(HandJoint.COUNT * RtmHand.BINS)
     private val crop = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+    private val cropPixels = IntArray(n * n)
     private val det = Bitmap.createBitmap(DET, DET, Bitmap.Config.ARGB_8888)
-    private val detIn = FloatArray(3 * DET * DET)
-    private val pixels = IntArray(DET * DET)
+    private val detPixels = IntArray(DET * DET)
+    private val detIn = ByteBuffer.allocateDirect(3 * DET * DET * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private val detFloats = FloatArray(3 * DET * DET)
+    /** Per-channel normalisation tables (value - mean) / std, indexed by the 0..255 byte. */
+    private val normR = FloatArray(256) { (it - 123.675f) / 58.395f }
+    private val normG = FloatArray(256) { (it - 116.28f) / 57.12f }
+    private val normB = FloatArray(256) { (it - 103.53f) / 57.375f }
+    private val keepJoints = FloatArray(HandJoint.COUNT * 2)
+    private val keepConf = FloatArray(HandJoint.COUNT)
+    /** The detector runs on its own thread while hands are being tracked; boxes reach the next frame. */
+    private val detWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-rtmdet").apply { priority = Thread.NORM_PRIORITY + 1 } }
+    private val detBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var detResult: List<FloatArray>? = null
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val matrix = Matrix()
+    private val detMatrix = Matrix()
+    private val cropCanvas = Canvas(crop)
+    private val detCanvas = Canvas(det)
     private val joints = FloatArray(HandJoint.COUNT * 2)
     private val conf = FloatArray(HandJoint.COUNT)
 
@@ -80,7 +96,7 @@ class RtmHandEngine(private val context: Context) : HandEngine {
                 }
                 model.rewind()
                 val i = Interpreter(model, opts)
-                poseIn.rewind(); i.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to simX, 1 to simY))
+                poseIn.rewind(); outX.rewind(); outY.rewind(); i.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to outX, 1 to outY))
                 pose = i; device = label
                 break
             } catch (t: Throwable) {
@@ -105,15 +121,37 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         val w = bmp.width; val h = bmp.height
         val crops = ArrayList(tracks)
         val fromTrack = BooleanArray(2) { it < crops.size }
-        // look for a missing hand: every frame with none, every 3rd frame with one
-        if (crops.size < 2 && (crops.isEmpty() || frame % 3 == 0L)) {
-            val t0 = System.nanoTime()
-            for (b in detect(bmp)) {
+        fun addBoxes(boxes: List<FloatArray>) {
+            for (b in boxes) {
                 if (crops.size >= 2) break
                 val c = RtmHand.cropFromBox(b[0], b[1], b[2], b[3])
                 if (crops.none { o -> kotlin.math.hypot(o.cx - c.cx, o.cy - c.cy) < o.side * 0.35f }) crops += c
             }
+        }
+        if (crops.isEmpty() && detBusy.get()) {
+            // the hand was just lost while the background search runs: take its answer when ready
+            detResult?.let { detResult = null; addBoxes(it) }
+        } else if (crops.isEmpty()) {
+            // no hand: find one now, on this thread (nothing else to wait for)
+            detResult = null
+            val t0 = System.nanoTime()
+            letterbox(bmp)
+            addBoxes(detect())
             detectorMs = (System.nanoTime() - t0) / 1e6f
+        } else if (crops.size < 2) {
+            // one hand tracked: the second is looked for in the background, every 3rd frame, so the
+            // tracked hand never waits for the detector
+            detResult?.let { detResult = null; addBoxes(it) }
+            if (frame % 3 == 0L && detBusy.compareAndSet(false, true)) {
+                letterbox(bmp)
+                detWorker.execute {
+                    try {
+                        val t0 = System.nanoTime()
+                        detResult = detect()
+                        detectorMs = (System.nanoTime() - t0) / 1e6f
+                    } catch (t: Throwable) { Diagnostics.log("RTMDet failed: ${t.message}") } finally { detBusy.set(false) }
+                }
+            }
         }
         val t1 = System.nanoTime()
         val out = ArrayList<RawHand>(2)
@@ -123,9 +161,10 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             var presence = runPose(p, bmp, c)
             // a tracked hand that moved fast may have left its crop: one wider look before giving up
             if (presence < 0.3f && k < fromTrack.size && fromTrack[k]) {
+                joints.copyInto(keepJoints); conf.copyInto(keepConf)
                 val wide = c.copy(side = c.side * 1.5f)
                 val p2 = runPose(p, bmp, wide)
-                if (p2 > presence) { presence = p2; c = wide } else runPose(p, bmp, c)
+                if (p2 > presence) { presence = p2; c = wide } else { keepJoints.copyInto(joints); keepConf.copyInto(conf) }
             }
             // new hands must look clearly like one; tracked ones are kept through blur
             if (presence < (if (k < fromTrack.size && fromTrack[k]) 0.25f else 0.5f)) continue
@@ -145,41 +184,53 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         matrix.reset()
         matrix.postTranslate(-(c.cx - c.side / 2), -(c.cy - c.side / 2))
         matrix.postScale(n / c.side, n / c.side)
-        val cv = Canvas(crop); cv.drawColor(Color.BLACK); cv.drawBitmap(bmp, matrix, paint)
-        crop.getPixels(pixels, 0, n, 0, 0, n, n)
-        poseIn.rewind()
-        val f = poseIn.asFloatBuffer()
+        cropCanvas.drawColor(Color.BLACK); cropCanvas.drawBitmap(bmp, matrix, paint)
+        crop.getPixels(cropPixels, 0, n, 0, 0, n, n)
+        // RGB, normalised through lookup tables, then one bulk copy into the model's input
+        val f = poseFloats
+        var o = 0
         for (i in 0 until n * n) {
-            val px = pixels[i]
-            f.put((((px shr 16) and 0xff) - 123.675f) / 58.395f); f.put((((px shr 8) and 0xff) - 116.28f) / 57.12f); f.put(((px and 0xff) - 103.53f) / 57.375f)
+            val px = cropPixels[i]
+            f[o] = normR[(px shr 16) and 0xff]; f[o + 1] = normG[(px shr 8) and 0xff]; f[o + 2] = normB[px and 0xff]
+            o += 3
         }
-        poseIn.rewind()
-        p.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to simX, 1 to simY))
-        for (j in 0 until HandJoint.COUNT) {
-            System.arraycopy(simX[0][j], 0, flatX, j * RtmHand.BINS, RtmHand.BINS)
-            System.arraycopy(simY[0][j], 0, flatY, j * RtmHand.BINS, RtmHand.BINS)
-        }
+        poseIn.rewind(); poseIn.asFloatBuffer().put(f)
+        poseIn.rewind(); outX.rewind(); outY.rewind()
+        p.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to outX, 1 to outY))
+        outX.rewind(); outX.asFloatBuffer().get(flatX)
+        outY.rewind(); outY.asFloatBuffer().get(flatY)
         RtmHand.decode(flatX, flatY, c, joints, conf)
         return RtmHand.presence(conf)
     }
 
-    /** RTMDet-nano: hand boxes (x0, y0, x1, y1 in frame pixels), best first. */
-    private fun detect(bmp: Bitmap): List<FloatArray> {
+    private var detScale = 1f
+
+    /** The frame scaled into the detector's 320x320 letterbox (on the tracking thread; the bitmap is reused). */
+    private fun letterbox(bmp: Bitmap) {
+        val s = DET.toFloat() / maxOf(bmp.width, bmp.height)
+        detMatrix.reset(); detMatrix.postScale(s, s)
+        detCanvas.drawColor(Color.rgb(114, 114, 114)); detCanvas.drawBitmap(bmp, detMatrix, paint)
+        detScale = s
+    }
+
+    /** RTMDet-nano on the last [letterbox]: hand boxes (x0, y0, x1, y1 in frame pixels), best first. */
+    private fun detect(): List<FloatArray> {
         val d = detector ?: return emptyList()
         val e = env ?: return emptyList()
-        val s = DET.toFloat() / maxOf(bmp.width, bmp.height)
-        matrix.reset(); matrix.postScale(s, s)
-        val cv = Canvas(det); cv.drawColor(Color.rgb(114, 114, 114)); cv.drawBitmap(bmp, matrix, paint)
-        det.getPixels(pixels, 0, DET, 0, 0, DET, DET)
+        val s = detScale
+        det.getPixels(detPixels, 0, DET, 0, 0, DET, DET)
         val plane = DET * DET
+        val f = detFloats
         for (i in 0 until plane) {
-            val px = pixels[i]
+            val px = detPixels[i]
             // BGR planes, as the detector was trained
-            detIn[i] = ((px and 0xff) - 103.53f) / 57.375f
-            detIn[plane + i] = (((px shr 8) and 0xff) - 116.28f) / 57.12f
-            detIn[2 * plane + i] = (((px shr 16) and 0xff) - 123.675f) / 58.395f
+            f[i] = normB[px and 0xff]
+            f[plane + i] = normG[(px shr 8) and 0xff]
+            f[2 * plane + i] = normR[(px shr 16) and 0xff]
         }
-        OnnxTensor.createTensor(e, FloatBuffer.wrap(detIn), longArrayOf(1, 3, DET.toLong(), DET.toLong())).use { t ->
+        detIn.rewind(); detIn.put(f); detIn.rewind()
+        // a direct buffer: ONNX Runtime reads it in place
+        OnnxTensor.createTensor(e, detIn, longArrayOf(1, 3, DET.toLong(), DET.toLong())).use { t ->
             d.run(mapOf("input" to t)).use { r ->
                 @Suppress("UNCHECKED_CAST")
                 val dets = (r.get(0).value as Array<Array<FloatArray>>)[0]
@@ -190,6 +241,9 @@ class RtmHandEngine(private val context: Context) : HandEngine {
 
     override fun close() {
         pose?.close(); pose = null; nnapi?.close(); nnapi = null; gpu?.close(); gpu = null
+        // the background detector may still be running: let it finish before its session goes
+        detWorker.shutdown()
+        runCatching { detWorker.awaitTermination(500, java.util.concurrent.TimeUnit.MILLISECONDS) }
         detector?.close(); detector = null
     }
 

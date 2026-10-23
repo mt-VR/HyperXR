@@ -185,6 +185,17 @@ class XrEngine(
     /** Fence of the previous frame: the CPU waits for it so it never runs a frame ahead of the GPU. */
     private var frameFence = 0L
     private var refreshPeriodNs = 16_666_667L
+    /** Prediction target locked to the display's vsync (Choreographer on the UI thread). */
+    private val photonClock = com.hyperxr.headtracking.PhotonClock()
+    @Volatile private var vsyncRunning = false
+    private val vsyncCallback = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            photonClock.onVsync(frameTimeNanos)
+            if (vsyncRunning) android.view.Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+    private var latchNs = 0L
+    private var cpuDoneNs = 0L
     private var useVisualGyro = false
     val share = com.hyperxr.share.ScreenShare(activity)
     private val spectatorEye = EyeView()
@@ -323,6 +334,7 @@ class XrEngine(
         @Suppress("DEPRECATION")
         val hz = activity.windowManager.defaultDisplay.refreshRate
         if (hz > 20f) refreshPeriodNs = (1e9f / hz).toLong()
+        photonClock.periodNs = refreshPeriodNs
         compositor.resize(w, h, activity.resources.displayMetrics.xdpi, settings.graphics)
         arCore?.setDisplayGeometry(displayRotation(), w, h)
     }
@@ -344,8 +356,14 @@ class XrEngine(
         // Frame pacing: wait for the GPU to finish the previous frame before sampling anything,
         // so this frame's poses are as fresh as possible (no frame queued behind another).
         if (frameFence != 0L) {
+            // how long the last frame took from its pose latch to the GPU finishing it: when the
+            // fence is already signalled the moment is unknown, so the CPU end is the estimate
+            val status = IntArray(1)
+            GLES30.glGetSynciv(frameFence, GLES30.GL_SYNC_STATUS, 1, null, 0, status, 0)
+            val waited = status[0] != GLES30.GL_SIGNALED
             GLES30.glClientWaitSync(frameFence, GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, 20_000_000L)
             GLES30.glDeleteSync(frameFence); frameFence = 0L
+            if (latchNs != 0L) photonClock.onRendered((if (waited) System.nanoTime() else cpuDoneNs) - latchNs)
         }
         val predictionNs = predictionNs()
         synchronized(input) { tracker?.pose(predictionNs, input.head) }
@@ -389,7 +407,8 @@ class XrEngine(
         // late latching: the head is sampled again right before drawing, so the content's own
         // work (UI, physics, hands) does not add to what the eyes see as rotation latency
         if (openXrSession == 0L) synchronized(input) {
-            photonNs = System.nanoTime() + predictionNs()
+            latchNs = System.nanoTime()
+            photonNs = latchNs + predictionNs()
             tracker?.pose(predictionNs(), input.head)
             renderedOrientation.set(input.head.orientation)
         }
@@ -448,6 +467,7 @@ class XrEngine(
         Diagnostics.record(Stage.RENDER_CPU, System.nanoTime() - r0)
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
         frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        cpuDoneNs = System.nanoTime()
         reportFrameWork(System.nanoTime() - frameStart)
     }
 
@@ -639,7 +659,8 @@ class XrEngine(
      */
     private fun predictionNs(): Long {
         val trim = ((settings.headTracking.predictionMs - 16f) * 1e6f).toLong()
-        return (2 * refreshPeriodNs + trim).coerceIn(0L, 80_000_000L)
+        val now = System.nanoTime()
+        return (photonClock.photon(now, trim) - now).coerceIn(0L, 80_000_000L)
     }
 
     /** Mono 16:9 frustum from the (steadied) spectator pose; over the camera it matches the image. */
@@ -818,9 +839,15 @@ class XrEngine(
         return joyCons.onMotionEvent(e)
     }
 
-    fun onResume() { tracker?.start(); gyro.start(); content.onResume() }
+    fun onResume() {
+        tracker?.start(); gyro.start(); content.onResume()
+        vsyncRunning = true
+        activity.runOnUiThread { android.view.Choreographer.getInstance().postFrameCallback(vsyncCallback) }
+    }
 
     fun onPause() {
+        vsyncRunning = false
+        activity.runOnUiThread { android.view.Choreographer.getInstance().removeFrameCallback(vsyncCallback) }
         tracker?.stop()
         gyro.stop()
         content.onPause()
