@@ -68,9 +68,22 @@ class HyperConnectServer(private val context: Context) {
             if (n < 0) break
             for (m in dec.feed(buf, n)) when (m) {
                 is HyperConnectProtocol.State -> { state = m; receivedNs = System.nanoTime() }
-                is HyperConnectProtocol.Hello -> { deviceName = m.name; leftHanded = m.leftHanded; status = "Conectado: ${m.name}" }
+                is HyperConnectProtocol.Hello -> { deviceName = m.name; leftHanded = m.leftHanded; status = "Conectado: ${m.name}"; keyboardSent = null }
+                is HyperConnectProtocol.Text, is HyperConnectProtocol.Key -> typing.add(m)
             }
         }
+    }
+
+    /** Text and keys typed on the controller phone, in order (Text or Key), for the focused field. */
+    val typing = java.util.concurrent.ConcurrentLinkedQueue<Any>()
+    @Volatile private var keyboardSent: Boolean? = null
+
+    /** Tells the controller phone whether a text field is open in HyperXR (it then shows its keyboard). */
+    fun setKeyboardOpen(open: Boolean) {
+        if (keyboardSent == open || client == null) return
+        keyboardSent = open
+        val c = client ?: return
+        try { synchronized(this) { c.outputStream.write(HyperConnectProtocol.encode(HyperConnectProtocol.Keyboard(open))) } } catch (_: Throwable) {}
     }
 
     /** Buzzes the controller phone (the pointer reaching a button, a click). */

@@ -24,6 +24,15 @@ com vibrações: o controle vibra quando o ponteiro chega num botão e a cada to
    conectar, a direção do controle é alinhada com a da sua cabeça. Segurar **Home** realinha;
    um toque em Home recentraliza a visão.
 
+## Teclado pelo celular controle
+
+Quando um campo de texto abre no HyperXR (teclado flutuante ou na mesa), o celular controle abre o
+teclado dele sozinho. O que você digita nele (letras, apagar, Enter) vai para esse campo. Sem campo
+aberto, vai para a janela da frente. Também dá para abrir pelo botão "Teclado".
+
+Por dentro, o app compara o texto antes e depois de cada mudança (`TextDiff`) e manda "apagar N" e
+"texto novo". Assim funcionam a correção automática e as sugestões de qualquer teclado do Android.
+
 ## Como funciona
 
 - Protocolo e modelo do controle ficam em `core/src/main/kotlin/com/hyperxr/connect/HyperConnect.kt`,

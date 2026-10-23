@@ -158,6 +158,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- per frame
     override fun onFrame(ctx: XrContext, dt: Float) {
         while (true) { val t = glTasks.poll() ?: break; t() }
+        deliverPhoneTyping()
         followClock()
         processPendingCloses()
         val s = app.settings.current
@@ -769,6 +770,25 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         keyboard = null
         (tableKeyboardTarget as? UrlEditor)?.let { if (it.active) it.cancel() }
         closeTableKeyboard()
+    }
+
+    /**
+     * HyperConnect: the controller phone's keyboard types into the open field (the floating or
+     * table keyboard's target, else the front window); the phone is told when a field opens.
+     */
+    private fun deliverPhoneTyping() {
+        val hc = ctx.hyperConnect ?: return
+        val open = keyboard?.visible == true || tableKeyboard != null
+        hc.setKeyboardOpen(open)
+        val target: com.hyperxr.windows.KeyTarget? = keyboard?.target ?: tableKeyboardTarget ?: appWindows.lastOrNull { it.visible }
+        while (true) {
+            val m = hc.typing.poll() ?: break
+            val t = target ?: continue
+            when (m) {
+                is com.hyperxr.connect.HyperConnectProtocol.Text -> t.typeText(m.text)
+                is com.hyperxr.connect.HyperConnectProtocol.Key -> t.sendKey(m.keyCode)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- keyboard on the table

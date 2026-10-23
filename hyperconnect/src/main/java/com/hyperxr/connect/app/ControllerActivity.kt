@@ -124,9 +124,53 @@ class ControllerActivity : Activity(), SensorEventListener {
 
     // ------------------------------------------------------------------ controller
 
+    // ------------------------------------------------------------------ typing into HyperXR
+    private var typing: android.widget.EditText? = null
+    private var typed = ""
+
+    /** The phone's own keyboard typing into the field open in HyperXR. */
+    private fun typingBar(): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(24, 8, 24, 8); visibility = View.GONE }
+        val edit = android.widget.EditText(this).apply {
+            hint = "Digite aqui: vai para o campo aberto no HyperXR"
+            setTextColor(Color.WHITE); setHintTextColor(Color.rgb(140, 142, 150)); isSingleLine = true
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val now = s?.toString() ?: ""
+                    val e = com.hyperxr.connect.TextDiff.between(typed, now)
+                    typed = now
+                    repeat(e.deletes) { send(P.encode(P.Key(KeyEvent.KEYCODE_DEL))) }
+                    if (e.insert.isNotEmpty()) send(P.encode(P.Text(e.insert)))
+                }
+            })
+            setOnEditorActionListener { _, _, _ -> send(P.encode(P.Key(KeyEvent.KEYCODE_ENTER))); typed = ""; setText(""); true }
+        }
+        typing = edit
+        row.addView(edit, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(Button(this).apply { text = "Fechar"; isAllCaps = false; setOnClickListener { showTyping(false) } })
+        return row
+    }
+
+    private fun showTyping(show: Boolean) {
+        val e = typing ?: return
+        (e.parent as? View)?.visibility = if (show) View.VISIBLE else View.GONE
+        val imm = getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+        if (show) { typed = ""; e.setText(""); e.requestFocus(); imm?.showSoftInput(e, 0) } else imm?.hideSoftInputFromWindow(e.windowToken, 0)
+    }
+
+    private fun send(bytes: ByteArray) {
+        val s = socket ?: return
+        Thread { try { synchronized(sendLock) { s.outputStream.write(bytes) } } catch (_: Throwable) {} }.start()
+    }
+    private val sendLock = Any()
+
     private fun showController() {
         val pad = Pad()
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG) }
+        col.addView(typingBar(), LinearLayout.LayoutParams(-1, -2))
         col.addView(text("Conectado a $deviceName. Segure como um controle remoto, tela para cima. Segure HOME para centralizar.", 14f, false).apply { setPadding(36, 24, 36, 8) },
             LinearLayout.LayoutParams(-1, -2))
         col.addView(pad, LinearLayout.LayoutParams(-1, 0, 3f))
@@ -135,6 +179,7 @@ class ControllerActivity : Activity(), SensorEventListener {
             for ((label, bit) in b) addView(HoldButton(label, bit), LinearLayout.LayoutParams(0, -1, 1f))
         }
         col.addView(row("Voltar" to P.BACK, "Home" to P.HOME, "Menu" to P.MENU), LinearLayout.LayoutParams(-1, 0, 0.9f))
+        col.addView(Button(this).apply { text = "Teclado"; isAllCaps = false; setOnClickListener { showTyping(true) } }, LinearLayout.LayoutParams(-1, -2))
         col.addView(row("Grip" to P.GRIP, "Gatilho" to P.TRIGGER), LinearLayout.LayoutParams(-1, 0, 1.3f))
         setContentView(col)
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -155,7 +200,7 @@ class ControllerActivity : Activity(), SensorEventListener {
                         P.State(seq++ and 0xffff, SystemClock.elapsedRealtimeNanos(), rot.copyOf(), gyro.copyOf(), accel.copyOf(),
                             buttons, touching, touchX, touchY, battery?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0)
                     }
-                    out.write(P.encode(st))
+                    synchronized(sendLock) { out.write(P.encode(st)) }
                     Thread.sleep(10)
                 }
             } catch (t: Throwable) { if (running) ui.post { disconnected() } }
@@ -167,7 +212,10 @@ class ControllerActivity : Activity(), SensorEventListener {
                 val inp = s.inputStream
                 while (running) {
                     val n = inp.read(buf); if (n < 0) break
-                    for (m in dec.feed(buf, n)) if (m is P.Vibrate) vibrate(m.ms.toLong(), m.amplitude)
+                    for (m in dec.feed(buf, n)) when (m) {
+                        is P.Vibrate -> vibrate(m.ms.toLong(), m.amplitude)
+                        is P.Keyboard -> ui.post { showTyping(m.open) }
+                    }
                 }
             } catch (_: Throwable) {}
         }, "hyperconnect-recv").start()

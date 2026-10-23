@@ -23,6 +23,9 @@ object HyperConnectProtocol {
     const val TYPE_STATE = 1
     const val TYPE_HELLO = 2
     const val TYPE_VIBRATE = 3
+    const val TYPE_TEXT = 4          // phone -> HyperXR: typed text
+    const val TYPE_KEY = 5           // phone -> HyperXR: an Android key code (delete, enter...)
+    const val TYPE_KEYBOARD = 6      // HyperXR -> phone: a text field opened (1) or closed (0)
 
     // buttons
     const val TRIGGER = 1; const val CLICK = 2; const val BACK = 4; const val MENU = 8
@@ -41,6 +44,9 @@ object HyperConnectProtocol {
     )
     class Hello(val name: String, val leftHanded: Boolean)
     class Vibrate(val ms: Int, val amplitude: Int)
+    class Text(val text: String)
+    class Key(val keyCode: Int)
+    class Keyboard(val open: Boolean)
 
     private const val HEADER = 6
     private const val STATE_BYTES = 2 + 8 + 16 + 12 + 12 + 2 + 1 + 8 + 1
@@ -65,6 +71,10 @@ object HyperConnectProtocol {
 
     fun encode(v: Vibrate): ByteArray = frame(TYPE_VIBRATE, ByteBuffer.allocate(3).order(ByteOrder.LITTLE_ENDIAN)
         .putShort(v.ms.coerceIn(0, 2000).toShort()).put(v.amplitude.coerceIn(1, 255).toByte()).array())
+
+    fun encode(t: Text): ByteArray = frame(TYPE_TEXT, t.text.toByteArray(Charsets.UTF_8).let { if (it.size > 1000) it.copyOf(1000) else it })
+    fun encode(k: Key): ByteArray = frame(TYPE_KEY, ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(k.keyCode.toShort()).array())
+    fun encode(k: Keyboard): ByteArray = frame(TYPE_KEYBOARD, byteArrayOf(if (k.open) 1 else 0))
 
     /** Splits a byte stream into messages, skipping garbage until the next "HC" header. */
     class Decoder {
@@ -98,8 +108,24 @@ object HyperConnectProtocol {
                 battery = b.get().toInt() and 0xff)
             TYPE_HELLO -> { val left = b.get().toInt() != 0; val bytes = ByteArray(size - 1); b.get(bytes); Hello(String(bytes, Charsets.UTF_8), left) }
             TYPE_VIBRATE -> Vibrate(b.short.toInt() and 0xffff, b.get().toInt() and 0xff)
+            TYPE_TEXT -> { val bytes = ByteArray(size); b.get(bytes); Text(String(bytes, Charsets.UTF_8)) }
+            TYPE_KEY -> Key(b.short.toInt() and 0xffff)
+            TYPE_KEYBOARD -> Keyboard(b.get().toInt() != 0)
             else -> null
         }
+    }
+}
+
+/**
+ * What changed between two versions of the phone's text box, as key presses: deletions from the
+ * end back to the common prefix, then the new text (how IMEs edit is not visible from outside).
+ */
+object TextDiff {
+    class Edit(val deletes: Int, val insert: String)
+    fun between(before: String, after: String): Edit {
+        var p = 0
+        while (p < before.length && p < after.length && before[p] == after[p]) p++
+        return Edit(before.length - p, after.substring(p))
     }
 }
 

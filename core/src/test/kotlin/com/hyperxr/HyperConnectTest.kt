@@ -92,4 +92,16 @@ class HyperConnectTest {
         t += 20_000_000L; m.update(state(phone(0f)), head, ahead, t)
         assertEquals(0f, m.scroll, 0f)
     }
+
+    @Test fun typingMessagesAndTextDiff() {
+        val bytes = P.encode(P.Text("olá mundo")) + P.encode(P.Key(67)) + P.encode(P.Keyboard(true))
+        val got = P.Decoder().feed(bytes)
+        assertEquals("olá mundo", (got[0] as P.Text).text)
+        assertEquals(67, (got[1] as P.Key).keyCode)
+        assertTrue((got[2] as P.Keyboard).open)
+        val e = com.hyperxr.connect.TextDiff.between("helo", "hello world")
+        assertEquals(1, e.deletes); assertEquals("lo world", e.insert)
+        val d = com.hyperxr.connect.TextDiff.between("abc", "ab")
+        assertEquals(1, d.deletes); assertEquals("", d.insert)
+    }
 }
