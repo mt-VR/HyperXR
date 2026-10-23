@@ -201,14 +201,16 @@ class NpuHandEngine(private val context: Context) {
         val rois = ArrayList<HandRoi>(2)
         val prev = ArrayList<Track?>(2)
         for (t in tracked) { rois += t.predicted(); prev += t }
-        // the second hand is looked for every 3rd frame (~50-100 ms) so it shows up fast
-        if (rois.size < 2 && (rois.isEmpty() || frame % 3 == 0L)) {
+        // a missing hand is looked for on every frame while the palm detector is quick (a few ms
+        // on the NPU), so a hand entering the view shows up on the next camera frame; on a slow
+        // detector every other frame
+        if (rois.size < 2 && (rois.isEmpty() || detectorMs < 8f || frame % 2 == 0L)) {
             val t0 = System.nanoTime()
             fillPalmInput(bmp)
             det.runForMultipleInputsOutputs(arrayOf(palmIn), mapOf(0 to regressors, 1 to logits))
             detectorMs = (System.nanoTime() - t0) / 1e6f
             for (i in 0 until PalmDecoder.ANCHORS) { System.arraycopy(regressors[0][i], 0, regFlat, i * 18, 18); logFlat[i] = logits[0][i][0] }
-            for (p in PalmDecoder.decode(regFlat, logFlat, bmp.width, bmp.height, 0.5f)) {
+            for (p in PalmDecoder.decode(regFlat, logFlat, bmp.width, bmp.height, 0.42f)) {
                 if (rois.size >= 2) break
                 val r = HandRoi.fromPalm(p)
                 // a palm inside a hand already tracked is that hand

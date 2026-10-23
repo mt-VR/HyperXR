@@ -60,10 +60,11 @@ class HandVerifierTest {
 
     @Test fun handNeedsTwoConfidentFramesThenStays() {
         val v = HandVerifier()
-        assertFalse(v.gate(1, 0.85f))  // good but not certain: wait one more frame
-        assertTrue(v.gate(1, 0.85f))
+        assertFalse(v.gate(1, 0.8f))  // good but not certain: wait one more frame
+        assertTrue(v.gate(1, 0.8f))
         assertTrue(v.gate(1, 0.6f))   // blur: kept once confirmed
-        assertFalse(v.gate(1, 0.3f))  // lost
+        assertTrue(v.gate(1, 0.35f))  // heavy blur: still kept
+        assertFalse(v.gate(1, 0.2f))  // lost
         assertFalse(v.gate(1, 0.6f))  // must be re-acquired with a confident score
     }
 
@@ -73,14 +74,14 @@ class HandVerifierTest {
         var used = false
         repeat(3) {
             v.beginFrame()
-            used = v.gate(1, 0.85f)
+            used = v.gate(1, 0.8f)
             v.endFrame()
         }
         assertTrue(used)
         // a frame without the hand drops it; it then needs confirming again
         v.beginFrame(); v.endFrame()
-        v.beginFrame(); assertFalse(v.gate(1, 0.85f)); v.endFrame()
-        v.beginFrame(); assertTrue(v.gate(1, 0.85f)); v.endFrame()
+        v.beginFrame(); assertFalse(v.gate(1, 0.8f)); v.endFrame()
+        v.beginFrame(); assertTrue(v.gate(1, 0.8f)); v.endFrame()
         // a certain hand shows up on its very first frame
         v.beginFrame(); v.endFrame()
         v.beginFrame(); assertTrue(v.gate(1, 0.97f)); v.endFrame()

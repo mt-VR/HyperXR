@@ -185,9 +185,11 @@ class HandTrackingService(private val context: Context) {
             // blur and partial occlusion instead of dropping the hand and re-running the detector.
             // Presence at 0.5 (was 0.35): measured on photos, the sole of a foot scores up to 0.73 and
             // curtains under 0.1, so a low threshold tracked feet; HandVerifier checks the rest.
-            .setMinHandDetectionConfidence(0.55f)
-            .setMinHandPresenceConfidence(0.5f)
-            .setMinTrackingConfidence(0.5f)
+            // permissive here: HandVerifier decides what is a hand (shape, size, reach, presence),
+            // and a hand found or kept by MediaPipe a frame earlier shows up a frame earlier
+            .setMinHandDetectionConfidence(0.42f)
+            .setMinHandPresenceConfidence(0.35f)
+            .setMinTrackingConfidence(0.35f)
         if (mode == RunningMode.LIVE_STREAM) {
             opts.setResultListener { result, _ -> onResult(result) }
             opts.setErrorListener { e -> status = "Erro de inferência: ${e.message}"; finishInflight() }
@@ -344,6 +346,7 @@ class HandTrackingService(private val context: Context) {
     }
 
     private val presenceOf = FloatArray(2)
+    private val nearEdge = BooleanArray(2)
 
     private fun processHands(hands: List<RawHand>, slot: Slot, t0: Long) {
         Diagnostics.record(Stage.HAND_INFERENCE, t0 - slot.submitNs)
@@ -370,7 +373,8 @@ class HandTrackingService(private val context: Context) {
                 val w = fused[n].cameraSpace[HandJoint.WRIST]
                 val c = slot.pose?.position
                 if (verifier.reach(w.x - (c?.x ?: 0f), w.y - (c?.y ?: 0f), w.z - (c?.z ?: 0f)) != null) continue
-                fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); presenceOf[n] = h.presence; n++
+                fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); presenceOf[n] = h.presence
+                nearEdge[n] = HandHold.nearEdge(obs.image); n++
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
@@ -389,6 +393,9 @@ class HandTrackingService(private val context: Context) {
             }
             // depth is smoothed along the ray from where the camera was (world space when its
             // pose is known, otherwise camera space with the camera at the origin)
+            // a hand lost in the middle of the view is kept (it is behind blur or the other hand);
+            // one lost at the edge has left the view and goes quickly
+            trackers.getValue(side).lostTimeoutNs = HandHold.timeoutNs(nearEdge[k])
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k], slot.pose?.position ?: ORIGIN)
             seen += side
         }

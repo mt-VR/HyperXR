@@ -70,7 +70,8 @@ class HandAura {
             GLES30.glUniform1f(uPx, 2f * z / (eye.proj[5] * outH))
             GLES30.glUniform2fv(uJoints, HandJoint.COUNT, plane, 0)
             GLES30.glUniform1fv(uRadius, 5, RADII, 0)
-            val fade = if (h.state == TrackingState.LOST_PREDICTING) 0.5f else 1f
+            // a hand briefly unseen is still the hand: only slightly dimmer, so it does not seem to vanish
+            val fade = if (h.state == TrackingState.LOST_PREDICTING) 0.85f else 1f
             GLES30.glUniform1f(uAlpha, opacity.coerceIn(0f, 1f) * fade)
             quad.position(0)
             GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER, 0, 4 * 3 * 4, quad)

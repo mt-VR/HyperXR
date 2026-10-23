@@ -18,11 +18,12 @@ import kotlin.math.sqrt
  * it is kept with a lower score so it does not flicker.
  */
 class HandVerifier {
-    var acquirePresence = 0.8f
-    var keepPresence = 0.5f
+    var acquirePresence = 0.75f
+    /** A confirmed hand is kept down to this score (motion blur lowers it for a frame or two). */
+    var keepPresence = 0.3f
     var confirmFrames = 2
     /** A score this high confirms a new hand at once (no waiting for a second frame). */
-    var instantPresence = 0.9f
+    var instantPresence = 0.85f
     var maxReachMeters = 1.0f
     var minReachMeters = 0.08f
 
