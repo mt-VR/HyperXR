@@ -227,3 +227,25 @@ profundidade, imagem com 50 ms de atraso, tela a 90 Hz.
 | Tremor com a mão parada (segunda diferença, ponta do indicador) | 9,61 mm | **0,49 mm** |
 | Erro com a mão parada | 9,5 mm | 4,8 mm |
 | Erro com a mão em movimento (pico de 0,94 m/s) | 66,6 mm | **29,5 mm** |
+
+## Mão que some e mão do tamanho certo (revisão)
+
+Três motivos faziam a mão sumir com frequência:
+
+1. **"Longe demais":** o teste de alcance (1,0 m) eliminava a mão quando a profundidade estimada
+   pelo tamanho da palma errava 15–20%. O limite agora é 1,3 m.
+2. **Confirmação perdida num quadro ruim:** com movimento rápido, a nota de presença cai por
+   causa do borrão. Antes, a mão só voltava com nota ≥ 0,85 (ou ≥ 0,75 duas vezes). Agora, uma mão
+   confirmada há menos de 0,6 s volta com a nota de manutenção (0,3).
+3. **Troca esquerda/direita:** se a única mão na imagem trocava de lado por um quadro, ela
+   recomeçava do zero no outro lado e deixava uma mão fantasma deslizando no lado antigo. Agora a
+   confirmação passa para o novo lado e o lado antigo é encerrado na hora (`forceLost`).
+
+**Tamanho exato:** na realidade mista, o contorno da mão é desenhado em pixels a partir dos pontos
+da mão *na imagem da câmera*. Eles passam pelo inverso do mesmo mapeamento usado para mostrar a
+câmera (corte de preenchimento + `cpuMatrix`) e são levados adiante com a velocidade da mão na
+imagem até o instante do quadro exibido. Assim o contorno tem o tamanho e o lugar da mão real,
+qualquer que seja a profundidade estimada. No ambiente virtual continua o contorno 3D.
+
+**Otimização:** a máscara da mão reaproveita o mesmo bitmap 256x256. Antes era criado um novo a
+cada ~30 ms, cerca de 8 MB/s de lixo e pausas do coletor.

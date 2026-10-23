@@ -377,6 +377,10 @@ class HandTrackingService(private val context: Context) {
     @Volatile var personMaskSeq = 0; private set
     private val breakthrough = PersonBreakthrough(HandMaskEngine.SIZE)
     private val maskLabels = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+    private val maskSmall: Bitmap = Bitmap.createBitmap(HandMaskEngine.SIZE, HandMaskEngine.SIZE, Bitmap.Config.ARGB_8888)
+    private val maskCanvas = android.graphics.Canvas(maskSmall)
+    private val maskRect = android.graphics.Rect(0, 0, HandMaskEngine.SIZE, HandMaskEngine.SIZE)
+    private val maskPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
 
     /**
      * Every analysed camera frame with its intrinsics and camera pose (tracking space), for the
@@ -397,7 +401,9 @@ class HandTrackingService(private val context: Context) {
         if (now - lastMaskNs < interval || !maskBusy.compareAndSet(false, true)) return
         lastMaskNs = now
         val src = slot.bitmap ?: run { maskBusy.set(false); return }
-        val small = Bitmap.createScaledBitmap(src, HandMaskEngine.SIZE, HandMaskEngine.SIZE, true)
+        // one mask job at a time (maskBusy): the same small bitmap is reused, no garbage per frame
+        val small = maskSmall
+        maskCanvas.drawBitmap(src, null, maskRect, maskPaint)
         val hands = if (wantHands) seen.map { sideImage.getValue(it).copyOf() } else emptyList()
         val aspect = src.width.toFloat() / src.height
         val flip = slot.rotation180
@@ -419,7 +425,7 @@ class HandTrackingService(private val context: Context) {
                         if ((m != null) != (was != null)) Diagnostics.log(if (m != null) "Pessoa por perto: aparecendo no ambiente" else "Pessoa saiu de vista")
                     }
                 }
-            } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { small.recycle(); maskBusy.set(false) }
+            } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { maskBusy.set(false) }
         }
     }
 
@@ -584,7 +590,13 @@ class HandTrackingService(private val context: Context) {
         for (k in 0 until n) {
             val side = assign[k]
             // confirmation over frames: a confident first sighting, then kept through blur
-            if (!verifier.gate(if (side == Handedness.LEFT) 0 else 1, presenceOf[k])) continue
+            if (!verifier.gate(if (side == Handedness.LEFT) 0 else 1, presenceOf[k], t0, onlyHand = n == 1)) continue
+            // a left/right flip of the same hand: no ghost left coasting on the old side
+            if (verifier.swappedFrom >= 0) {
+                val gone = if (verifier.swappedFrom == 0) Handedness.LEFT else Handedness.RIGHT
+                trackers.getValue(gone).forceLost()
+                synchronized(lock) { imageHands.getValue(gone).valid = false }
+            }
             val r = fused[k]
             if (autoCalibrate) scaleEstimator.add(r.cameraSpace, r.depthSource, r.confidence)?.let { palm ->
                 autoCalibrate = false
@@ -600,6 +612,7 @@ class HandTrackingService(private val context: Context) {
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k], slot.pose?.position ?: ORIGIN)
             measureTips(trackers.getValue(side).state, r, fusedImage[k], intr, depth, slot)
             fusedImage[k].copyInto(sideImage.getValue(side))
+            recordImageHand(side, fusedImage[k], slot)
             seen += side
         }
         verifier.endFrame()
@@ -628,6 +641,48 @@ class HandTrackingService(private val context: Context) {
     }
 
     private var statLatencyNs = 0L
+
+    // ------------------------------------------------------------------ hands in the camera image
+    /** Joints where the camera image shows them (sensor orientation, 0..1), for drawing over passthrough. */
+    private class ImageHand { val pts = FloatArray(HandJoint.COUNT * 2); var captureNs = 0L; var vx = 0f; var vy = 0f; var valid = false }
+    private val imageHands = mapOf(Handedness.LEFT to ImageHand(), Handedness.RIGHT to ImageHand())
+
+    private fun recordImageHand(side: Handedness, image: FloatArray, slot: Slot) {
+        synchronized(lock) {
+            val ih = imageHands.getValue(side)
+            // centre of the palm, for the hand's velocity across the image
+            val flip = slot.rotation180
+            val m = HandJoint.MIDDLE_MCP * 3
+            val rx = (image[0] + image[m]) / 2; val ry = (image[1] + image[m + 1]) / 2
+            val nx = if (flip) 1f - rx else rx; val ny = if (flip) 1f - ry else ry
+            val dt = (slot.captureNs - ih.captureNs) / 1e9f
+            if (ih.valid && dt in 0.005f..0.15f) {
+                val ox = (ih.pts[0] + ih.pts[HandJoint.MIDDLE_MCP * 2]) / 2; val oy = (ih.pts[1] + ih.pts[HandJoint.MIDDLE_MCP * 2 + 1]) / 2
+                ih.vx = ih.vx * 0.4f + (nx - ox) / dt * 0.6f
+                ih.vy = ih.vy * 0.4f + (ny - oy) / dt * 0.6f
+            } else { ih.vx = 0f; ih.vy = 0f }
+            for (j in 0 until HandJoint.COUNT) {
+                ih.pts[j * 2] = if (flip) 1f - image[j * 3] else image[j * 3]
+                ih.pts[j * 2 + 1] = if (flip) 1f - image[j * 3 + 1] else image[j * 3 + 1]
+            }
+            ih.captureNs = slot.captureNs
+            ih.valid = true
+        }
+    }
+
+    /**
+     * The [side] hand's joints in the camera image (sensor orientation, 0..1, x then y), carried
+     * forward with the hand's image velocity to [displayedCaptureNs] (when the camera frame on
+     * screen was taken), so the outline sits on the real hand in the passthrough. False when the
+     * hand was not seen in the last quarter second.
+     */
+    fun imageHand(side: Handedness, out: FloatArray, displayedCaptureNs: Long): Boolean = synchronized(lock) {
+        val ih = imageHands.getValue(side)
+        if (!ih.valid || System.nanoTime() - ih.captureNs > 250_000_000L) return false
+        val dt = ((displayedCaptureNs - ih.captureNs) / 1e9f).coerceIn(0f, 0.08f)
+        for (j in 0 until HandJoint.COUNT) { out[j * 2] = ih.pts[j * 2] + ih.vx * dt; out[j * 2 + 1] = ih.pts[j * 2 + 1] + ih.vy * dt }
+        true
+    }
 
     private fun updateStats(now: Long, hands: Int, inferNs: Long, latencyNs: Long) {
         if (statStartNs == 0L) statStartNs = now

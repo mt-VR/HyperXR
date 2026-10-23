@@ -24,21 +24,32 @@ class HandVerifier {
     var confirmFrames = 2
     /** A score this high confirms a new hand at once (no waiting for a second frame). */
     var instantPresence = 0.85f
-    var maxReachMeters = 1.0f
+    /** Depth from the palm's size can be 20% off: a stretched arm must never count as "too far". */
+    var maxReachMeters = 1.3f
     var minReachMeters = 0.08f
 
     /** Last rejection, for the hand test screen ("pé?", "longe demais"...), empty when none. */
     @Volatile var lastRejection = ""; private set
     @Volatile var rejections = 0; private set
 
+    /**
+     * A hand confirmed this recently comes back with the keep score, not the acquisition score:
+     * one bad frame (blur, a missed detection) used to drop it until it was held still again.
+     */
+    var graceNs = 600_000_000L
+
     private val streak = IntArray(2)
     private val confirmed = BooleanArray(2)
     private val gatedThisFrame = BooleanArray(2)
+    private val lastConfirmedNs = LongArray(2)
 
-    fun reset() { streak.fill(0); confirmed.fill(false) }
+    /** Set by [gate] when the only hand changed side (handedness flip): the side it came from, else -1. */
+    var swappedFrom = -1; private set
+
+    fun reset() { streak.fill(0); confirmed.fill(false); lastConfirmedNs.fill(0L) }
 
     /** Call before the frame's gate() calls. */
-    fun beginFrame() { gatedThisFrame.fill(false) }
+    fun beginFrame() { gatedThisFrame.fill(false); swappedFrom = -1 }
 
     /**
      * Call after them: a side not looked at this frame lost its hand. A side that was looked at
@@ -78,21 +89,34 @@ class HandVerifier {
     /**
      * Presence gate with hysteresis for the hand assigned to [side] (0 left, 1 right); NaN
      * presence (engines that do not report it) counts as passing. Returns true when the hand may
-     * be used this frame.
+     * be used this frame. [onlyHand]: this is the frame's single hand, so a confirmed hand that
+     * just changed side (left/right flip) keeps its confirmation instead of starting over.
      */
-    fun gate(side: Int, presence: Float): Boolean {
+    fun gate(side: Int, presence: Float, nowNs: Long = System.nanoTime(), onlyHand: Boolean = false): Boolean {
         gatedThisFrame[side] = true
         val p = if (presence.isNaN()) 1f else presence
+        fun ok(): Boolean { confirmed[side] = true; lastConfirmedNs[side] = nowNs; return true }
         if (confirmed[side]) {
-            if (p >= keepPresence) return true
+            if (p >= keepPresence) return ok()
             confirmed[side] = false; streak[side] = 0
             reject("presença de mão baixa (%.2f)".format(p))
             return false
         }
-        if (p >= instantPresence) { confirmed[side] = true; streak[side] = confirmFrames; return true }
+        val other = 1 - side
+        val recent = { s: Int -> lastConfirmedNs[s] != 0L && nowNs - lastConfirmedNs[s] < graceNs }
+        // the same hand, briefly lost: back at once
+        if (recent(side) && p >= keepPresence) { streak[side] = confirmFrames; return ok() }
+        // the same hand, now called the other side
+        if (onlyHand && (confirmed[other] || recent(other)) && !gatedThisFrame[other] && p >= keepPresence) {
+            confirmed[other] = false; lastConfirmedNs[other] = 0L; streak[other] = 0
+            swappedFrom = other
+            streak[side] = confirmFrames
+            return ok()
+        }
+        if (p >= instantPresence) { streak[side] = confirmFrames; return ok() }
         if (p >= acquirePresence) {
             streak[side]++
-            if (streak[side] >= confirmFrames) { confirmed[side] = true; return true }
+            if (streak[side] >= confirmFrames) return ok()
             return false
         }
         streak[side] = 0

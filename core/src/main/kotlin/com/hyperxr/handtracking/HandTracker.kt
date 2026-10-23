@@ -327,6 +327,16 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         predictionGain = 0f
     }
 
+    /** Drops the hand at once (it turned out to be the other side's hand). */
+    fun forceLost() {
+        state.state = TrackingState.NOT_TRACKED
+        motion.moving = false
+        state.confidence = 0f
+        state.gesture = Gesture.NONE
+        state.pinchStrength = 0f
+        gestures.reset()
+    }
+
     private fun handleMissing(now: Long, dt: Float) {
         when (state.state) {
             TrackingState.TRACKING, TrackingState.RECOVERING, TrackingState.LOST_PREDICTING -> {

@@ -65,7 +65,24 @@ class HandVerifierTest {
         assertTrue(v.gate(1, 0.6f))   // blur: kept once confirmed
         assertTrue(v.gate(1, 0.35f))  // heavy blur: still kept
         assertFalse(v.gate(1, 0.2f))  // lost
-        assertFalse(v.gate(1, 0.6f))  // must be re-acquired with a confident score
+        assertTrue(v.gate(1, 0.6f))   // seen a moment ago: back without waiting for a confident score
+        // long gone: a new hand needs a confident score again
+        val w = HandVerifier()
+        assertTrue(w.gate(1, 0.9f, nowNs = 1_000_000_000L))
+        assertFalse(w.gate(1, 0.2f, nowNs = 1_010_000_000L))
+        assertFalse(w.gate(1, 0.6f, nowNs = 2_000_000_000L))
+    }
+
+    @Test fun aHandThatFlipsSideKeepsItsConfirmation() {
+        val v = HandVerifier()
+        var t = 1_000_000_000L
+        v.beginFrame(); assertTrue(v.gate(1, 0.9f, t, onlyHand = true)); v.endFrame()
+        t += 33_000_000L
+        // the next frame calls the same hand "left", with a blurred score
+        v.beginFrame(); assertTrue(v.gate(0, 0.5f, t, onlyHand = true)); assertEquals(1, v.swappedFrom); v.endFrame()
+        // two hands in view: no swapping
+        t += 33_000_000L
+        v.beginFrame(); assertFalse(v.gate(1, 0.5f, t + 2_000_000_000L, onlyHand = false)); v.endFrame()
     }
 
     /** The way the service calls it each frame: a new hand must get confirmed (regression). */
@@ -78,10 +95,9 @@ class HandVerifierTest {
             v.endFrame()
         }
         assertTrue(used)
-        // a frame without the hand drops it; it then needs confirming again
+        // a frame without the hand: it comes straight back (grace), even with a blurred score
         v.beginFrame(); v.endFrame()
-        v.beginFrame(); assertFalse(v.gate(1, 0.8f)); v.endFrame()
-        v.beginFrame(); assertTrue(v.gate(1, 0.8f)); v.endFrame()
+        v.beginFrame(); assertTrue(v.gate(1, 0.5f)); v.endFrame()
         // a certain hand shows up on its very first frame
         v.beginFrame(); v.endFrame()
         v.beginFrame(); assertTrue(v.gate(1, 0.97f)); v.endFrame()

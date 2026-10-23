@@ -144,6 +144,9 @@ interface XrContent {
 /** The boot animation played in this process already (not again when returning from an app). */
 @Volatile private var bootPlayed = false
 
+/** How old the camera frame on screen is when drawn (the passthrough texture lags the sensor). */
+private const val DISPLAYED_CAMERA_AGE_NS = 30_000_000L
+
 class XrEngine(
     private val activity: Activity,
     private val content: XrContent,
@@ -514,7 +517,20 @@ class XrEngine(
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
         if (visual != com.hyperxr.settings.HandVisual.NONE) {
-            aura.render(handList, eye, target.fbo, target.width, target.height)
+            // over the passthrough, each hand is drawn where the camera image shows it (exact size
+            // and place); in a virtual environment, or without a fresh image, from the 3D hand
+            val overCamera = camera != null && camera.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill
+            if (!overCamera) aura.render(handList, eye, target.fbo, target.width, target.height)
+            else for (h in drawnHands) {
+                if (!h.isUsable) continue
+                if (hands.imageHand(h.handedness, imgHand, System.nanoTime() - DISPLAYED_CAMERA_AGE_NS) && imageToEye(imgHand, eye, camera!!, target.width, target.height)) {
+                    val fade = if (h.state == com.hyperxr.handtracking.TrackingState.LOST_PREDICTING) 0.85f else 1f
+                    aura.renderScreen(eyePx, fade, target.fbo, target.width, target.height)
+                } else {
+                    single[0] = h
+                    aura.render(single, eye, target.fbo, target.width, target.height)
+                }
+            }
         }
         renderer.renderPanels(scene, eye, overlayPass = true)
         if (bootActive) boot.render(eye)   // fading out over the scene
@@ -523,6 +539,30 @@ class XrEngine(
     }
 
     private val drawnHands = arrayOf(HandState(Handedness.LEFT), HandState(Handedness.RIGHT))
+    private val imgHand = FloatArray(com.hyperxr.handtracking.HandJoint.COUNT * 2)
+    private val eyePx = FloatArray(com.hyperxr.handtracking.HandJoint.COUNT * 2)
+    private val single = arrayListOf(drawnHands[0])
+
+    /**
+     * Camera image (sensor orientation, 0..1) to this eye's viewport pixels (y up): the inverse of
+     * how the passthrough is drawn (fill crop, then the view-to-CPU-image matrix).
+     */
+    private fun imageToEye(img: FloatArray, eye: EyeView, camera: CameraImageSource, w: Int, h: Int): Boolean {
+        val m = camera.cpuMatrix
+        val det = m[0] * m[5] - m[4] * m[1]
+        if (kotlin.math.abs(det) < 1e-9f) return false
+        val (cropU, cropV) = com.hyperxr.rendering.SceneRenderer.fillCrop(eye.proj[5] / eye.proj[0], camera)
+        for (j in 0 until com.hyperxr.handtracking.HandJoint.COUNT) {
+            val cx = img[j * 2] - m[12]; val cy = img[j * 2 + 1] - m[13]
+            val u = (m[5] * cx - m[4] * cy) / det
+            val v = (-m[1] * cx + m[0] * cy) / det
+            val su = 0.5f + (u - 0.5f) / cropU
+            val sv = 0.5f + (v - 0.5f) / cropV
+            eyePx[j * 2] = su * w
+            eyePx[j * 2 + 1] = (1f - sv) * h
+        }
+        return true
+    }
     private val handList by lazy { drawnHands.toList() }
 
     // ---------------------------------------------------------------- hand occlusion
