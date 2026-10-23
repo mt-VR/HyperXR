@@ -63,3 +63,14 @@ Gerados por `tools/make_icons.py` (SVG → PNG 216 px, camadas `bg`/`fg` como as
 
 Apps Android instalados usam o ícone do próprio app. Para trocar qualquer um destes por arte do
 autor, basta substituir os dois PNGs com o mesmo nome.
+
+## Logo HX (ícone do HyperXR e animação de inicialização)
+
+A imagem enviada pelo autor do projeto está em `branding/logo/hx_logo_source.jpg`. A partir dela,
+`branding/logo/hx_logo.png` (e `res/drawable-nodpi/hx_logo.png`) é a máscara limpa: logo branco
+sobre fundo transparente, recortado. O ícone do app é `ic_hx_logo_bg` (degradê grafite) +
+`ic_hx_logo_fg` (logo com brilho suave).
+
+Atenção: esse desenho é o logo da marca HyperX (HP), uma marca registrada. Usar como está é
+decisão do autor do projeto. Para publicar o app, troque estes arquivos por um logo próprio: o
+ícone e as duas animações de inicialização usam só `hx_logo.png`.

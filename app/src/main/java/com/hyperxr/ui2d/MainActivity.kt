@@ -74,7 +74,11 @@ class MainActivity : ComponentActivity() {
                     app.settings.addListener(l)
                     onDispose { app.settings.removeListener(l) }
                 }
-                Root(this)
+                var booting by remember { mutableStateOf(!bootSplashPlayed && app.settings.current.graphics.bootAnimation) }
+                androidx.compose.foundation.layout.Box {
+                    Root(this@MainActivity)
+                    if (booting) BootSplash { bootSplashPlayed = true; booting = false }
+                }
             }
         }
     }

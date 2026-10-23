@@ -141,6 +141,9 @@ interface XrContent {
  * Frame: camera/AR update -> head pose -> hands/controllers -> content -> per-eye render
  * (background, scene, panels, hand aura) -> lens distortion composite or OpenXR submit.
  */
+/** The boot animation played in this process already (not again when returning from an app). */
+@Volatile private var bootPlayed = false
+
 class XrEngine(
     private val activity: Activity,
     private val content: XrContent,
@@ -207,9 +210,16 @@ class XrEngine(
     }
 
     // ---------------------------------------------------------------- GL lifecycle
+    private val boot = com.hyperxr.rendering.BootSequence(activity)
+    private var bootActive = false
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         com.hyperxr.rendering.FullscreenTriangle.reset()
         renderer.init()
+        // the boot plays once per start of the app, not when coming back from another app
+        if (settings.graphics.bootAnimation && !bootPlayed) {
+            try { boot.init(); bootActive = true; bootPlayed = true } catch (t: Throwable) { Diagnostics.log("Boot animation off: ${t.message}") }
+        }
         renderer.passthroughFill = settings.graphics.passthroughFill
         aura.init()
         compositor.init()
@@ -383,6 +393,12 @@ class XrEngine(
         // the hands drawn this frame are carried forward again to right now (fresher than the copy
         // taken before the content ran, which interaction keeps using)
         if (input.handsAvailable) hands.snapshot(drawnHands[0], drawnHands[1])
+        if (bootActive) {
+            val handsReady = !input.handsAvailable || hands.backendInUse != "-"
+            boot.readiness = if (handsReady && ctx.frameIndex > 30) 1f else 0.4f
+            boot.frame(input.head)
+            if (boot.finished) { bootActive = false; boot.release() }
+        }
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
         // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only
@@ -468,6 +484,14 @@ class XrEngine(
 
     private fun renderEye(eye: EyeView, target: RenderTarget, camera: CameraImageSource?) {
         target.bind()
+        // the boot covers everything at first: nothing else needs drawing
+        if (bootActive && boot.opaque) {
+            GLES30.glClearColor(0f, 0f, 0f, 1f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+            boot.render(eye)
+            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
+            return
+        }
         if ((content as? EyeOverride)?.renderEye(eye, target) == true) {
             GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
             return
@@ -493,6 +517,7 @@ class XrEngine(
             aura.render(handList, eye, target.fbo, target.width, target.height)
         }
         renderer.renderPanels(scene, eye, overlayPass = true)
+        if (bootActive) boot.render(eye)   // fading out over the scene
         // Tile-based GPUs: the depth buffer is never read back, so do not store it to memory.
         GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
     }

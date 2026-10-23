@@ -49,6 +49,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Toggle("Launcher no modo New", "Biblioteca à frente em vez da barra", { it.launcher.mode == LauncherMode.NEW }) { s, v ->
                 a.setMode(if (v) LauncherMode.NEW else LauncherMode.DOCK); s.copy(launcher = s.launcher.copy(mode = if (v) LauncherMode.NEW else LauncherMode.DOCK)) },
             Item.Action("Recentralizar visão", "Traz tudo para a frente de você") { a.recenter() },
+            Item.Toggle("Animação de inicialização", "O logo e a viagem pelas estrelas ao abrir", { it.graphics.bootAnimation }) { s, v -> s.copy(graphics = s.graphics.copy(bootAnimation = v)) },
             Item.Toggle("Timewarp", "Reajusta a imagem com o giroscópio antes de mostrar", { it.graphics.timewarp }) { s, v -> s.copy(graphics = s.graphics.copy(timewarp = v)) },
             Item.Toggle("Correção da lente", "Distorção para as lentes do VR Box", { it.graphics.lensDistortion }) { s, v -> s.copy(graphics = s.graphics.copy(lensDistortion = v)) },
             Item.Action("Configurações 2D completas", "Sai do XR para a tela do celular") { a.exitToSettings() },
