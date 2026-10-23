@@ -37,6 +37,8 @@ data class ApkReport(
     val launchActivity: String?,
     /** Uses the Daydream controller API (Google VR Services only). */
     val daydreamController: Boolean = false,
+    /** Daydream app (also when it supports Cardboard too). */
+    val daydream: Boolean = false,
     val verdict: Verdict,
     val reasons: List<String>,
 )
@@ -67,9 +69,12 @@ object QuestApk {
         val scan = StringScan()
         if (abi != null) for (name in libs.filter { it.startsWith("lib/$abi/") }) zip.getInputStream(zip.getEntry(name)).use { scan.feed(it) }
         // Google VR / Cardboard apps: which Java APIs they use (controller, Daydream checks)
-        val gvr = libs.any { it.endsWith("/libgvr.so") || it.endsWith("/libcardboard_api.so") || it.endsWith("/libGfxPluginCardboard.so") }
-        if (gvr || BinaryXml.parse(zip.getInputStream(manifestEntry).use { it.readBytes() }).descendants("category")
-                .any { it.attr("name") == ApkPatcher.DAYDREAM || it.attr("name") == ApkPatcher.CARDBOARD }) {
+        val gvr = libs.any { it.endsWith("/libgvr.so") || it.endsWith("/libgvrunity.so") || it.endsWith("/libcardboard_api.so") || it.endsWith("/libGfxPluginCardboard.so") }
+        val vrManifest = manifest.descendants("category").any { it.attr("name") == ApkPatcher.DAYDREAM || it.attr("name") == ApkPatcher.CARDBOARD } ||
+            manifest.descendants("activity").any { it.attr("enableVrMode") != null } ||
+            manifest.all("uses-feature").any { (it.attr("name") ?: "").startsWith("android.software.vr") || (it.attr("name") ?: "").startsWith("android.hardware.vr") } ||
+            manifest.descendants("meta-data").any { (it.attr("name") ?: "").startsWith("com.google.android.vr") }
+        if (gvr || vrManifest) {
             zip.entries().asSequence().filter { it.name.matches(Regex("classes\\d*\\.dex")) }.forEach { e -> zip.getInputStream(e).use { scan.feed(it) } }
         }
         analyze(manifest, libs, abis, abi, scan)
@@ -103,10 +108,21 @@ object QuestApk {
             else -> "Nativo"
         }
         val hasLoader = "libopenxr_loader.so" in libNames
+        // Daydream shows in many ways besides the launcher category (Unity and SDK templates differ)
+        val gvrLib = "libgvr.so" in libNames || "libgvrunity.so" in libNames || "libgvr_audio.so" in libNames
+        val daydreamSignals = buildList {
+            if (ApkPatcher.DAYDREAM in categories) add("categoria DAYDREAM")
+            if (activities.any { it.attr("enableVrMode") != null }) add("modo VR do Android (enableVrMode)")
+            if (meta.keys.any { it.startsWith("com.google.android.vr.icon") }) add("ícone do Daydream Home")
+            if (features.any { it == "android.software.vr.mode" || it == "android.hardware.vr.high_performance" }) add("recursos de VR do Android")
+            if (scan.has("Lcom/google/vr/sdk/controller/ControllerManager;") || scan.has("gvr_controller_create_and_init")) add("controle Daydream")
+            if (scan.has("Lcom/google/vr/ndk/base/DaydreamApi;") && (scan.has("isDaydreamReadyPlatform") || scan.has("launchInVr"))) add("API Daydream")
+        }
+        val daydream = daydreamSignals.isNotEmpty() && (gvrLib || ApkPatcher.DAYDREAM in categories || scan.has("Lcom/google/vr/"))
         val xrApi = when {
             hasLoader || OPENXR_CATEGORY in categories -> XrApi.OPENXR
             "libvrapi.so" in libNames || scan.has("vrapi_Initialize") -> XrApi.VRAPI
-            ApkPatcher.DAYDREAM in categories && ApkPatcher.CARDBOARD !in categories -> XrApi.DAYDREAM
+            daydream && ApkPatcher.CARDBOARD !in categories -> XrApi.DAYDREAM
             ApkPatcher.CARDBOARD in categories || "libgvr.so" in libNames || "libcardboard_api.so" in libNames -> XrApi.CARDBOARD
             else -> XrApi.NONE
         }
@@ -149,7 +165,8 @@ object QuestApk {
         val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) }.sorted()
         if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperXR não as implementa, o jogo funciona só se forem opcionais"
         val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
-        if (ddController) reasons += "Usa o controle Daydream: telas que exigem o controle não avançam (só o Google VR Services o fornece)"
+        if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
+        if (ddController) reasons += "Usa o controle Daydream: no modo \"runtime HyperXR\" o Joy-Con faz o papel dele; no modo Cardboard as telas que exigem o controle não avançam"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
         if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
 
@@ -158,7 +175,7 @@ object QuestApk {
             minSdk = sdk?.attr("minSdkVersion")?.toIntOrNull() ?: 1, targetSdk = sdk?.attr("targetSdkVersion")?.toIntOrNull() ?: 0,
             abis = abis, nativeLibs = libNames.sorted(), engine = engine, xrApi = xrApi, loader = loader, questApp = questApp,
             supportedDevices = meta["com.oculus.supportedDevices"], platformSdk = platformSdk, graphics = graphics, extensions = exts,
-            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons,
+            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons, daydream = daydream,
         )
     }
 

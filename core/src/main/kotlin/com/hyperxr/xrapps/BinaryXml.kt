@@ -29,7 +29,7 @@ object BinaryXml {
         0x01010281 to "glEsVersion", 0x0101020c to "minSdkVersion", 0x01010270 to "targetSdkVersion",
         0x0101021b to "versionCode", 0x0101021c to "versionName", 0x01010001 to "label", 0x01010002 to "icon",
         0x01010010 to "exported", 0x0101000f to "debuggable", 0x010104ea to "extractNativeLibs",
-        0x01010591 to "isSplitRequired", 0x0101064e to "requiredSplitTypes",
+        0x01010591 to "isSplitRequired", 0x0101064e to "requiredSplitTypes", 0x01010525 to "enableVrMode",
     )
 
     /** One attribute's typed value inside the file, for in-place edits ([dataOffset] = 32-bit data). */

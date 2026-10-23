@@ -41,7 +41,7 @@ object ApkImports {
                 if (f.isDirectory) {
                     if (f.name.startsWith(".") || (depth == 0 && f.name == "Android")) continue
                     walk(f, depth + 1)
-                } else if (f.name.endsWith(".apk", true) || f.name.endsWith(".apks", true) || f.name.endsWith(".xapk", true)) out += f
+                } else if (f.name.endsWith(".apk", true) || f.name.endsWith(".apks", true) || f.name.endsWith(".xapk", true) || f.name.endsWith(".apkm", true)) out += f
             }
         }
         walk(root, 0)
@@ -100,7 +100,7 @@ class ApkPickerPanel(private val host: MediaHost) : XrPanel(1.4f, 1.15f, title =
         val act = host.activity
         com.hyperxr.xr.ActivityResults.launch(act, android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("*/*")
-            .putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf("application/vnd.android.package-archive", "application/octet-stream"))) { data ->
+            .putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed", "application/xapk-package-archive", "application/vnd.apkm"))) { data ->
             val uri = data?.data ?: return@launch
             mediaIo.execute {
                 val f = runCatching { ApkImports.copy(act, uri) }.getOrNull() ?: return@execute

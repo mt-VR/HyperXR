@@ -49,8 +49,12 @@ class ApkImportState(private val a: MainActivity) {
         open = true; busy = true; report = null; plan = null; file = null; status = "Copiando e analisando o APK…"
         a.io.execute {
             try {
-                val f = ApkImports.copy(a, uri)
-                if (!f.name.endsWith(".apk", true)) throw IllegalArgumentException("Pacotes divididos (.apks/.xapk) ainda não são suportados: use um APK único.")
+                val copied = ApkImports.copy(a, uri)
+                // split bundles (.xapk/.apks): base + this phone's native libraries in one APK
+                val f = if (com.hyperxr.xrapps.ApkBundle.isBundle(copied)) {
+                    a.runOnUiThread { status = "Juntando o pacote dividido num APK…" }
+                    com.hyperxr.xrapps.ApkBundle.merge(copied, File(copied.parentFile, copied.nameWithoutExtension + "-merged.apk"), Build.SUPPORTED_ABIS.toList()).apk
+                } else copied
                 val r = QuestApk.inspect(f, Build.SUPPORTED_ABIS.toList())
                 val p = if (r.xrApi != XrApi.NONE || r.questApp) runCatching { CompatLayer.plan(a, f) }.getOrNull() else null
                 a.runOnUiThread { file = f; report = r; plan = p; status = null; busy = false }
@@ -116,7 +120,7 @@ class ApkImportState(private val a: MainActivity) {
 @Composable
 fun ApkImportCard(a: MainActivity) {
     SectionCard("Corrigir APK: OpenXR, Quest e Daydream", "Escolha o APK de um jogo OpenXR, de Quest ou de um app Daydream/Cardboard. O HyperXR diz se ele pode rodar, corrige para o runtime HyperXR (OpenXR da Khronos; Daydream vira Cardboard), assina e instala.") {
-        Button(onClick = { a.pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream")) },
+        Button(onClick = { a.pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed", "application/xapk-package-archive", "application/vnd.apkm")) },
             colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
         Note("Também no XR: Apps XR > Importar APK para corrigir.")
     }

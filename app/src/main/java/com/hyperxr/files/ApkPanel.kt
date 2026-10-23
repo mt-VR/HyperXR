@@ -23,7 +23,10 @@ import java.io.File
  * runtime can run it, then installs it with Shizuku (`pm install`, no prompt, OBB copied too) or
  * hands it to the system installer.
  */
-class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4f, 1.1f, title = "Instalar ${apk.name}") {
+class ApkPanel(private val host: MediaHost, private val source: File) : XrPanel(1.4f, 1.1f, title = "Instalar ${source.name}") {
+    /** The APK worked on: [source] itself, or a split bundle (.xapk/.apks) merged into one APK. */
+    @Volatile private var apk: File = source
+    @Volatile private var bundleNote: String? = null
     private val app = HyperXRApp.instance
     @Volatile private var report: ApkReport? = null
     @Volatile private var error: String? = null
@@ -36,10 +39,17 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
     @Volatile private var mismatch = false
 
     init {
-        val ext = FileKinds.extension(apk.name)
-        if (ext != "apk") error = "Pacotes divididos (.$ext) ainda não são suportados: use um APK único."
-        else mediaIo.execute {
+        mediaIo.execute {
             try {
+                if (com.hyperxr.xrapps.ApkBundle.isBundle(source)) {
+                    status = "Juntando o pacote dividido num APK…"; dirty = true
+                    val out = File(app.cacheDir, "bundle-merged.apk")
+                    val m = com.hyperxr.xrapps.ApkBundle.merge(source, out, Build.SUPPORTED_ABIS.toList())
+                    apk = m.apk
+                    bundleNote = "Pacote dividido: ${m.base.substringAfterLast('/')}" + (m.abiSplit?.let { " + bibliotecas de ${it.substringAfterLast('/')}" } ?: "") +
+                        if (m.skipped.isNotEmpty()) " (${m.skipped.size} partes de idioma/tela ficaram de fora)" else ""
+                    status = null
+                }
                 val r = QuestApk.inspect(apk, Build.SUPPORTED_ABIS.toList())
                 obbs = QuestApk.findObbs(apk, r.packageName)
                 installed = isInstalled(r.packageName)
@@ -58,6 +68,7 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
         if (r == null) { c.paragraph("Analisando o APK (bibliotecas e manifesto)...", 30f); return }
         c.label(r.packageName, c.pad, c.y, 34f, XrTheme.text, bold = true)
         c.y += 50f
+        bundleNote?.let { c.paragraph(it, 22f, XrTheme.textDim) }
         c.paragraph("Versão ${r.versionName} (${r.versionCode}) • Android ${r.minSdk}+ • ${FileKinds.formatSize(apk.length())}" +
             if (installed) " • já instalado" else "", 24f)
         var x = c.pad
@@ -69,7 +80,10 @@ class ApkPanel(private val host: MediaHost, private val apk: File) : XrPanel(1.4
         x += c.chip(vText, x, c.y, vColor) + 10f
         if (r.questApp) x += c.chip("App de Quest", x, c.y, XrTheme.button) + 10f
         x += c.chip(r.engine, x, c.y, XrTheme.button) + 10f
-        x += c.chip(when (r.xrApi) { XrApi.OPENXR -> "OpenXR"; XrApi.VRAPI -> "VrApi (Meta)"; XrApi.CARDBOARD -> "Cardboard"; XrApi.DAYDREAM -> "Daydream"; XrApi.NONE -> "Sem XR" }, x, c.y, XrTheme.button) + 10f
+        x += c.chip(when (r.xrApi) {
+            XrApi.OPENXR -> "OpenXR"; XrApi.VRAPI -> "VrApi (Meta)"; XrApi.CARDBOARD -> if (r.daydream) "Daydream + Cardboard" else "Cardboard"
+            XrApi.DAYDREAM -> "Daydream"; XrApi.NONE -> "Sem XR"
+        }, x, c.y, XrTheme.button) + 10f
         if (r.graphics.isNotEmpty()) c.chip(r.graphics.joinToString(" + "), x, c.y, XrTheme.button)
         c.y += 58f
         if (r.loader != LoaderKind.NONE) c.paragraph("Loader OpenXR: " + when (r.loader) {
