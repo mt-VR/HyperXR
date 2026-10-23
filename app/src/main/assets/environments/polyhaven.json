@@ -1,0 +1,371 @@
+[
+ {
+  "id": "kloofendal_48d_partly_cloudy_puresky",
+  "name": "Kloofendal 48d Partly Cloudy (Pure Sky)",
+  "authors": [
+   "Greg Zaal",
+   "Jarod Guest"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "midday",
+   "partly cloudy",
+   "high contrast",
+   "natural light",
+   "pure skies"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+  "ambient": [
+   0.448,
+   0.494,
+   0.605
+  ]
+ },
+ {
+  "id": "moonless_golf",
+  "name": "Moonless Golf",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "night",
+   "clear",
+   "medium contrast",
+   "natural light",
+   "artificial light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/moonless_golf",
+  "ambient": [
+   0.221,
+   0.202,
+   0.197
+  ]
+ },
+ {
+  "id": "lilienstein",
+  "name": "Lilienstein",
+  "authors": [
+   "Andreas Mischok"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "sunrise-sunset",
+   "partly cloudy",
+   "medium contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/lilienstein",
+  "ambient": [
+   0.465,
+   0.51,
+   0.465
+  ]
+ },
+ {
+  "id": "the_sky_is_on_fire",
+  "name": "The Sky Is On Fire",
+  "authors": [
+   "Greg Zaal",
+   "Rico Cilliers"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "urban",
+   "sunrise-sunset",
+   "partly cloudy",
+   "medium contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/the_sky_is_on_fire",
+  "ambient": [
+   0.456,
+   0.398,
+   0.446
+  ]
+ },
+ {
+  "id": "canary_wharf",
+  "name": "Canary Wharf",
+  "authors": [
+   "Andreas Mischok"
+  ],
+  "categories": [
+   "outdoor",
+   "urban",
+   "morning-afternoon",
+   "partly cloudy",
+   "low contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/canary_wharf",
+  "ambient": [
+   0.457,
+   0.49,
+   0.525
+  ]
+ },
+ {
+  "id": "wide_street_01",
+  "name": "Wide Street 01",
+  "authors": [
+   "Sergej Majboroda"
+  ],
+  "categories": [
+   "outdoor",
+   "urban",
+   "midday",
+   "clear",
+   "high contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/wide_street_01",
+  "ambient": [
+   0.443,
+   0.504,
+   0.538
+  ]
+ },
+ {
+  "id": "fireplace",
+  "name": "Fireplace",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "indoor",
+   "urban",
+   "night",
+   "high contrast",
+   "artificial light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/fireplace",
+  "ambient": [
+   0.366,
+   0.214,
+   0.038
+  ]
+ },
+ {
+  "id": "cayley_interior",
+  "name": "Cayley Interior",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "indoor",
+   "urban",
+   "sunrise-sunset",
+   "artificial light",
+   "natural light",
+   "high contrast"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/cayley_interior",
+  "ambient": [
+   0.489,
+   0.443,
+   0.396
+  ]
+ },
+ {
+  "id": "lebombo",
+  "name": "Lebombo",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "indoor",
+   "urban",
+   "morning-afternoon",
+   "low contrast",
+   "natural light",
+   "artificial light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/lebombo",
+  "ambient": [
+   0.547,
+   0.469,
+   0.386
+  ]
+ },
+ {
+  "id": "dikhololo_night",
+  "name": "Dikhololo Night",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "outdoor",
+   "nature",
+   "night",
+   "clear",
+   "low contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/dikhololo_night",
+  "ambient": [
+   0.314,
+   0.287,
+   0.264
+  ]
+ },
+ {
+  "id": "satara_night",
+  "name": "Satara Night",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "clear",
+   "night",
+   "high contrast",
+   "artificial light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/satara_night",
+  "ambient": [
+   0.223,
+   0.181,
+   0.175
+  ]
+ },
+ {
+  "id": "spruit_sunrise",
+  "name": "Spruit Sunrise",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "sunrise-sunset",
+   "clear",
+   "high contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/spruit_sunrise",
+  "ambient": [
+   0.439,
+   0.498,
+   0.47
+  ]
+ },
+ {
+  "id": "kloppenheim_06_puresky",
+  "name": "Kloppenheim 06 (Pure Sky)",
+  "authors": [
+   "Greg Zaal",
+   "Jarod Guest"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "sunrise-sunset",
+   "partly cloudy",
+   "low contrast",
+   "natural light",
+   "pure skies"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/kloppenheim_06_puresky",
+  "ambient": [
+   0.433,
+   0.501,
+   0.589
+  ]
+ },
+ {
+  "id": "brown_photostudio_02",
+  "name": "Brown Photostudio 02",
+  "authors": [
+   "Sergej Majboroda"
+  ],
+  "categories": [
+   "urban",
+   "studio",
+   "indoor",
+   "artificial light",
+   "natural light",
+   "medium contrast"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/brown_photostudio_02",
+  "ambient": [
+   0.522,
+   0.508,
+   0.489
+  ]
+ },
+ {
+  "id": "kiara_1_dawn",
+  "name": "Kiara 1 Dawn",
+  "authors": [
+   "Greg Zaal"
+  ],
+  "categories": [
+   "outdoor",
+   "skies",
+   "nature",
+   "sunrise-sunset",
+   "partly cloudy",
+   "medium contrast",
+   "natural light"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/kiara_1_dawn",
+  "ambient": [
+   0.512,
+   0.463,
+   0.585
+  ]
+ },
+ {
+  "id": "belfast_sunset_puresky",
+  "name": "Belfast Sunset (Pure Sky)",
+  "authors": [
+   "Greg Zaal",
+   "Dimitrios Savva",
+   "Jarod Guest"
+  ],
+  "categories": [
+   "natural light",
+   "outdoor",
+   "nature",
+   "low contrast",
+   "partly cloudy",
+   "sunrise-sunset",
+   "skies",
+   "pure skies"
+  ],
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/a/belfast_sunset_puresky",
+  "ambient": [
+   0.488,
+   0.484,
+   0.572
+  ]
+ }
+]

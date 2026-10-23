@@ -115,6 +115,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | HyperXR Environments (Poly Haven CC0, MD5, Wi-Fi, atribuição, cena 3D vs 360°) | ✅ parser · 🟡 download/render |
 | Ambiente procedural embutido | 🟡 |
 | Ambientes 360 embutidos (rua roxa à noite, praça futurista, estúdio de criação VR, cobertura ao pôr do sol) | ✅ build · 🟡 aparelho |
+| 16 ambientes 360 CC0 do Poly Haven já no APK (natureza, ruas, interiores, noites, nascer/pôr do sol, céus, 1 estúdio — tools/fetch_environments.py) e grade de ambientes com imagem de prévia | ✅ build · 🟡 aparelho |
 | Luz que combina com o ambiente 360 (cor média do panorama) e ambiente pelo horário | ✅ testes · 🟡 aparelho |
 | Menu na palma da mão e fita métrica com as duas mãos | ✅ testes da pose e da medida · 🟡 aparelho |
 | Emuladores: voltar no tempo (buffer de save states), acelerar 3x, modo cinema | ✅ voltar no tempo testado no servidor com os 3 núcleos · 🟡 aparelho |
