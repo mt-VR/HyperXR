@@ -134,6 +134,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override fun onGlRelease() {
         (windows + library + taskbar).forEach { it.release() }
+        handToolsOrNull?.release()
         assistantOrNull?.release()
         if (::appWorld.isInitialized) appWorld.release()
         appWindows.forEach { it.close(); it.screen.release() }
@@ -183,6 +184,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         keyboard?.let { if (it.visible) surfaces += it }
         lab?.let { surfaces += it.panel }
+        if (ctx.input.handsAvailable && !immersiveMedia) handTools.update(ctx.input.hands, head, dt)
+        surfaces += handTools.surfaces()
         // App-to-World objects (hidden inside a 360 photo/video, like the library)
         if (!immersiveMedia) surfaces += appWorld.hits
 
@@ -201,6 +204,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene)
         }
         keyboard?.let { k -> if (k.visible) k.submit(ctx.scene) else { k.release(); keyboard = null } }
+        handTools.submit()
         submitPointerVisuals()
         updateLinkDrag()
         submitRadialMenus()
@@ -626,6 +630,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                     openWindow(w)
                     val pad = com.hyperxr.emulators.EmulatorPad(w)
                     pad.placeInFront(ctx.input.head, 0.95f, yOffset = -0.48f)
+                    pad.onCinema = {
+                        if (isTheater(w)) exitTheater(w) else enterTheater(w)
+                        pad.cinemaOn = isTheater(w); pad.dirty = true
+                    }
                     windows += pad
                     focusGame(w)
                 }
@@ -1136,6 +1144,16 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         light.ambient.copyInto(ctx.scene.ambient)
         light.lightColor.copyInto(ctx.scene.lightColor)
     }
+
+    private var handToolsOrNull: HandTools? = null
+    /** Palm menu and measuring tape (hands). */
+    private val handTools: HandTools get() = handToolsOrNull ?: HandTools(ctx, object : HandTools.Actions {
+        override fun voice() = startVoice()
+        override fun recenter() = ctx.requestRecenter()
+        override fun capture() = this@SpatialLauncher.capture()
+        override fun library() = toggleLibrary()
+        override fun windows() = toggleWindows()
+    }).also { handToolsOrNull = it }
 
     private var lastClockCheck = 0.0
 

@@ -125,6 +125,33 @@ Em Ajustes > Launcher > **Ambiente pelo horário**, os panoramas embutidos segue
 
 O ambiente não troca enquanto o fundo é a câmera.
 
+## Menu na palma da mão
+Vire a palma de uma mão para o rosto, com os dedos abertos e a até 75 cm dos olhos. Em 0,35 s
+aparece um menu acima dos dedos com:
+- Voz
+- Recentralizar
+- Captura
+- Biblioteca
+- Janelas
+- Fita métrica
+
+Clique com a outra mão. Para o menu fechar, a mão precisa sair da pose por 0,3 s, então um
+quadro ruim do rastreamento não o fecha.
+
+A pose é medida em `PalmMenuDetector` (core, com testes):
+- a normal da palma (produto vetorial entre os nós do indicador e do mindinho, espelhado na mão
+  esquerda) aponta para os olhos a menos de 45°;
+- pelo menos 3 pontas de dedo estão além da junta do meio;
+- não há pinça.
+
+As costas da mão, o punho fechado e uma mão longe não abrem o menu.
+
+## Fita métrica com as mãos
+Ligue a Fita métrica no menu da palma e faça a pinça com as duas mãos. Uma linha amarela liga as
+duas pinças e mostra a distância ("34,5 cm", "1,27 m"). Depois de soltar, a medida fica na tela
+por 4 s. A precisão depende do rastreamento das mãos (profundidade estimada pelo tamanho da mão),
+então serve para medidas aproximadas.
+
 ## Emuladores
 Veja [EMULATORS.md](EMULATORS.md). Inclui o controle para as mãos, que deixa segurar dois botões
-ao mesmo tempo, um com cada mão.
+ao mesmo tempo, um com cada mão, e também voltar no tempo, acelerar e o modo cinema.

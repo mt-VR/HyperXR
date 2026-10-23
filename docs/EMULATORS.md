@@ -44,6 +44,21 @@ Ficaram de fora núcleos com licença não comercial, como Snes9x, Genesis Plus 
 - **Arquivos:** `files/emulators/{roms,saves,states,system}`. O mGBA usa a BIOS própria (HLE);
   uma `gba_bios.bin` em `system/` também funciona.
 
+## Voltar no tempo, acelerar e cinema
+
+- **Voltar no tempo:** segure **Voltar** no controle das mãos, ou ZL no Joy-Con. O jogo anda para
+  trás no ritmo normal e sem som. Solte para continuar dali.
+  - O frontend guarda um save state a cada 3 quadros num buffer circular de até 48 MB.
+  - Isso dá 20 s no NES (12,8 KB por estado) e no Game Boy (26,9 KB), e 4,8 s no GBA (528 KB).
+- **Acelerar:** segure **Rápido**, ou ZR. O jogo roda 3x mais rápido; o som toca só 1 de cada 3
+  quadros.
+- **Cinema:** o botão no topo do controle das mãos leva o jogo para uma tela curva de 3,2 m a
+  2,4 m de você. Toque de novo para sair.
+
+Testado no servidor com os três núcleos:
+- Um estado restaurado e jogado com a mesma entrada dá quadros idênticos (8 de 8).
+- Um passo para trás mostra exatamente um quadro que já tinha acontecido.
+
 ## Mapeamento
 
 | Controle / teclado | Botão |
@@ -53,7 +68,8 @@ Ficaram de fora núcleos com licença não comercial, como Snes9x, Genesis Plus 
 | X / S | X |
 | Y / A | Y |
 | L, R / Q, W | L, R |
-| ZL, ZR | L2, R2 |
+| ZL (segurar) | Voltar no tempo |
+| ZR (segurar) | Acelerar 3x |
 | + / Enter | Start |
 | − / Espaço | Select |
 | Analógico, direcional, hat | Direções |

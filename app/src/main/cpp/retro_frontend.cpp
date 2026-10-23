@@ -59,6 +59,13 @@ std::atomic<uint32_t> buttons {0};
 std::vector<int16_t> audio;
 size_t audioMax = 0;
 
+// Rewind: a ring of save states taken every [rewindInterval] frames within a memory budget.
+std::vector<std::vector<uint8_t>> ring;
+size_t ringHead = 0, ringCount = 0;
+int rewindInterval = 3;
+long frameNo = 0;
+bool rewindOn = false;
+
 void logCb(enum retro_log_level level, const char* fmt, ...) {
     char buf[1024];
     va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
@@ -163,7 +170,10 @@ template <typename T> bool sym(T& out, const char* name) {
     return out != nullptr;
 }
 
+void rewindReset() { ring.clear(); ring.shrink_to_fit(); ringHead = ringCount = 0; frameNo = 0; }
+
 void closeAll() {
+    rewindReset(); rewindOn = false;
     if (core.handle) {
         if (gameLoaded && core.unload_game) core.unload_game();
         if (core.deinit) core.deinit();
@@ -289,8 +299,55 @@ JNIEXPORT jint JNICALL Java_com_hyperxr_emulators_RetroNative_runFrame(JNIEnv* e
     audio.clear();
     if (audio.capacity() < audioMax) audio.reserve(audioMax);
     core.run();
+    if (rewindOn && !ring.empty() && ++frameNo % rewindInterval == 0) {
+        auto& slot = ring[ringHead];
+        if (core.serialize(slot.data(), slot.size())) {
+            ringHead = (ringHead + 1) % ring.size();
+            if (ringCount < ring.size()) ringCount++;
+        }
+    }
     if (!audio.empty()) env->SetShortArrayRegion(out, 0, (jsize) audio.size(), audio.data());
     return (jint) audio.size();
+}
+
+/**
+ * Turns rewind on with up to [seconds] of history (at [fps]) inside [budgetBytes]; returns the
+ * seconds actually kept (0 when the core cannot save states).
+ */
+JNIEXPORT jfloat JNICALL Java_com_hyperxr_emulators_RetroNative_enableRewind(JNIEnv*, jobject, jfloat seconds, jfloat fps, jint budgetBytes) {
+    rewindReset();
+    rewindOn = false;
+    if (!gameLoaded) return 0;
+    size_t size = core.serialize_size();
+    if (!size) return 0;
+    size_t want = (size_t) (seconds * fps / rewindInterval);
+    size_t cap = (size_t) budgetBytes / size;
+    size_t n = want < cap ? want : cap;
+    if (n < 8) return 0;
+    ring.assign(n, std::vector<uint8_t>(size));
+    rewindOn = true;
+    return (jfloat) (n * rewindInterval / fps);
+}
+
+/**
+ * One step back in time: restores the newest stored state and runs a frame to show it (its audio
+ * is dropped). Returns false when the history is used up.
+ */
+JNIEXPORT jboolean JNICALL Java_com_hyperxr_emulators_RetroNative_rewindStep(JNIEnv*, jobject) {
+    if (!gameLoaded || !rewindOn || ringCount == 0) return JNI_FALSE;
+    ringHead = (ringHead + ring.size() - 1) % ring.size();
+    ringCount--;
+    auto& slot = ring[ringHead];
+    if (!core.unserialize(slot.data(), slot.size())) return JNI_FALSE;
+    audioMax = 0; audio.clear();
+    bool was = rewindOn; rewindOn = false;   // the shown frame is not stored again
+    core.run();
+    rewindOn = was;
+    return JNI_TRUE;
+}
+
+JNIEXPORT jint JNICALL Java_com_hyperxr_emulators_RetroNative_stateSize(JNIEnv*, jobject) {
+    return gameLoaded ? (jint) core.serialize_size() : 0;
 }
 
 JNIEXPORT void JNICALL Java_com_hyperxr_emulators_RetroNative_reset(JNIEnv*, jobject) { if (gameLoaded) core.reset(); }

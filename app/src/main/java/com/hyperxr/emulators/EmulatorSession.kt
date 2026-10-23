@@ -41,7 +41,14 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
     private fun stateFile(slot: Int) = File(EmulatorFiles.states(context), "$base.$slot.state")
 
     fun setSurface(s: Surface?) { surface = s; surfaceChanged = true }
-    fun setButtons(mask: Int) { if (running) RetroNative.setButtons(mask) }
+    /** Joypad bits; L2 held goes back in time and R2 held runs 3x faster (no core here uses them). */
+    fun setButtons(mask: Int) {
+        buttons = mask
+        if (running) RetroNative.setButtons(mask and ((1 shl RetroPad.L2) or (1 shl RetroPad.R2)).inv())
+    }
+    @Volatile private var buttons = 0
+    /** Seconds of history rewind keeps for this game (0 = unavailable). */
+    @Volatile var rewindSeconds = 0f; private set
 
     fun reset() = commands.add { RetroNative.reset() }
     fun saveState(slot: Int = 0, done: (Boolean) -> Unit = {}) = commands.add { done(RetroNative.saveState(stateFile(slot).path)) }
@@ -75,6 +82,7 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
         val fps = av[3].takeIf { it in 20.0..120.0 } ?: 60.0
         val rate = av[4].toInt().takeIf { it in 8000..192000 } ?: 44100
         Diagnostics.log("Emulator ${core.coreName}: ${rom.name}, ${av[0].toInt()}x${av[1].toInt()} @ ${"%.2f".format(fps)} fps, $rate Hz")
+        rewindSeconds = RetroNative.enableRewind(20f, fps.toFloat(), 48 shl 20)
         status = null
         onReady(aspect)
 
@@ -83,6 +91,7 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
         // one frame of audio at most (plus slack for cores that batch two)
         val audio = ShortArray(((rate / fps) * 2 * 2 + 64).toInt())
         val periodNs = (1e9 / fps).toLong()
+        val scratch = ShortArray(audio.size)
         var next = System.nanoTime()
         var lastSave = System.nanoTime()
         try {
@@ -90,6 +99,15 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
                 while (true) { val c = commands.poll() ?: break; runCatching { c() } }
                 if (surfaceChanged) { surfaceChanged = false; RetroNative.setSurface(surface) }
                 if (paused) { Thread.sleep(30); next = System.nanoTime(); continue }
+                if (buttons and (1 shl RetroPad.L2) != 0) {
+                    // back in time at the game's frame rate; silent
+                    if (!RetroNative.rewindStep()) Thread.sleep(5)
+                    next += periodNs
+                    val wait = next - System.nanoTime()
+                    if (wait > 0) Thread.sleep(wait / 1_000_000, (wait % 1_000_000).toInt()) else next = System.nanoTime()
+                    continue
+                }
+                if (buttons and (1 shl RetroPad.R2) != 0) repeat(2) { RetroNative.runFrame(scratch) }
                 val n = RetroNative.runFrame(audio)
                 if (track != null && n > 0 && !muted) {
                     track.write(audio, 0, n, AudioTrack.WRITE_BLOCKING)

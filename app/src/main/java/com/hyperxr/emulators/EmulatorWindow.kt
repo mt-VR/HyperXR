@@ -120,6 +120,9 @@ class EmulatorPad(val window: EmulatorWindow) : XrPanel(1.05f, 0.42f, title = "C
     private val rects = ArrayList<Pair<RectF, Int>>()
     private val held = HashMap<Int, Int>()  // pointer id -> bit
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    /** Set by the launcher: toggles the cinema screen; [cinemaOn] is its current state. */
+    var onCinema: (() -> Unit)? = null
+    var cinemaOn = false
 
     private fun mask() = held.values.fold(0) { m, b -> m or (1 shl b) }
 
@@ -157,10 +160,14 @@ class EmulatorPad(val window: EmulatorWindow) : XrPanel(1.05f, 0.42f, title = "C
         key(RetroPad.DOWN, "", cx + s, top + 2 * s, s, s)
         // middle: shoulders, select, start
         val mx = c.w / 2 - 1.6f * s
-        key(RetroPad.L, "L", mx, top, 1.5f * s, 0.8f * s)
-        key(RetroPad.R, "R", mx + 1.7f * s, top, 1.5f * s, 0.8f * s)
-        key(RetroPad.SELECT, "Select", mx, top + 1.6f * s, 1.5f * s, 0.8f * s)
-        key(RetroPad.START, "Start", mx + 1.7f * s, top + 1.6f * s, 1.5f * s, 0.8f * s)
+        key(RetroPad.L, "L", mx, top, 1.5f * s, 0.7f * s)
+        key(RetroPad.R, "R", mx + 1.7f * s, top, 1.5f * s, 0.7f * s)
+        key(RetroPad.SELECT, "Select", mx, top + 0.95f * s, 1.5f * s, 0.7f * s)
+        key(RetroPad.START, "Start", mx + 1.7f * s, top + 0.95f * s, 1.5f * s, 0.7f * s)
+        // hold to go back in time / to run faster (the session reads these two bits)
+        key(RetroPad.L2, "Voltar", mx, top + 1.9f * s, 1.5f * s, 0.7f * s)
+        key(RetroPad.R2, "Rápido", mx + 1.7f * s, top + 1.9f * s, 1.5f * s, 0.7f * s)
+        onCinema?.let { cinema -> c.button("cinema", if (cinemaOn) "Sair do cinema" else "Cinema", c.w - c.pad - 300f, 14f, 300f, 64f) { cinema() } }
         // face buttons on the right, Nintendo diamond
         val fx = c.w - c.pad - 3 * s
         key(RetroPad.X, "X", fx + s, top, s, s, round = true)

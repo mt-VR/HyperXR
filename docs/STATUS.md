@@ -116,6 +116,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Ambiente procedural embutido | 🟡 |
 | Ambientes 360 embutidos (rua roxa à noite, praça futurista, estúdio de criação VR, cobertura ao pôr do sol) | ✅ build · 🟡 aparelho |
 | Luz que combina com o ambiente 360 (cor média do panorama) e ambiente pelo horário | ✅ testes · 🟡 aparelho |
+| Menu na palma da mão e fita métrica com as duas mãos | ✅ testes da pose e da medida · 🟡 aparelho |
+| Emuladores: voltar no tempo (buffer de save states), acelerar 3x, modo cinema | ✅ voltar no tempo testado no servidor com os 3 núcleos · 🟡 aparelho |
 | Emuladores embutidos (QuickNES, Gambatte, mGBA; libretro compilado do código-fonte) com créditos, controle para as mãos, saves e save states | ✅ frontend testado no servidor com os 3 núcleos · 🟡 aparelho |
 | Apps web (TikTok, Twitch, YouTube, WhatsApp Web, Facebook, Instagram): 2D e painel espacial | 🟡 |
 

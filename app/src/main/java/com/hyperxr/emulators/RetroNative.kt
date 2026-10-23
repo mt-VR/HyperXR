@@ -21,5 +21,10 @@ object RetroNative {
     external fun loadRam(path: String): Boolean
     external fun saveState(path: String): Boolean
     external fun loadState(path: String): Boolean
+    /** Keeps up to [seconds] of history for rewind within [budgetBytes]; returns the seconds kept. */
+    external fun enableRewind(seconds: Float, fps: Float, budgetBytes: Int): Float
+    /** One step back in time (false when the history is used up). */
+    external fun rewindStep(): Boolean
+    external fun stateSize(): Int
     external fun close()
 }
