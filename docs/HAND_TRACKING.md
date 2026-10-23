@@ -280,6 +280,10 @@ mantém com 0,25 (desfoque de movimento).
 - A profundidade relativa de cada ponto sai das proporções dos ossos: um osso que parece mais
   curto que seu tamanho real aponta para longe da câmera pela diferença. Com o óculos, as costas
   da mão ficam para a câmera e os dedos dobram para a palma.
+- O tamanho da palma na imagem vem do encaixe da forma da palma nos cinco nós (pulso e quatro
+  juntas dos dedos), não só do pulso até o dedo médio. Uma palma inclinada encolhe só numa
+  direção; a outra mantém o tamanho real. Assim a distância estimada, e com ela o tamanho da mão,
+  não pula quando a mão inclina. A inclinação da palma também vira profundidade das juntas.
 - A escala métrica parte de uma palma de 9 cm. Depois a fusão com a câmera e o tamanho
   medido/informado da mão corrigem a escala, como antes.
 - O lado (esquerda/direita) sai do sentido de giro pulso → indicador → mindinho na imagem. O

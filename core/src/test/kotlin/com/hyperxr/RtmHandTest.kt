@@ -15,9 +15,11 @@ class RtmHandTest {
         set(0, 0f, 100f)
         set(1, -30f, 80f); set(2, -55f, 55f); set(3, -70f, 30f); set(4, -80f, 8f)
         // palm length 100 px (wrist to middle knuckle); a bent finger looks shorter
-        for ((f, x) in floatArrayOf(-30f, -10f, 10f, 30f).withIndex()) {
-            val b = 5 + f * 4
-            set(b, x, 0f); set(b + 1, x, -45f * (1 - bend)); set(b + 2, x, -72f * (1 - bend)); set(b + 3, x, -92f * (1 - bend))
+        // knuckles on a real palm's arc (index, middle, ring, pinky)
+        val kx = floatArrayOf(-30f, 0f, 22f, 45f); val ky = floatArrayOf(8f, 0f, 9f, 24f)
+        for (f in 0..3) {
+            val b = 5 + f * 4; val x = kx[f]; val y = ky[f]
+            set(b, x, y); set(b + 1, x, y - 45f * (1 - bend)); set(b + 2, x, y - 72f * (1 - bend)); set(b + 3, x, y - 92f * (1 - bend))
         }
         return p
     }
@@ -49,9 +51,9 @@ class RtmHandTest {
     @Test fun bentFingersGoAwayFromTheCamera() {
         val z = FloatArray(21)
         RtmHand.liftDepth(hand(), z)
-        assertTrue(z[8] < 15f)                                // straight finger: little depth
+        assertTrue(z[8] - z[5] < 15f)                         // straight finger: little depth past its knuckle
         RtmHand.liftDepth(hand(bend = 0.6f), z)
-        assertTrue(z[8] > 30f)                                // bent: the tip is well behind the knuckle
+        assertTrue(z[8] - z[5] > 30f)                         // bent: the tip is well behind the knuckle
         assertTrue(z[12] > z[10])
     }
 
@@ -65,6 +67,32 @@ class RtmHandTest {
         RtmHand.toPipeline(hand(), 640, 480, image, world)
         assertEquals(320f / 640f, image[0], 1e-4f)
         val dx = world[HandJoint.MIDDLE_MCP * 3] - world[0]; val dy = world[HandJoint.MIDDLE_MCP * 3 + 1] - world[1]
-        assertEquals(0.09f, kotlin.math.hypot(dx, dy), 1e-4f)
+        val dz = world[HandJoint.MIDDLE_MCP * 3 + 2] - world[2]
+        assertEquals(0.09f, kotlin.math.sqrt(dx * dx + dy * dy + dz * dz), 1e-4f)
+    }
+
+    /** The palm template, 100 px long, tilted by [tilt] degrees about the image x axis or y axis, then rotated in the image. */
+    private fun tiltedPalm(tilt: Float, aboutX: Boolean, roll: Float, mirror: Boolean = false): FloatArray {
+        val tx = floatArrayOf(0f, -0.30f, 0f, 0.22f, 0.45f); val ty = floatArrayOf(0f, -0.92f, -1f, -0.91f, -0.76f)
+        val joints = intArrayOf(0, 5, 9, 13, 17)
+        val p = FloatArray(42)
+        val c = kotlin.math.cos(Math.toRadians(tilt.toDouble())).toFloat()
+        val cr = kotlin.math.cos(Math.toRadians(roll.toDouble())).toFloat(); val sr = kotlin.math.sin(Math.toRadians(roll.toDouble())).toFloat()
+        for ((k, j) in joints.withIndex()) {
+            var x = tx[k] * (if (mirror) -1 else 1) * 100f; var y = ty[k] * 100f
+            if (aboutX) y *= c else x *= c
+            p[j * 2] = 400f + x * cr - y * sr; p[j * 2 + 1] = 300f + x * sr + y * cr
+        }
+        return p
+    }
+
+    @Test fun palmSizeHoldsWhenThePalmTilts() {
+        for (aboutX in listOf(true, false)) for (tilt in listOf(0f, 30f, 55f)) for (roll in listOf(0f, 40f, -110f)) for (mirror in listOf(false, true)) {
+            assertEquals("tilt $tilt aboutX $aboutX roll $roll", 100f, RtmHand.palmScale(tiltedPalm(tilt, aboutX, roll, mirror)), 1.5f)
+        }
+        // wrist to middle knuckle alone would have read 57 px at 55 degrees
+        val z = FloatArray(21)
+        RtmHand.liftDepth(tiltedPalm(55f, true, 0f), z)
+        assertEquals(kotlin.math.sqrt(100f * 100f - 57.36f * 57.36f), z[HandJoint.MIDDLE_MCP], 1.5f)
     }
 }
