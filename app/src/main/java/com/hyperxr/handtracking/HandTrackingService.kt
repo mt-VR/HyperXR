@@ -453,8 +453,8 @@ class HandTrackingService(private val context: Context) {
                 copy(src, out)
                 if (src.state != TrackingState.TRACKING || src.timestampNs == 0L) continue
                 // forward to now, plus the time until the frame drawn now reaches the eyes
-                val dt = ((now - src.timestampNs) / 1e9f + aheadS).coerceIn(0f, 0.06f)
-                motions.getValue(side).extrapolate(src, dt, out.joints)
+                val since = ((now - src.timestampNs) / 1e9f).coerceIn(0f, 0.05f)
+                motions.getValue(side).extrapolate(src, since, out.joints, aheadS.coerceIn(0f, 0.02f))
             }
         }
     }

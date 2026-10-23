@@ -368,9 +368,9 @@ class XrEngine(
             tracker?.pose(predictionNs(), input.head)
             renderedOrientation.set(input.head.orientation)
         }
-        // the hands drawn this frame are moved forward again, to the same photon time as the head
-        // (interaction keeps the copy taken before the content ran)
-        if (input.handsAvailable) hands.snapshot(drawnHands[0], drawnHands[1], predictionNs() / 1e9f)
+        // the hands drawn this frame are carried forward again to right now (fresher than the copy
+        // taken before the content ran, which interaction keeps using)
+        if (input.handsAvailable) hands.snapshot(drawnHands[0], drawnHands[1])
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
         // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only

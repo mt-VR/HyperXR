@@ -94,21 +94,22 @@ class HandJitterTest {
 
     /** What the app draws: the tracker's latest state carried forward to the display time. */
     private fun shown(tr: HandTracker, t: Double, out: Array<Vec3>) {
-        val ahead = (t - tr.state.timestampNs / 1e9 + DISPLAY_AHEAD).toFloat().coerceIn(0f, 0.06f)
-        tr.extrapolate(ahead, out)
+        val since = (t - tr.state.timestampNs / 1e9).toFloat().coerceIn(0f, 0.05f)
+        tr.extrapolate(since, out, DISPLAY_AHEAD.toFloat())
     }
 
     @Test fun stillHandDoesNotTremble() {
         val r = run(0f, 1f, ::shown)
         println("Still hand: tremor ${"%.2f".format(r.jitterMm)} mm at 90 Hz, error ${"%.1f".format(r.errorMm)} mm")
         // the tracker before this rewrite: 9.61 mm tremor, 9.5 mm error
-        assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 1.0f)
+        assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 0.45f)
     }
 
     @Test fun movingHandFollowsClosely() {
         val r = run(0.15f, 1f, ::shown)
         println("Moving hand (0.94 m/s peak): tremor ${"%.2f".format(r.jitterMm)} mm, error ${"%.1f".format(r.errorMm)} mm")
-        // the tracker before this rewrite: 66.6 mm error
+        // the tracker before this rewrite: 66.6 mm error; before continuous blending: 11.6 mm tremor
         assertTrue("error ${r.errorMm} mm", r.errorMm < 40f)
+        assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 8f)
     }
 }

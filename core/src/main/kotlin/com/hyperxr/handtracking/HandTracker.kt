@@ -11,7 +11,7 @@ class HandMotion {
     val velocity = Vec3()
     var gain = 0f
     val residual = Array(HandJoint.COUNT) { Vec3() }
-    var blendSeconds = 0.02f
+    var blendSeconds = 0.03f
     var moving = false
 
     fun set(o: HandMotion) {
@@ -20,12 +20,20 @@ class HandMotion {
     }
 
     /**
-     * [src]'s joints [aheadSeconds] after its update: moved as a whole by the velocity (not at all
-     * while still), with the last correction fading in.
+     * How far past "now" the display draws (the frame drawn now reaches the eyes this much later).
+     * The tracker uses it to know exactly where the hand was being drawn when a new result
+     * arrives, so the new result starts from there instead of jumping.
      */
-    fun extrapolate(src: HandState, aheadSeconds: Float, out: Array<Vec3>) {
-        val s = if (moving) aheadSeconds * gain else 0f
-        val r = kotlin.math.exp(-aheadSeconds / blendSeconds)
+    var displayAheadS = 0.012f
+
+    /**
+     * [src]'s joints [sinceSeconds] after its update, drawn [aheadSeconds] in the future: moved
+     * as a whole by the velocity (not at all while still), with the last correction fading out
+     * over the time since the update only (so it is continuous whatever the display horizon).
+     */
+    fun extrapolate(src: HandState, sinceSeconds: Float, out: Array<Vec3>, aheadSeconds: Float = displayAheadS) {
+        val s = if (moving) (sinceSeconds + aheadSeconds) * gain else 0f
+        val r = kotlin.math.exp(-sinceSeconds / blendSeconds)
         for (i in 0 until HandJoint.COUNT) out[i].set(src.joints[i]).addScaled(velocity, s).addScaled(residual[i], r)
     }
 }
@@ -65,6 +73,8 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     var jumpThreshold = 0.12f
     var recoveryNs = 120_000_000L
     var predictionSeconds = 0.0f
+    /** A correction larger than this (metres) is a real jump: shown at once instead of blended. */
+    var residualLimit = 0.06f
 
     /** Centre of the hand across the view (Hz at rest; [lateralBeta] opens it with speed). */
     var lateralCutoffHz = 1.0f
@@ -178,8 +188,13 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
 
         // where the display has been drawing the hand for this instant (last result carried
         // forward): the new result is blended in from there instead of jumping to it
-        val shownGain = predictionGain
-        for (i in 0 until HandJoint.COUNT) residual[i].set(state.joints[i]).addScaled(velocity, dt * shownGain)
+        // (exactly what [HandMotion.extrapolate] gave for this instant, the fading correction included)
+        val shownGain = if (motion.moving) predictionGain else 0f
+        val ahead = motion.displayAheadS
+        val keep = if (dt > 0f) kotlin.math.exp(-dt / motion.blendSeconds) else 0f
+        for (i in 0 until HandJoint.COUNT) {
+            residual[i].scale(keep).add(state.joints[i]).addScaled(velocity, (dt + ahead) * shownGain)
+        }
 
         // centre of the palm, and its distance along the camera ray smoothed on its own
         palmCentre(meas, rawRoot)
@@ -237,11 +252,13 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
             state.joints[i].z += velocity.z * pz + offset[i].z * fade
         }
         if (fade == 0f) offset.forEach { it.set(0f, 0f, 0f) }
-        // residual = what was shown minus the new estimate; dropped after a re-acquisition or a jump
+        // residual = what was shown minus what the new estimate shows now; dropped after a
+        // re-acquisition or a jump
         var big = state.state != TrackingState.TRACKING || dt == 0f
+        val newShift = ahead * g
         for (i in 0 until HandJoint.COUNT) {
-            residual[i].sub(state.joints[i])
-            if (residual[i].length() > 0.04f) big = true
+            residual[i].sub(state.joints[i]).addScaled(velocity, -newShift)
+            if (residual[i].length() > residualLimit) big = true
         }
         if (big) residual.forEach { it.set(0f, 0f, 0f) }
         lastSeenNs = timestampNs
@@ -252,10 +269,11 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     }
 
     /**
-     * The hand [aheadSeconds] after its last update, for the display between camera frames: moved
+     * The hand [sinceSeconds] after its last update, for the display between camera frames: moved
      * as a whole by the centre's velocity, and not at all while it is still.
      */
-    fun extrapolate(aheadSeconds: Float, out: Array<Vec3>) = motion.extrapolate(state, aheadSeconds, out)
+    fun extrapolate(sinceSeconds: Float, out: Array<Vec3>, aheadSeconds: Float = motion.displayAheadS) =
+        motion.extrapolate(state, sinceSeconds, out, aheadSeconds)
 
     private fun lag(f: OneEuroFilter) = (1f / (2f * Math.PI.toFloat() * f.lastCutoff)).coerceAtMost(0.08f)
 
