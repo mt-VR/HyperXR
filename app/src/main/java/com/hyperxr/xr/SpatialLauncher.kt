@@ -196,6 +196,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (!immersiveMedia) surfaces += appWorld.hits
 
         updatePointers(ctx, surfaces, s.handTracking.directTouch)
+        airDraw.update(ctx.input.hands, airBusy)
+        airDraw.submit(ctx.scene)
         lab?.update(dt, ctx.input.hands, head, if (cursorRayValid) cursorRay else null, cursorLabDown)
 
         // submit
@@ -275,6 +277,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val microGestures = arrayOf(com.hyperxr.handtracking.MicroGestures(), com.hyperxr.handtracking.MicroGestures())
     private var gazeHit: Vec3? = null
     private var lastHapticTarget: Any? = null
+    /** Drawing in the air (Personalização > Desenho no ar). */
+    private val airDraw = AirDraw()
+    private val airBusy = BooleanArray(2)
 
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
         val now = System.nanoTime()
@@ -343,7 +348,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 // the pinch starting with the palm up opens the menu right away
                 val palmUp = pinching && !wasPinching[i] && !linkDrag.active && lab?.handBusy?.get(i) != true &&
                     com.hyperxr.handtracking.PalmMenuDetector.isPalmUp(h.joints, h.handedness == com.hyperxr.handtracking.Handedness.RIGHT, input.head.position)
-                radials[i].update(pinching, pinchPoint, input.head, overTarget, now, instant = palmUp)?.let { radialAction(it) }
+                // drawing in the air: a pinch away from the UI draws, so it must not open the radial menu
+                if (airDraw.active) radials[i].update(false, pinchPoint, input.head, true, now)
+                else radials[i].update(pinching, pinchPoint, input.head, overTarget, now, instant = palmUp)?.let { radialAction(it) }
+                airBusy[i] = overTarget
             } else radials[i].update(false, pinchPoint, input.head, true, now)
             wasPinching[i] = h.isUsable && pinching
             val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && (!overTarget || radials[i].openedInstantly)
@@ -621,6 +629,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "library" -> { if (!libraryOpen()) toggleLibrary(); return }
             "environments" -> EnvironmentsPanel(this)
             "roomcapture" -> RoomCapturePanel(this, ctx.hands)
+            "airdraw" -> { airDraw.active = true; AirDrawPanel(airDraw) { glTasks += { windows.removeAll { w -> (w is AirDrawPanel).also { if (it) w.release() } } } } }
             "files" -> com.hyperxr.files.FilesPanel(this)
             "gallery" -> com.hyperxr.files.GalleryPanel(this)
             "messages" -> MessagesPanel()

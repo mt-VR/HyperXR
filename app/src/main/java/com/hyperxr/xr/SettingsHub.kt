@@ -68,6 +68,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
         Category("personalization", "edit", "Personalização", "Ambiente virtual", listOf(
             Item.Action("Ambientes", "Escolher o ambiente ao seu redor") { open("environments") },
             Item.Action("Capturar sua sala em 360°", "Gire no lugar e sua sala vira um ambiente") { open("roomcapture") },
+            Item.Action("Desenho no ar", "Faça a pinça e desenhe linhas de luz no espaço") { open("airdraw") },
             Item.Toggle("Ambiente pela hora do dia", "Troca sozinho de manhã, à tarde e à noite", { it.launcher.autoEnvironmentByTime }) { s, v -> s.copy(launcher = s.launcher.copy(autoEnvironmentByTime = v)) },
             Item.Toggle("Reabrir janelas", "As janelas da última vez voltam ao abrir", { it.launcher.restoreWindows }) { s, v -> s.copy(launcher = s.launcher.copy(restoreWindows = v)) },
         )),

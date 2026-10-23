@@ -399,3 +399,20 @@ o que dá uma imagem mais nítida do que tirar a média de quadros que nunca se 
 Quadros com a cabeça girando rápido (acima de ~60°/s) são ignorados por causa do borrão. Teto e
 chão não vistos são completados a partir da linha vista mais próxima. O resultado é salvo como
 ambiente pessoal e aplicado na hora; nada sai do celular.
+
+## Desenho no ar
+
+Ajustes > Personalização > "Desenho no ar". Com o modo ligado, fazer a pinça longe dos painéis
+desenha uma linha de luz onde o polegar e o indicador se encontram; soltar termina o traço. Os
+traços ficam no lugar do quarto em que foram desenhados.
+
+- **Paleta:** 6 cores, 3 espessuras, desfazer, apagar tudo e concluir.
+- **Por dentro:** cada traço é um tubo 3D (`TubeGeometry` no core). Os anéis seguem o traço sem
+  torcer, e os pontos são amostrados a cada 6 mm com suavização (`StrokeSampler`). Um traço
+  terminado é uma malha só; o traço em andamento é refeito enquanto cresce.
+- **Menu radial:** com o desenho ligado, "pinça e segura" no ar não abre o menu radial.
+
+## Teclado do celular (HyperConnect)
+
+Veja docs/HYPERCONNECT.md: o celular controle abre o teclado dele quando um campo de texto abre
+no HyperXR, e o que você digita vai para esse campo.
