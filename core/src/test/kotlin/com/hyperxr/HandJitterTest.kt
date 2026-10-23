@@ -51,7 +51,7 @@ class HandJitterTest {
      */
     private fun run(amp: Float, hz: Float, display: (HandTracker, Double, Array<Vec3>) -> Unit): Result {
         val tracker = HandTracker(Handedness.RIGHT)
-        tracker.predictionSeconds = 0.05f * 0.75f
+        tracker.predictionSeconds = 0.05f * 0.5f
         val rnd = Random(7)
         val obs = Array(HandJoint.COUNT) { Vec3() }
         val shown = Array(HandJoint.COUNT) { Vec3() }
@@ -108,8 +108,10 @@ class HandJitterTest {
     @Test fun movingHandFollowsClosely() {
         val r = run(0.15f, 1f, ::shown)
         println("Moving hand (0.94 m/s peak): tremor ${"%.2f".format(r.jitterMm)} mm, error ${"%.1f".format(r.errorMm)} mm")
-        // the tracker before this rewrite: 66.6 mm error; before continuous blending: 11.6 mm tremor
-        assertTrue("error ${r.errorMm} mm", r.errorMm < 40f)
+        // the tracker before this rewrite: 66.6 mm error; before continuous blending: 11.6 mm tremor.
+        // Prediction is kept short on purpose (a hand that stops must not swing past, see
+        // HandStopTest), so continuous waving trails a little more than it could.
+        assertTrue("error ${r.errorMm} mm", r.errorMm < 60f)
         assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 8f)
     }
 }

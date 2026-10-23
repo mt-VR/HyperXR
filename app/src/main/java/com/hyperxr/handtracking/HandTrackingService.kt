@@ -408,8 +408,8 @@ class HandTrackingService(private val context: Context) {
         // published hand is where the real hand is now, not where it was when photographed
         inferEwmaNs = (inferEwmaNs * 7 + (t0 - slot.submitNs)) / 8
         ageEwmaNs = (ageEwmaNs * 7 + (t0 - slot.captureNs)) / 8
-        // 75% of the age: full prediction overshoots when a moving hand stops
-        val predict = (ageEwmaNs / 1e9f * 0.75f + predictionTrimS).coerceIn(0f, 0.06f)
+        // half the age: more prediction swings the hand past where it stops and back
+        val predict = (ageEwmaNs / 1e9f * 0.5f + predictionTrimS).coerceIn(0f, 0.06f)
         reportWork(t0 - slot.submitNs)
         trackers.values.forEach { it.predictionSeconds = predict }
         if (debug != null) slot.bitmap?.let { runCatching { debug(it, debugLms!!) } }

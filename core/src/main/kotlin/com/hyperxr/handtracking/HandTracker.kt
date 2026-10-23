@@ -25,6 +25,15 @@ class HandMotion {
      * arrives, so the new result starts from there instead of jumping.
      */
     var displayAheadS = 0.012f
+    /**
+     * Between camera results the hand keeps its velocity only for about this long (seconds): a
+     * hand that stopped is seen ~50 ms late, and carrying the old velocity the whole time made it
+     * swing past the stop and back. 0 = keep the velocity unchanged.
+     */
+    var coastTauS = 0.015f
+
+    /** Distance factor (seconds of velocity) carried over [t] seconds. */
+    fun carried(t: Float): Float = if (coastTauS <= 0f) t else coastTauS * (1f - kotlin.math.exp(-t / coastTauS))
 
     /**
      * [src]'s joints [sinceSeconds] after its update, drawn [aheadSeconds] in the future: moved
@@ -32,7 +41,7 @@ class HandMotion {
      * over the time since the update only (so it is continuous whatever the display horizon).
      */
     fun extrapolate(src: HandState, sinceSeconds: Float, out: Array<Vec3>, aheadSeconds: Float = displayAheadS) {
-        val s = if (moving) (sinceSeconds + aheadSeconds) * gain else 0f
+        val s = if (moving) carried(sinceSeconds + aheadSeconds) * gain else 0f
         val r = kotlin.math.exp(-sinceSeconds / blendSeconds)
         for (i in 0 until HandJoint.COUNT) out[i].set(src.joints[i]).addScaled(velocity, s).addScaled(residual[i], r)
     }
@@ -73,6 +82,8 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     var jumpThreshold = 0.12f
     var recoveryNs = 120_000_000L
     var predictionSeconds = 0.0f
+    /** Most the centre filter's lag is made up for by prediction (more = quicker but swings past a stop). */
+    var maxLagCompensationS = 0.03f
     /** A correction larger than this (metres) is a real jump: shown at once instead of blended. */
     var residualLimit = 0.06f
 
@@ -193,7 +204,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         val ahead = motion.displayAheadS
         val keep = if (dt > 0f) kotlin.math.exp(-dt / motion.blendSeconds) else 0f
         for (i in 0 until HandJoint.COUNT) {
-            residual[i].scale(keep).add(state.joints[i]).addScaled(velocity, (dt + ahead) * shownGain)
+            residual[i].scale(keep).add(state.joints[i]).addScaled(velocity, motion.carried(dt + ahead) * shownGain)
         }
 
         // centre of the palm, and its distance along the camera ray smoothed on its own
@@ -255,7 +266,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         // residual = what was shown minus what the new estimate shows now; dropped after a
         // re-acquisition or a jump
         var big = state.state != TrackingState.TRACKING || dt == 0f
-        val newShift = ahead * g
+        val newShift = motion.carried(ahead) * g
         for (i in 0 until HandJoint.COUNT) {
             residual[i].sub(state.joints[i]).addScaled(velocity, -newShift)
             if (residual[i].length() > residualLimit) big = true
@@ -275,7 +286,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     fun extrapolate(sinceSeconds: Float, out: Array<Vec3>, aheadSeconds: Float = motion.displayAheadS) =
         motion.extrapolate(state, sinceSeconds, out, aheadSeconds)
 
-    private fun lag(f: OneEuroFilter) = (1f / (2f * Math.PI.toFloat() * f.lastCutoff)).coerceAtMost(0.08f)
+    private fun lag(f: OneEuroFilter) = (1f / (2f * Math.PI.toFloat() * f.lastCutoff)).coerceAtMost(maxLagCompensationS)
 
     private fun palmCentre(j: Array<Vec3>, out: Vec3): Vec3 {
         out.set(0f, 0f, 0f)

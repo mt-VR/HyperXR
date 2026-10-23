@@ -108,8 +108,8 @@ data class ControllerSettings(
     val buttonPlus: ControllerAction = ControllerAction.MENU,
     val buttonHome: ControllerAction = ControllerAction.RECENTER,
     val screenTapSelects: Boolean = true,
-    /** Look at a button for [dwellMs] to click it (works without touching the screen). */
-    val dwellClick: Boolean = true,
+    /** Look at a button for [dwellMs] to click it (off: it clicked things just by pointing at them). */
+    val dwellClick: Boolean = false,
     /** Joy-Con stick cursor speed, degrees per second at full deflection. */
     val stickCursorSpeed: Float = 75f,
     val dwellMs: Int = 1100,
@@ -182,7 +182,7 @@ data class HyperSettings(
     val runtime: RuntimeSettings = RuntimeSettings(),
 ) {
     companion object {
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
 
         /** Settings saved by an older version, brought to the current defaults where they changed. */
         fun migrate(s: HyperSettings): HyperSettings {
@@ -192,6 +192,8 @@ data class HyperSettings(
             if (hv == HandVisual.SKELETON || hv == HandVisual.BOTH)
                 m = m.copy(handTracking = m.handTracking.copy(handVisual = HandVisual.AURA))
             if (m.version < 2) m = m.copy(handTracking = m.handTracking.copy(auraOpacity = 0.8f))
+            // v3: no automatic click by pointing (it was on by default and clicked by accident)
+            if (m.version < 3) m = m.copy(controllers = m.controllers.copy(dwellClick = false))
             return if (m.version < CURRENT_VERSION) m.copy(version = CURRENT_VERSION) else m
         }
     }

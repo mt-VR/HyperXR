@@ -262,6 +262,7 @@ fun ControlsSection(a: MainActivity) {
         ChoiceRow("Botão +", actions, c.buttonPlus, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonPlus = v)) } }
         ChoiceRow("Botão HOME", actions, c.buttonHome, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonHome = v)) } }
         ToggleRow("Toque na tela seleciona (VR Box)", c.screenTapSelects) { v -> a.update { it.copy(controllers = it.controllers.copy(screenTapSelects = v)) } }
+        ToggleRow("Clique automático ao apontar (olhar parado num botão)", c.dwellClick) { v -> a.update { it.copy(controllers = it.controllers.copy(dwellClick = v)) } }
     }
 }
 
