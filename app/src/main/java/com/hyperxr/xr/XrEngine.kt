@@ -517,6 +517,7 @@ class XrEngine(
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         renderer.renderBackground(scene, eye, camera, input.head)
         renderer.renderScene(scene, eye)
+        scene.painter?.let { it.afterScene(eye); renderer.restoreState() }
         renderer.renderPanels(scene, eye, overlayPass = false)
         renderer.renderLate(scene, eye)
         if (boundaryActive && camera != null) {

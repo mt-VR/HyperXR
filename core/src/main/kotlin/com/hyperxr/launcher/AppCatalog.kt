@@ -56,7 +56,7 @@ object IconLibrary {
      */
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
-        "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package",
+        "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -101,6 +101,9 @@ object BuiltinApps {
         AppEntry("game:handlab", "Hand Physics Lab", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "handlab", "handlab",
             runtime = "HyperXR (nativo)", compatibility = "Realidade mista ou VR",
             limitations = "Física de corpos rígidos numa bancada à sua frente; use as mãos (ou o cursor do Joy-Con)"),
+        AppEntry("game:ocean", "Oceano", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "ocean", "ocean",
+            runtime = "HyperXR (nativo)", compatibility = "Realidade mista (ARCore Depth para medir a sala) ou VR",
+            limitations = "Sua sala afunda e vira mar aberto; chuva, trovões, luz e volume num menu rápido. Sem sensor de profundidade, o chão é estimado pela altura"),
         AppEntry("hx:appworld", "App-to-World", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "appworld", "appworld",
             runtime = "HyperXR", compatibility = "Apps Android como objetos no espaço",
             limitations = "Música e notificações precisam do acesso às notificações; arquivos, do acesso ao armazenamento"),

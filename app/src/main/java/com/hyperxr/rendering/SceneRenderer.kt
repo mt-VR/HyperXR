@@ -60,6 +60,16 @@ class PanelItem {
 
 enum class Background { COLOR, ENVIRONMENT, PASSTHROUGH }
 
+/**
+ * Content that draws with its own shaders (the Ocean app): a whole background in place of the
+ * environment or the camera, and effects after the 3D scene (rain), before the panels.
+ */
+interface ScenePainter {
+    val ownsBackground: Boolean
+    fun background(eye: EyeView)
+    fun afterScene(eye: EyeView)
+}
+
 class FrameScene {
     private val drawPool = ArrayList<DrawItem>()
     private val panelPool = ArrayList<PanelItem>()
@@ -73,8 +83,10 @@ class FrameScene {
     /** Region covered by the shadow map (content sets it every frame; radius 0 = no shadows). */
     val shadowCenter = Vec3()
     var shadowRadius = 0f
+    /** Set by content every frame that wants to paint (cleared by [reset]). */
+    var painter: ScenePainter? = null
 
-    fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f }
+    fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f; painter = null }
     fun addDraw(): DrawItem {
         if (drawCount == drawPool.size) drawPool += DrawItem()
         return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false; it.late = false }
@@ -241,6 +253,7 @@ class SceneRenderer {
         GLES30.glClearColor(c[0], c[1], c[2], c[3])
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
         immersive?.let { drawImmersive(eye, it); return }
+        scene.painter?.let { if (it.ownsBackground) { it.background(eye); restoreState(); return } }
         when (scene.background) {
             Background.PASSTHROUGH -> {
                 when {
@@ -253,6 +266,14 @@ class SceneRenderer {
             Background.ENVIRONMENT -> drawEnvironment(eye, scene)
             Background.COLOR -> Unit
         }
+    }
+
+    /** The state the scene passes expect, after a painter used its own. */
+    fun restoreState() {
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(true)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glBindVertexArray(0)
     }
 
     private fun drawEnvironment(eye: EyeView, scene: FrameScene) {

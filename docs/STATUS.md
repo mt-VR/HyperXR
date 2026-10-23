@@ -146,6 +146,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Ponte JNI LuaJIT | ✅ no host · 🟡 no Android |
 | Scene/Window, UI, física, áudio, rede, arquivos | ✅ em Lua · 🟡 host Android |
 | Jogos antigos (STILLSHOT, FORGE LAB, PRIMAL RUSH) | removidos a pedido; desinstalados automaticamente |
+| **Oceano** (sala medida pelo ARCore Depth afunda no mar; ondas Gerstner, céu, chuva, raios e trovões, som sintetizado, menu estilo painel rápido do Android) | ✅ modelo, céu e som (testes) + shaders compilados no WebGL2 com prévia · 🟡 aparelho · ver OCEAN.md |
+| Previsão da cabeça presa ao vsync (tempo real do fóton pelo Choreographer e o tempo medido da GPU) e motor de mãos RTMPose mais rápido (detector em outra thread, entradas/saídas diretas) | ✅ testes (`PhotonClockTest`) · 🟡 ganho real no aparelho |
 | **Hand Physics Lab** (bancada em MR junto da UI, física de corpos rígidos, mãos colisoras, pegar/arremessar, sombras) | ✅ física (11 testes) · 🟡 aparelho · ver HAND_PHYSICS_LAB.md |
 | `hx.camera` com pixels para scripts | ⏳ (retorna erro explicativo) |
 | Assinatura de pacotes por publicador | ⏳ |

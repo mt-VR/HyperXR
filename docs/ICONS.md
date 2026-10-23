@@ -51,6 +51,7 @@ Gerados por `tools/make_icons.py` (SVG → PNG 216 px, camadas `bg`/`fg` como as
 | emulators | videogame_asset (Material) | Emuladores |
 | androidapps | android (Material) | Apps Android |
 | handlab | back_hand (Material) | Hand Physics Lab |
+| ocean | tsunami (Material) | Oceano (blocos do menu: rainy, thunderstorm, waves, layers, view_in_ar, light_mode, volume_up, arrow_downward, undo) |
 | appworld | view_in_ar (Material) | App-to-World |
 | assistant | auto_awesome (Material) | Assistente |
 | screenshare | screen_share (Material) | Compartilhar tela |

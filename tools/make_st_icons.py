@@ -2,6 +2,7 @@ import io, re, sys, glob, os
 import cairosvg
 from PIL import Image, ImageDraw
 SRC, OUT = sys.argv[1], sys.argv[2]
+PREFIX = sys.argv[3] if len(sys.argv) > 3 else "st_"
 for f in glob.glob(f"{SRC}/*.svg"):
     name = os.path.basename(f)[:-4]
     svg = open(f).read()
@@ -18,5 +19,5 @@ for f in glob.glob(f"{SRC}/*.svg"):
     svg = re.sub(r'<svg ', '<svg fill="#ffffff" ', svg, count=1)
     svg = re.sub(r'fill="(?!#ffffff)[^"]*"', 'fill="#ffffff"', svg)
     png = cairosvg.svg2png(bytestring=svg.encode(), output_width=96, output_height=96)
-    Image.open(io.BytesIO(png)).convert("RGBA").save(f"{OUT}/st_{name}.png")
+    Image.open(io.BytesIO(png)).convert("RGBA").save(f"{OUT}/{PREFIX}{name}.png")
 print("ok")

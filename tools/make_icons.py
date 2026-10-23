@@ -20,6 +20,7 @@ icons = {
     "twitch":      ("brand_twitch.svg",   "#a06bff", "#7a3cf0", 0.50),
     "tiktok":      ("brand_tiktok.svg",   "#2c2c2e", "#0c0c0d", 0.50),
     "hyperx_package": ("extension.svg",   "#8e9eab", "#566373", 0.50),
+    "ocean":       ("tsunami.svg",        "#38d6ee", "#0b4aa6", 0.54),
 }
 def hexc(h): return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
 def gradient(a, b):

@@ -42,7 +42,7 @@ class RoomCapturePanel(private val host: MediaHost, private val hands: HandTrack
     private fun start() {
         val h = hands ?: run { status = "Precisa da câmera (modo realidade mista com o hand tracking ligado)"; dirty = true; return }
         capturing = true; status = "Gire devagar no lugar. Olhe também para cima e para baixo."; dirty = true
-        h.frameTap = { bmp, intr, pose -> onFrame(bmp, intr.fx, intr.fy, intr.cx, intr.cy, intr.width, floatArrayOf(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w)) }
+        h.frameTap = { bmp, intr, pose, _ -> onFrame(bmp, intr.fx, intr.fy, intr.cx, intr.cy, intr.width, floatArrayOf(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w)) }
     }
 
     private fun stop() { capturing = false; hands?.frameTap = null; dirty = true }

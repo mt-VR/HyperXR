@@ -418,3 +418,24 @@ traços ficam no lugar do quarto em que foram desenhados.
 
 Veja docs/HYPERCONNECT.md: o celular controle abre o teclado dele quando um campo de texto abre
 no HyperXR, e o que você digita vai para esse campo.
+
+## Oceano
+
+Um app novo em que a sala afunda e vira mar aberto. O sensor de profundidade mede a sala antes.
+Tem chuva, trovões, luz e volume num menu no estilo do painel rápido do Android. Detalhes em
+[OCEAN.md](OCEAN.md).
+
+## Latência e desempenho
+
+- **Previsão da cabeça presa ao vsync:** antes a previsão mirava "agora + 2 quadros", que cai
+  em qualquer ponto do ciclo da tela e variava até um quadro de um frame para o outro. Isso
+  dava uma tremida leve ao virar a cabeça. Agora o alvo é o momento real em que a imagem
+  acende: o fim do trabalho da GPU (medido), o próximo vsync (do Choreographer), um quadro de
+  composição e o meio da varredura da tela.
+- **Rastreio de mãos mais leve:**
+  - normalização da imagem por tabela, com uma cópia só;
+  - saídas do modelo direto em buffers;
+  - entrada do detector lida no lugar pelo ONNX Runtime;
+  - sem inferência repetida quando a busca mais larga falha;
+  - com uma mão rastreada, a busca pela segunda roda em outra thread, então a mão rastreada não
+    espera o detector.

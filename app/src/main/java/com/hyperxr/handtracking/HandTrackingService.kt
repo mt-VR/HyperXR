@@ -388,10 +388,10 @@ class HandTrackingService(private val context: Context) {
      * Every analysed camera frame with its intrinsics and camera pose (tracking space), for the
      * room capture. Called on the hand tracking thread: copy what you need, the bitmap is reused.
      */
-    @Volatile var frameTap: ((Bitmap, CameraIntrinsics, Pose) -> Unit)? = null
+    @Volatile var frameTap: ((Bitmap, CameraIntrinsics, Pose, DepthSampler?) -> Unit)? = null
 
     private fun afterFrame(slot: Slot) {
-        frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p) } }
+        frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p, if (slot.depth.valid) slot.depth else null) } }
         if (!personMaskEnabled) { if (personMask != null) { personMask = null; personMaskSeq++ }; return }
         val now = System.nanoTime()
         if (now - lastMaskNs < 120_000_000L || !maskBusy.compareAndSet(false, true)) return

@@ -65,6 +65,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var windowsMinimized = false
     /** Hand Physics Lab bench, shown in the same space as the launcher while open. */
     private var lab: com.hyperxr.lab.HandPhysicsLab? = null
+    /** The Ocean app (sky, sea and the sinking room), in the same space as the launcher while open. */
+    private var ocean: com.hyperxr.ocean.OceanApp? = null
     private val cursorRay = Ray()
     private var cursorRayValid = false
     private var cursorLabDown = false
@@ -142,6 +144,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         windowControls.values.forEach { it.release() }
         keyboard?.release()
         lab?.release(); lab = null
+        ocean?.release(); ocean = null
         Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex); Gl.deleteTexture(dragChipTex)
         radialTex.forEach { Gl.deleteTexture(it) }
     }
@@ -190,6 +193,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             surfaces += tk.controls
         }
         lab?.let { surfaces += it.panel }
+        ocean?.let { surfaces += it.panel }
         if (ctx.input.handsAvailable && !immersiveMedia) handTools.update(ctx.input.hands, head, dt)
         surfaces += handTools.surfaces()
         // App-to-World objects (hidden inside a 360 photo/video, like the library)
@@ -203,6 +207,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         // submit
         if (showLibrary) { library.update(dt); library.submit(ctx.scene) }
         lab?.submit()
+        ocean?.let { it.update(dt, head); it.submit(ctx.scene) }
         if (!immersiveMedia) { appWorld.update(dt); appWorld.submit() }
         taskbar.update(dt); taskbar.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
@@ -639,6 +644,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "androidapps" -> AndroidAppsPanel(activity) { pkg, comp, title -> openAndroidApp(pkg, comp, title) }
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
+            "ocean" -> { toggleOcean(); return }
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)
@@ -896,6 +902,16 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val l = lab
         if (l != null) { l.release(); lab = null; return }
         lab = com.hyperxr.lab.HandPhysicsLab(ctx) { glTasks += { lab?.release(); lab = null } }.also {
+            it.initGl()
+            it.place(ctx.input.head, anchorYaw)
+        }
+    }
+
+    // ---------------------------------------------------------------- Ocean
+    private fun toggleOcean() {
+        val o = ocean
+        if (o != null) { o.release(); ocean = null; return }
+        ocean = com.hyperxr.ocean.OceanApp(ctx) { glTasks += { ocean?.release(); ocean = null } }.also {
             it.initGl()
             it.place(ctx.input.head, anchorYaw)
         }
