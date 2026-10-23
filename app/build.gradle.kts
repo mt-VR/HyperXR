@@ -101,11 +101,12 @@ val compatAssets = tasks.register<Sync>("compatAssets") {
 }
 android.sourceSets["main"].assets.srcDir(compatAssets)
 
-/** HyperXR Daydream (the :vrcore companion APK), installed from inside HyperXR. */
+/** Companion APKs shipped inside HyperXR: HyperXR Daydream (:vrcore) and HyperConnect (:hyperconnect). */
 val daydreamAssets = tasks.register<Sync>("daydreamAssets") {
     group = "hyperxr"
-    dependsOn(":vrcore:assembleDebug")
+    dependsOn(":vrcore:assembleDebug", ":hyperconnect:assembleDebug")
     from(project(":vrcore").layout.buildDirectory.file("outputs/apk/debug/vrcore-debug.apk")) { rename { "hyperxr-daydream.apk" }; into("compat") }
+    from(project(":hyperconnect").layout.buildDirectory.file("outputs/apk/debug/hyperconnect-debug.apk")) { rename { "hyperconnect.apk" }; into("compat") }
     into(layout.buildDirectory.dir("generated/daydream-assets"))
 }
 android.sourceSets["main"].assets.srcDir(daydreamAssets)

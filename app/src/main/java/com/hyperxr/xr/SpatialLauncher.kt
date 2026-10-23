@@ -92,6 +92,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override val trackingDescription: String get() = if (::ctx.isInitialized) ctx.trackingDescription else ""
     override val handStatus: String get() = if (::ctx.isInitialized) ctx.handStatus() else ""
+    override val hyperConnectStatus: String get() = if (::ctx.isInitialized) ctx.hyperConnect?.status ?: "" else ""
     override val modeDescription: String get() = if (!::ctx.isInitialized) "" else when (ctx.decision.mode) {
         com.hyperxr.capabilities.XrMode.MIXED_REALITY_ARCORE, com.hyperxr.capabilities.XrMode.MIXED_REALITY_CAMERA -> "Realidade mista"
         com.hyperxr.capabilities.XrMode.OPENXR_RUNTIME -> "OpenXR"
@@ -272,6 +273,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val MICRO_SCROLL_SCREENS = 1.5f
     private val microGestures = arrayOf(com.hyperxr.handtracking.MicroGestures(), com.hyperxr.handtracking.MicroGestures())
     private var gazeHit: Vec3? = null
+    private var lastHapticTarget: Any? = null
 
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
         val now = System.nanoTime()
@@ -293,8 +295,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val second = other?.stickY ?: p.stick2Y
             if (kotlin.math.abs(second) > 0.15f) scrollY = second
             stickCursor.speedDegPerSec = controls.stickCursorSpeed
-            if (!shoulder) stickCursor.update(p.stickX, p.stickY, dt)
-            stickCursor.ray(input.head, ray)
+            val aim = p.aim
+            if (aim != null) { ray.origin.set(aim.origin); ray.direction.set(aim.direction) }  // HyperConnect phone aims itself
+            else {
+                if (!shoulder) stickCursor.update(p.stickX, p.stickY, dt)
+                stickCursor.ray(input.head, ray)
+            }
             val buttons = p.buttons or (other?.buttons ?: 0)
             val aDown = buttons and 128 != 0
             // A on a lab object carries it; A on the UI clicks
@@ -303,6 +309,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             cursorRay.origin.set(ray.origin); cursorRay.direction.set(ray.direction); cursorRayValid = true
             cursorLabDown = toLab && aDown
             ctrlPointers[0].update(ray, aDown && !toLab, surfaces, now)
+            // a short buzz in the controller phone when the pointer reaches something new
+            val hov = ctrlPointers[0].hovered
+            if (hov != null && hov !== lastHapticTarget) p.haptics?.invoke(8)
+            lastHapticTarget = hov
             recordPointer(1, ray, aDown)
             if (ctrlPointers[0].hitDistance.isNaN()) hitPoints += ray.pointAt(1.5f) else trackHit(ctrlPointers[0], ray)
             dragWindows(ctrlPointers[0], ray, aDown)

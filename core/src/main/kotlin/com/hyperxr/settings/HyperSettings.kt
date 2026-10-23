@@ -127,6 +127,10 @@ data class ControllerSettings(
     /** Joy-Con stick cursor speed, degrees per second at full deflection. */
     val stickCursorSpeed: Float = 75f,
     val dwellMs: Int = 1100,
+    /** HyperConnect: a second phone as the controller over Bluetooth. */
+    val hyperConnect: Boolean = true,
+    /** HyperConnect: buzz the controller phone when the pointer reaches a button. */
+    val hyperConnectHaptics: Boolean = true,
 )
 
 @Serializable

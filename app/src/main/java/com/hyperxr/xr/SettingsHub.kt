@@ -27,6 +27,7 @@ import com.hyperxr.windows.KeyTarget
 
 /** Last result of installing / opening HyperXR Daydream, shown in its status row. */
 @Volatile private var daydreamMessage = ""
+@Volatile private var hyperConnectMessage = ""
 
 class SettingsHubPanel(private val a: LauncherActions, private val open: (String) -> Unit) :
     XrPanel(1.6f, 1.0f, title = ""), KeyTarget {
@@ -89,6 +90,12 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Toggle("Direct Touch", "Tocar botões com o dedo indicador", { it.handTracking.directTouch }) { s, v -> s.copy(handTracking = s.handTracking.copy(directTouch = v)) },
             Item.Toggle("Clicar apontando e empurrando", "Em vez da pinça", { it.handTracking.clickGesture == ClickGesture.POINT_PUSH }) { s, v ->
                 s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.POINT_PUSH else ClickGesture.PINCH)) },
+            Item.Info("HyperConnect") { hyperConnectMessage.ifEmpty { a.hyperConnectStatus } },
+            Item.Toggle("HyperConnect", "Outro celular como controle, por Bluetooth", { it.controllers.hyperConnect }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnect = v)) },
+            Item.Toggle("Vibração no HyperConnect", "O celular controle vibra ao apontar um botão", { it.controllers.hyperConnectHaptics }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnectHaptics = v)) },
+            Item.Action("Enviar o app HyperConnect", "Instale no outro celular, pareie os dois e conecte") {
+                hyperConnectMessage = CompatLayer.shareHyperConnect(HyperXRApp.instance)
+            },
             Item.Info("Controle Daydream") { daydreamMessage.ifEmpty { CompatLayer.daydreamStatus(HyperXRApp.instance) } },
             Item.Action("Instalar HyperXR Daydream", "Joy-Con como controle Daydream nos apps GVR") {
                 daydreamMessage = "Instalando..."

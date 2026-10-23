@@ -52,6 +52,10 @@ class ControllerState {
     var positionFromHand = false
     var stick2X = 0f
     var stick2Y = 0f
+    /** Set when the controller aims by itself (HyperConnect phone): the pointer follows this ray. */
+    var aim: Ray? = null
+    /** Buzz the controller (milliseconds), when it can. */
+    var haptics: ((Int) -> Unit)? = null
     fun ray(out: Ray): Ray { out.origin.set(pose.position); pose.orientation.rotate(Pose.FORWARD, out.direction); return out }
 }
 
@@ -98,6 +102,8 @@ class XrContext(
     @Volatile var gameInput: GameInput? = null
     /** The hand tracking service (AI depth for table typing is switched on through it). */
     var hands: com.hyperxr.handtracking.HandTrackingService? = null
+    /** HyperConnect (controller phone over Bluetooth). */
+    var hyperConnect: com.hyperxr.connect.HyperConnectServer? = null
 }
 
 /** Takes raw controller/keyboard input (emulators); return false to let HyperXR handle the event. */
@@ -211,6 +217,7 @@ class XrEngine(
         ctx = XrContext(activity, settings, decision, renderer, images, icons, audio, scene, input)
         ctx.share = share
         ctx.hands = hands
+        ctx.hyperConnect = hyperConnect
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
@@ -344,6 +351,7 @@ class XrEngine(
         // 2. hands + controllers
         hands.snapshot(input.hands[0], input.hands[1])
         updateControllers(dt)
+        updatePhoneController()
         input.tapDown = tap.next()
         while (true) {
             val a = pendingActions.poll() ?: break
@@ -682,8 +690,16 @@ class XrEngine(
         } finally { depth?.second?.invoke() }
     }
 
+    val hyperConnect = com.hyperxr.connect.HyperConnectServer(activity)
+    private val phoneModel = com.hyperxr.connect.PhoneControllerModel()
+    private val phoneRay = Ray()
+    private val headPosArr = FloatArray(3)
+    private val headQArr = FloatArray(4)
+    private var phoneMenu = false
+    private var phoneWasConnected = false
+
     private fun updateControllers(dt: Float) {
-        for (i in 0..1) input.controllers[i].connected = false
+        for (i in 0..1) { input.controllers[i].connected = false; input.controllers[i].aim = null; input.controllers[i].haptics = null }
         val now = System.nanoTime()
         for (jc in joyCons.controllers.values) {
             val idx = when (jc.side) { JoyConSide.LEFT -> 0; else -> 1 }
@@ -699,6 +715,35 @@ class XrEngine(
             c.pose.position.set(fusions[idx].gripPosition)
             c.positionFromHand = fusions[idx].positionFromHand
         }
+    }
+
+    /** HyperConnect: the controller phone becomes the right controller, aiming with its own orientation. */
+    private fun updatePhoneController() {
+        if (settings.controllers.hyperConnect) hyperConnect.start() else { hyperConnect.stop(); return }
+        val st = hyperConnect.state
+        val on = hyperConnect.connected && st != null
+        if (on != phoneWasConnected) { phoneWasConnected = on; if (!on) phoneModel.reset() }
+        if (!on || st == null) return
+        val h = input.head
+        headPosArr[0] = h.position.x; headPosArr[1] = h.position.y; headPosArr[2] = h.position.z
+        headQArr[0] = h.orientation.x; headQArr[1] = h.orientation.y; headQArr[2] = h.orientation.z; headQArr[3] = h.orientation.w
+        phoneModel.leftHanded = hyperConnect.leftHanded
+        phoneModel.update(st, headPosArr, headQArr, System.nanoTime())
+        val c = input.controllers[if (hyperConnect.leftHanded) 0 else 1]
+        c.connected = true
+        c.buttons = (if (phoneModel.select) 128 else 0) or (if (phoneModel.back) 256 else 0)
+        c.stickX = 0f; c.stickY = 0f; c.stick2X = 0f
+        c.stick2Y = phoneModel.scroll
+        phoneRay.origin.set(phoneModel.rayOrigin[0], phoneModel.rayOrigin[1], phoneModel.rayOrigin[2])
+        phoneRay.direction.set(phoneModel.rayDirection[0], phoneModel.rayDirection[1], phoneModel.rayDirection[2])
+        c.aim = phoneRay
+        c.pose.position.set(phoneRay.origin)
+        c.pose.orientation.set(phoneModel.orientation[0], phoneModel.orientation[1], phoneModel.orientation[2], phoneModel.orientation[3])
+        c.positionFromHand = false
+        if (settings.controllers.hyperConnectHaptics) c.haptics = { ms -> hyperConnect.vibrate(ms) }
+        if (phoneModel.menu && !phoneMenu) pendingActions += Triple(ControllerAction.MENU, true, null)
+        phoneMenu = phoneModel.menu
+        if (phoneModel.homeTapped) pendingActions += Triple(ControllerAction.RECENTER, true, null)
     }
 
     private fun recenterControllers() { input.recenterCursor = true }
@@ -755,6 +800,7 @@ class XrEngine(
 
     fun onDestroy() {
         joyCons.stop()
+        hyperConnect.stop()
         hands.shutdown()
         passthrough?.shutdown()
         arCore?.close()

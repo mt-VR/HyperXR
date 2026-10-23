@@ -43,6 +43,8 @@ interface LauncherActions {
     val trackingDescription: String
     val modeDescription: String
     val handStatus: String
+    /** HyperConnect (controller phone) state for the settings. */
+    val hyperConnectStatus: String
     /** Background tabs of the library: id ("camera", "dim" or an environment id) to label. */
     fun backgroundOptions(): List<Pair<String, String>>
     fun backgroundChoice(): String

@@ -147,6 +147,20 @@ object CompatLayer {
         } catch (t: Throwable) { done("Instalador do sistema indisponível: ${t.message}") }
     }
 
+    /**
+     * Shares the HyperConnect APK (inside HyperXR) to the other phone through Android's share sheet
+     * (Nearby Share, Bluetooth, a messenger...). It opens on this phone's screen.
+     */
+    fun shareHyperConnect(ctx: Context): String = try {
+        val apk = File(ctx.cacheDir, "HyperConnect.apk")
+        ctx.assets.open("compat/hyperconnect.apk").use { i -> apk.outputStream().use { i.copyTo(it) } }
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", apk)
+        val send = Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive").putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        ctx.startActivity(Intent.createChooser(send, "Enviar o HyperConnect para o outro celular").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        "Escolha como enviar, na tela do celular"
+    } catch (t: Throwable) { "Não deu para compartilhar: ${t.message}" }
+
     /** Opens HyperXR Daydream's own screen (Shizuku permission, gyro axes, live test). */
     fun openDaydream(ctx: Context): Boolean = ctx.packageManager.getLaunchIntentForPackage(DAYDREAM_PACKAGE)
         ?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } ?: false
