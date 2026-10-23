@@ -221,7 +221,7 @@ class XrEngine(
         when (decision.mode) {
             XrMode.MIXED_REALITY_ARCORE -> if (forced3Dof) startCameraPassthrough() else {
                 val ar = ArCoreSession(activity).also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }
-                val depth = ar.create(settings.handTracking.useArCoreDepth)
+                val depth = ar.create(settings.handTracking.useArCoreDepth, settings.handTracking.prefer60FpsOverDepth)
                 app.capabilities.updateDepthSupport(depth)
                 if (ar.session != null) {
                     arCore = ar; tracker = ar

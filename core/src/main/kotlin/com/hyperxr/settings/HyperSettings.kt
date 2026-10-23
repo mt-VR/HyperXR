@@ -70,6 +70,8 @@ data class HandTrackingSettings(
     val enabled: Boolean = true,
     val backend: InferenceBackend = InferenceBackend.GPU,
     val useArCoreDepth: Boolean = true,
+    /** Keep the camera at 60 fps even when this phone offers the Depth API only at 30 fps. */
+    val prefer60FpsOverDepth: Boolean = false,
     /** How tracked hands are drawn. */
     val handVisual: HandVisual = HandVisual.AURA,
     val auraOpacity: Float = 0.8f,

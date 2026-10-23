@@ -72,7 +72,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         @Volatile var lightweight = false
     }
 
-    fun create(useDepth: Boolean): Capability {
+    fun create(useDepth: Boolean, prefer60Fps: Boolean = false): Capability {
         return try {
             val s = Session(activity)
             val config = Config(s).apply {
@@ -92,7 +92,10 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             var chosen: com.google.ar.core.CameraConfig? = null
             var depthSupported = false
             if (useDepth && !lightweight) {
+                val top = candidates.firstOrNull()?.fpsRange?.upper ?: 30
                 for (c in candidates) {
+                    // "60 fps first": only configurations as fast as the fastest one may bring depth
+                    if (prefer60Fps && c.fpsRange.upper < top) break
                     val ok = runCatching { s.cameraConfig = c; s.isDepthModeSupported(Config.DepthMode.AUTOMATIC) }.getOrDefault(false)
                     if (ok) { chosen = c; depthSupported = true; break }
                 }

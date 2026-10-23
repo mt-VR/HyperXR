@@ -8,7 +8,7 @@ package com.hyperxr.handtracking
  */
 object HandHold {
     const val INSIDE_NS = 1_000_000_000L
-    const val EDGE_NS = 220_000_000L
+    const val EDGE_NS = 400_000_000L
     const val EDGE = 0.06f
 
     /** [image] holds normalised x, y, z per joint; true when any joint is near the image border. */

@@ -15,7 +15,7 @@ class HandMotion {
     var moving = false
 
     fun set(o: HandMotion) {
-        velocity.set(o.velocity); gain = o.gain; blendSeconds = o.blendSeconds; moving = o.moving
+        velocity.set(o.velocity); gain = o.gain; blendSeconds = o.blendSeconds; moving = o.moving; braking = o.braking; coastTauS = o.coastTauS; moveTauS = o.moveTauS
         for (i in 0 until HandJoint.COUNT) residual[i].set(o.residual[i])
     }
 
@@ -31,9 +31,15 @@ class HandMotion {
      * swing past the stop and back. 0 = keep the velocity unchanged.
      */
     var coastTauS = 0.015f
+    /** True while the hand is slowing down: only then is the velocity cut short between results. */
+    var braking = false
 
     /** Distance factor (seconds of velocity) carried over [t] seconds. */
-    fun carried(t: Float): Float = if (coastTauS <= 0f) t else coastTauS * (1f - kotlin.math.exp(-t / coastTauS))
+    var moveTauS = 0.03f
+    fun carried(t: Float): Float {
+        val tau = if (braking) coastTauS else moveTauS
+        return if (tau <= 0f) t else tau * (1f - kotlin.math.exp(-t / tau))
+    }
 
     /**
      * [src]'s joints [sinceSeconds] after its update, drawn [aheadSeconds] in the future: moved
@@ -96,8 +102,8 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     /** With a depth map the distance is measured, not guessed: less smoothing. */
     var depthMapDepthCutoffHz = 1.2f
     /** Shape of the hand (joints relative to the palm). */
-    var shapeCutoffHz = 1.1f
-    var shapeBeta = 2.5f
+    var shapeCutoffHz = 2.5f
+    var shapeBeta = 15f
     /** Prediction fades in between these hand speeds (m/s). */
     var stillSpeed = 0.06f
     var movingSpeed = 0.30f
@@ -139,7 +145,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
      */
     fun setFilterParams(minCutoff: Float, @Suppress("UNUSED_PARAMETER") beta: Float) {
         val k = (minCutoff / 1.2f).coerceIn(0.3f, 4f)
-        lateralCutoffHz = 1.0f * k; depthCutoffHz = 0.45f * k; depthMapDepthCutoffHz = 1.2f * k; shapeCutoffHz = 1.1f * k
+        lateralCutoffHz = 1.0f * k; depthCutoffHz = 0.45f * k; depthMapDepthCutoffHz = 1.2f * k; shapeCutoffHz = 2.5f * k
     }
 
     /** Former Kalman process noise: now how fast the centre filter opens up with speed. */
@@ -248,6 +254,13 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
                 velocity.z + ((corrected.z - prevRoot.z) / dt - velocity.z) * a,
             )
         } else velocity.set(0f, 0f, 0f)
+        // slowing down: this result moved much less along the motion than the velocity says, so
+        // the hand is stopping and must not be carried on between results (it would swing past)
+        if (haveRoot && dt > 0f) {
+            val sp = velocity.length()
+            val along = if (sp > 1e-4f) ((corrected.x - prevRoot.x) * velocity.x + (corrected.y - prevRoot.y) * velocity.y + (corrected.z - prevRoot.z) * velocity.z) / (sp * dt) else 0f
+            motion.braking = along < sp * 0.6f
+        } else motion.braking = false
         prevRoot.set(corrected); haveRoot = true
         predictionGain = smoothstep(stillSpeed, movingSpeed, velocity.length())
 

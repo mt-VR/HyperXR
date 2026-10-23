@@ -102,7 +102,8 @@ class HandJitterTest {
         val r = run(0f, 1f, ::shown)
         println("Still hand: tremor ${"%.2f".format(r.jitterMm)} mm at 90 Hz, error ${"%.1f".format(r.errorMm)} mm")
         // the tracker before this rewrite: 9.61 mm tremor, 9.5 mm error
-        assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 0.45f)
+        // fingers are filtered lightly so taps and finger motion get through (0.30 mm before)
+        assertTrue("tremor ${r.jitterMm} mm", r.jitterMm < 0.6f)
     }
 
     @Test fun movingHandFollowsClosely() {

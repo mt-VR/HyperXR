@@ -15,6 +15,6 @@ class HandHoldTest {
         assertTrue(HandHold.nearEdge(hand(0.95f, 0.5f)))
         assertTrue(HandHold.nearEdge(hand(0.5f, 0.01f)))
         assertEquals(HandHold.INSIDE_NS, HandHold.timeoutNs(false))
-        assertTrue(HandHold.timeoutNs(true) < HandHold.timeoutNs(false) / 3)
+        assertTrue(HandHold.timeoutNs(true) < HandHold.timeoutNs(false) / 2)
     }
 }
