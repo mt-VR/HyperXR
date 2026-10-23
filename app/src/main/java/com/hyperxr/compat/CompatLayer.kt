@@ -130,11 +130,19 @@ object CompatLayer {
         val apk = File(ctx.cacheDir, "hyperxr-daydream.apk")
         try { ctx.assets.open("compat/hyperxr-daydream.apk").use { i -> apk.outputStream().use { i.copyTo(it) } } }
         catch (t: Throwable) { done("APK do HyperXR Daydream ausente: ${t.message}"); return }
+        installApkFile(ctx, apk) { ok, msg -> done(if (ok) "HyperXR Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else msg) }
+    }
+
+    /**
+     * Installs [apk] as it is: through Shizuku when ready (silent), otherwise the system installer
+     * asks on the phone's screen. [done] gets (installed now, message).
+     */
+    fun installApkFile(ctx: Context, apk: File, done: (Boolean, String) -> Unit) {
         if (com.hyperxr.shell.ShellBridge.state(ctx) == com.hyperxr.shell.ShizukuState.READY) {
             com.hyperxr.shell.ShellBridge.withService(ctx) { svc ->
                 Thread {
                     val err = svc?.let { s -> android.os.ParcelFileDescriptor.open(apk, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { s.installApk(it, apk.length()) } } ?: "Shizuku não respondeu"
-                    done(if (err.isEmpty()) "HyperXR Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else "Falha: $err")
+                    if (err.isEmpty()) done(true, "Instalado") else done(false, "Falha: $err")
                 }.start()
             }
             return
@@ -143,8 +151,8 @@ object CompatLayer {
             val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", apk)
             ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
-            done("Confirme a instalação na tela do celular")
-        } catch (t: Throwable) { done("Instalador do sistema indisponível: ${t.message}") }
+            done(false, "Confirme a instalação na tela do celular")
+        } catch (t: Throwable) { done(false, "Instalador do sistema indisponível: ${t.message}") }
     }
 
     /**

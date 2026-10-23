@@ -17,9 +17,9 @@ import java.net.URL
  * downloaded and opened in the patch/install panel; otherwise its source page opens.
  */
 class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) -> Unit) :
-    XrPanel(1.45f, 1.25f, title = "Jogos VR open source") {
-    private enum class Tab(val label: String) { CURATED("Selecionados"), OPENXR("GitHub: OpenXR"), CARDBOARD("GitHub: Cardboard"), ITCH("itch.io") }
-    private var tab = Tab.CURATED
+    XrPanel(1.45f, 1.25f, title = "Jogos VR") {
+    private enum class Tab(val label: String) { PARTNERS("Parceiros"), CURATED("Selecionados"), OPENXR("GitHub: OpenXR"), CARDBOARD("GitHub: Cardboard"), ITCH("itch.io") }
+    private var tab = Tab.PARTNERS
     @Volatile private var results: List<OpenGame>? = null
     @Volatile private var status: String? = null
     private var page = 0
@@ -28,12 +28,29 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
     override fun draw(c: PanelCanvas) {
         var x = c.pad
         for (t in Tab.values()) {
-            c.button("tab:${t.name}", t.label, x, c.y, 290f, 64f, accent = t == tab) { select(t) }
-            x += 302f
+            c.button("tab:${t.name}", t.label, x, c.y, 236f, 64f, accent = t == tab) { select(t) }
+            x += 246f
         }
         c.y += 80f
         status?.let { c.paragraph(it, 24f, XrTheme.accent2) }
         when (tab) {
+            Tab.PARTNERS -> {
+                c.paragraph("Jogos que os autores deixaram o HyperXR oferecer, sem modificação: o APK original vem da página do autor e é conferido byte a byte antes de instalar. Eles rodam como foram feitos (não passam pelo Corrigir APK).", 22f)
+                val ctx = com.hyperxr.HyperXRApp.instance
+                for (g in com.hyperxr.xrapps.PartnerGames.ALL) {
+                    val inst = com.hyperxr.compat.PartnerGameInstaller.installed(ctx, g)
+                    val detail = "${g.author} • ${g.description} • ${g.permission} • ${g.itchPage}"
+                    c.row("partner:${g.packageName}", if (inst) "Jogar ${g.name}" else "Baixar e instalar ${g.name}", detail = detail, enabled = busy == null) {
+                        if (inst) { if (!com.hyperxr.compat.PartnerGameInstaller.launch(ctx, g)) { status = "Não abriu: reinstale"; dirty = true } }
+                        else {
+                            busy = g.packageName
+                            com.hyperxr.compat.PartnerGameInstaller.downloadAndInstall(ctx, g, { p -> status = p; dirty = true }) { _, msg -> busy = null; status = msg; dirty = true }
+                        }
+                    }
+                    c.row("partnerpage:${g.packageName}", "Página do autor", detail = g.itchPage) { openUrl(g.itchPage) }
+                }
+                return
+            }
             Tab.ITCH -> {
                 c.paragraph("O itch.io não tem busca por licença aberta para apps: abra a lista e veja a licença na página de cada jogo. " +
                     "APKs baixados vão para Corrigir APK.", 24f)
