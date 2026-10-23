@@ -88,6 +88,8 @@ data class HandTrackingSettings(
     val tableFingers: Set<Int> = setOf(1, 2),
     /** AI depth (Depth Anything V2 on the NPU) confirms table taps; the model is downloaded once. */
     val aiDepth: Boolean = true,
+    /** Real hands drawn over the UI in mixed reality (hand segmentation on the NPU). */
+    val handOcclusion: Boolean = true,
     /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
     /** Pinch closes below this thumb–index distance / palm length (model landmarks). Renamed so old 0.25 values reset. */
     val pinchClose: Float = 0.38f,

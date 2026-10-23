@@ -360,6 +360,7 @@ class XrEngine(
         if (!ctx.passthroughAvailable && scene.background == Background.PASSTHROUGH) scene.background = Background.ENVIRONMENT
 
         updateBoundary(dt)
+        updateHandMask()
 
 
         // 4. render
@@ -472,6 +473,9 @@ class XrEngine(
             val ar = arCore!!
             renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)
         }
+        // real hands in front of the UI (mixed reality): camera pixels where the NPU mask sees a hand
+        if (camera != null && scene.background == Background.PASSTHROUGH && maskTex != 0 && hands.handMask != null)
+            renderer.drawHandCutout(eye, camera, maskTex)
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
         if (visual != com.hyperxr.settings.HandVisual.NONE) {
@@ -484,6 +488,38 @@ class XrEngine(
 
     private val drawnHands = arrayOf(HandState(Handedness.LEFT), HandState(Handedness.RIGHT))
     private val handList by lazy { drawnHands.toList() }
+
+    // ---------------------------------------------------------------- hand occlusion
+    private var maskTex = 0
+    private var maskSeq = -1
+    private val maskBuf = java.nio.ByteBuffer.allocateDirect(com.hyperxr.handtracking.HandMaskEngine.SIZE * com.hyperxr.handtracking.HandMaskEngine.SIZE)
+
+    /** Turns the NPU hand mask on in mixed reality and uploads each new mask (R8 texture). */
+    private fun updateHandMask() {
+        val want = settings.handTracking.handOcclusion && input.handsAvailable &&
+            scene.background == Background.PASSTHROUGH && ctx.passthroughAvailable
+        hands.handMaskEnabled = want
+        if (!want) return
+        val seq = hands.handMaskSeq
+        if (seq == maskSeq) return
+        maskSeq = seq
+        val m = hands.handMask ?: return
+        val n = com.hyperxr.handtracking.HandMaskEngine.SIZE
+        if (maskTex == 0) {
+            maskTex = com.hyperxr.rendering.Gl.genTexture()
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskTex)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R8, n, n, 0, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, null)
+        }
+        maskBuf.clear(); maskBuf.put(m); maskBuf.flip()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskTex)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
+        GLES30.glTexSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, n, n, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, maskBuf)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+    }
     private val headMatrix = FloatArray(16)
     private val eyeOffset = Vec3()
     private fun setupEye(eye: EyeView, offsetX: Float) {

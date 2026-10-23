@@ -136,6 +136,8 @@ interface CameraImageSource {
     /** Tangent of the half field of view (vertical) of that area. */
     val regionTanY: Float
     val hasFrame: Boolean
+    /** View UV (top-left origin) -> UV in the CPU image the hand pipeline sees (raw orientation). */
+    val cpuMatrix: FloatArray
 }
 
 class SceneRenderer {
@@ -147,6 +149,7 @@ class SceneRenderer {
     private lateinit var panoOesProg: Program
     private lateinit var oesFullProg: Program
     private lateinit var guardProg: Program
+    private lateinit var handCutProg: Program
     private lateinit var dimProg: Program
     /** 0..1: how much the camera image is darkened behind the UI ("dimmed MR"). */
     @Volatile var passthroughDim = 0f
@@ -200,6 +203,7 @@ class SceneRenderer {
         panoOesProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.PANO_OES_FS, "pano-oes"))
         oesFullProg = Program(Gl.compile(Shaders.OES_FULL_VS, Shaders.OES_FS, "oes-full"))
         guardProg = Program(Gl.compile(Shaders.GUARD_VS, Shaders.GUARD_FS, "guard"))
+        handCutProg = Program(Gl.compile(Shaders.GUARD_VS, Shaders.HANDCUT_FS, "handcut"))
         dimProg = Program(Gl.compile(Shaders.DIM_VS, Shaders.DIM_FS, "dim"))
         fullVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(fullVao)
@@ -419,6 +423,37 @@ class SceneRenderer {
         GLES30.glBindVertexArray(fullVao)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         GLES30.glBindVertexArray(0)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+    }
+
+    /**
+     * Real hands in front of the UI: the camera picture drawn again over everything rendered so
+     * far, only where [maskTex] (hand segmentation) marks a hand. Mixed reality with the camera
+     * filling the view only.
+     */
+    fun drawHandCutout(eye: EyeView, camera: CameraImageSource, maskTex: Int) {
+        if (!passthroughFill || !camera.hasFrame || maskTex == 0) return
+        val (cropU, cropV) = fillCrop(eye.proj[5] / eye.proj[0], camera)
+        GLES30.glUseProgram(handCutProg.id)
+        GLES30.glUniformMatrix4fv(handCutProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
+        GLES30.glUniformMatrix4fv(handCutProg.u("uDepthMatrix"), 1, false, camera.cpuMatrix, 0)
+        GLES30.glUniform2f(handCutProg.u("uCrop"), cropU, cropV)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
+        GLES30.glUniform1i(handCutProg.u("uTex"), 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskTex)
+        GLES30.glUniform1i(handCutProg.u("uMask"), 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glBindVertexArray(fullVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        GLES30.glBindVertexArray(0)
+        GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDepthMask(true)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
     }

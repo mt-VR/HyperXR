@@ -40,6 +40,22 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
     override val regionTanX: Float get() = kotlin.math.tan(fovX / 2)
     override val regionTanY: Float get() = kotlin.math.tan(fovY / 2)
     @Volatile override var hasFrame = false; private set
+    /**
+     * View UV -> CPU (hand tracking) image UV. Both streams are centred crops of the sensor: the
+     * wider one covers the full width, the other a central band; upside-down landscape flips.
+     */
+    override val cpuMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private var cpuAspect = 4f / 3f
+
+    private fun updateCpuMatrix() {
+        Matrix.setIdentityM(cpuMatrix, 0)
+        var sx = 1f; var sy = 1f
+        if (imageAspect > cpuAspect) sy = cpuAspect / imageAspect else sx = imageAspect / cpuAspect
+        val flip = displayRotation == Surface.ROTATION_270
+        val f = if (flip) -1f else 1f
+        cpuMatrix[0] = sx * f; cpuMatrix[5] = sy * f
+        cpuMatrix[12] = 0.5f - 0.5f * sx * f; cpuMatrix[13] = 0.5f - 0.5f * sy * f
+    }
 
     var error: String? = null; private set
     var intrinsics: CameraIntrinsics? = null; private set
@@ -87,6 +103,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         val previewSize = sizes.first()
         imageAspect = previewSize.width.toFloat() / previewSize.height
         val cpu = map.getOutputSizes(ImageFormat.YUV_420_888).minByOrNull { kotlin.math.abs(it.width - cpuSize.width) + kotlin.math.abs(it.height - cpuSize.height) } ?: cpuSize
+        cpuAspect = cpu.width.toFloat() / cpu.height
 
         // field of view from the physical sensor size and focal length
         val sensor = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
@@ -130,6 +147,7 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
         val size = sizes.getOrNull(attempt) ?: run { error = "Camera session configuration failed"; return }
         surfaceTexture?.setDefaultBufferSize(size.width, size.height)
         imageAspect = size.width.toFloat() / size.height
+        updateCpuMatrix()
         val targets = listOf(surface!!, reader!!.surface)
         @Suppress("DEPRECATION")
         d.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {

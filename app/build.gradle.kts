@@ -61,7 +61,7 @@ android {
     // Compressed native libs: GeckoView's libxul alone is ~150 MB uncompressed.
     packaging { jniLibs { useLegacyPackaging = true } }
     // MediaPipe memory-maps the model from the APK: it must be stored uncompressed.
-    androidResources { noCompress += listOf("task", "so") }
+    androidResources { noCompress += listOf("task", "so", "tflite") }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/hyperx-assets"))
     testOptions { unitTests.isReturnDefaultValues = true }

@@ -96,6 +96,7 @@ class HandTrackingService(private val context: Context) {
         val depth = DepthSnapshot()
         var captureNs = 0L
         var submitNs = 0L
+        var rotation180 = false
     }
     // one on the GPU, one being post-processed, one being converted / queued
     private val slots = arrayOf(Slot(), Slot(), Slot())
@@ -260,6 +261,7 @@ class HandTrackingService(private val context: Context) {
             slot.bitmap = slot.converter.convert(image, rotation180, pool)
         } finally { image.close() }
         slot.intr = if (rotation180) intr.copy(cx = intr.width - intr.cx, cy = intr.height - intr.cy) else intr
+        slot.rotation180 = rotation180
         slot.pose = cameraPose?.copy()
         slot.depth.capture(depth, rotation180)
         // when the light hit the sensor, not when the frame reached us: the camera's timestamp
@@ -350,6 +352,61 @@ class HandTrackingService(private val context: Context) {
     private val nearEdge = BooleanArray(2)
     private val fusedImage = Array(2) { FloatArray(HandJoint.COUNT * 3) }
     private val sideImage = mapOf(Handedness.LEFT to FloatArray(HandJoint.COUNT * 3), Handedness.RIGHT to FloatArray(HandJoint.COUNT * 3))
+
+    // ------------------------------------------------------------------ hand occlusion mask
+    /** On while real hands should be drawn over the UI (mixed reality); the NPU segmenter runs then. */
+    @Volatile var handMaskEnabled = false
+    private val maskEngine by lazy { HandMaskEngine(context) }
+    private val maskThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-hand-mask") }
+    private val maskBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var maskStarted: Boolean? = null
+    private var lastMaskNs = 0L
+    private val maskWork = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+    /**
+     * The latest hand mask: HandMaskEngine.SIZE squared bytes (0 = not hand, 255 = hand), in the
+     * camera's raw CPU-image orientation, and a counter that changes with each new mask.
+     */
+    @Volatile var handMask: ByteArray? = null; private set
+    @Volatile var handMaskSeq = 0; private set
+    val handMaskDevice: String get() = maskEngine.device
+
+    private fun maybeRunHandMask(slot: Slot) {
+        if (!handMaskEnabled) return
+        if (seen.isEmpty()) { if (handMask != null) { handMask = null; handMaskSeq++ }; return }
+        val now = System.nanoTime()
+        if (now - lastMaskNs < 30_000_000L || !maskBusy.compareAndSet(false, true)) return
+        lastMaskNs = now
+        val src = slot.bitmap ?: run { maskBusy.set(false); return }
+        val small = Bitmap.createScaledBitmap(src, HandMaskEngine.SIZE, HandMaskEngine.SIZE, true)
+        // each hand's box, grown by 45% (fingers spread, the forearm)
+        val boxes = seen.map { side ->
+            val img = sideImage.getValue(side)
+            var minX = 1f; var minY = 1f; var maxX = 0f; var maxY = 0f
+            for (j in 0 until HandJoint.COUNT) {
+                minX = minOf(minX, img[j * 3]); maxX = maxOf(maxX, img[j * 3]); minY = minOf(minY, img[j * 3 + 1]); maxY = maxOf(maxY, img[j * 3 + 1])
+            }
+            val gw = (maxX - minX) * 0.45f; val gh = (maxY - minY) * 0.45f
+            floatArrayOf(minX - gw, minY - gh, maxX + gw, maxY + gh)
+        }
+        val flip = slot.rotation180
+        maskThread.execute {
+            try {
+                if (maskStarted == null) maskStarted = maskEngine.start()
+                if (maskStarted == true && maskEngine.run(small, maskWork)) {
+                    val n = HandMaskEngine.SIZE
+                    val out = ByteArray(n * n)
+                    // only around the tracked hands (with the forearm): skin elsewhere (legs, face) stays behind the UI
+                    for (y in 0 until n) for (x in 0 until n) {
+                        val nx = (x + 0.5f) / n; val ny = (y + 0.5f) / n
+                        if (boxes.none { b -> nx > b[0] && nx < b[2] && ny > b[1] && ny < b[3] }) continue
+                        val dst = if (flip) (n - 1 - y) * n + (n - 1 - x) else y * n + x
+                        out[dst] = maskWork[y * n + x]
+                    }
+                    handMask = out; handMaskSeq++
+                }
+            } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { small.recycle(); maskBusy.set(false) }
+        }
+    }
 
     // ------------------------------------------------------------------ AI depth (table typing)
     /**
@@ -541,6 +598,7 @@ class HandTrackingService(private val context: Context) {
             }
         }
         maybeRunAiDepth(slot, intr)
+        maybeRunHandMask(slot)
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
         // the trackers predict across the measured age of the image (exposure -> result), so a

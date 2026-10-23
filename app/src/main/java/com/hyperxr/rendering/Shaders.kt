@@ -196,6 +196,24 @@ void main() {
     fragColor = vec4(tint, a);
 }"""
 
+    /**
+     * The user's real hands over the virtual UI: the camera image where the hand mask (NPU
+     * segmentation, in CPU-image coordinates like the depth map) says there is a hand.
+     */
+    const val HANDCUT_FS = """#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision mediump float;
+in vec2 vUv;
+in vec2 vDepthUv;
+uniform samplerExternalOES uTex;
+uniform sampler2D uMask;
+out vec4 fragColor;
+void main() {
+    float a = smoothstep(0.35, 0.65, texture(uMask, vDepthUv).r);
+    if (a < 0.01) discard;
+    fragColor = vec4(texture(uTex, vUv).rgb, a);
+}"""
+
     /** Darkens the whole view (dimmed passthrough behind the UI). */
     const val DIM_VS = """#version 300 es
 layout(location=0) in vec3 aPos;

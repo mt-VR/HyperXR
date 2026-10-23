@@ -64,6 +64,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private val imgUv = FloatArray(8)
     /** Maps view-normalized UVs to the CPU/depth image (depth is aligned with the CPU image). */
     val depthMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    override val cpuMatrix: FloatArray get() = depthMatrix
     private var texMatrixValid = false
 
     /** Must be called on the GL thread (creates the camera texture). */
