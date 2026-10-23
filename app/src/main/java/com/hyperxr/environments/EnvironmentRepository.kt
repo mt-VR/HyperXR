@@ -14,6 +14,8 @@ import com.hyperxr.rendering.GpuModel
 import com.hyperxr.rendering.SceneRenderer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.io.File
@@ -33,7 +35,73 @@ class EnvironmentRepository(private val context: Context) {
     private val root = File(context.filesDir, "environments").apply { mkdirs() }
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
 
-    fun installed(): List<EnvironmentEntry> = listOf(PolyHavenCatalog.STUDIO) + BUNDLED + root.listFiles().orEmpty().mapNotNull { dir ->
+    /**
+     * Poly Haven panoramas (CC0) shipped inside the APK, already downloaded: listed in
+     * assets/environments/polyhaven.json by tools/fetch_environments.py, each with its preview.
+     */
+    val bundledPolyHaven: List<EnvironmentEntry> by lazy {
+        runCatching {
+            val text = context.assets.open("environments/polyhaven.json").use { it.readBytes().toString(Charsets.UTF_8) }
+            kotlinx.serialization.json.Json.parseToJsonElement(text).jsonArray.map { e ->
+                val o = e.jsonObject
+                val id = o["id"]!!.jsonPrimitive.content
+                o["ambient"]?.jsonArray?.let { a -> ambientColors["bundled:ph_$id"] = FloatArray(3) { a[it].jsonPrimitive.content.toFloat() } }
+                EnvironmentEntry(
+                    id = "bundled:ph_$id", name = o["name"]!!.jsonPrimitive.content, kind = EnvironmentKind.PANORAMA_360,
+                    author = o["authors"]?.jsonArray?.joinToString(", ") { it.jsonPrimitive.content } ?: "Poly Haven",
+                    source = "Poly Haven (incluído no HyperXR)", sourceUrl = o["source"]!!.jsonPrimitive.content,
+                    license = "CC0-1.0", licenseUrl = PolyHavenCatalog.LICENSE_URL, format = "Equirectangular JPEG 4096x2048",
+                    downloadBytes = 0, compatibility = "360° image only: no geometry, no parallax", mainFile = "environments/ph_$id.jpg",
+                    previewUrl = "asset:environments/thumbs/ph_$id.jpg",
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private val thumbCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
+
+    /**
+     * A picture of what the environment looks like (512x256): the shipped preview, or one made
+     * once from a downloaded panorama, or the source's preview image; null for the procedural
+     * studio. May touch the network or decode a large image: call off the GL thread.
+     */
+    fun preview(e: EnvironmentEntry): android.graphics.Bitmap? {
+        thumbCache[e.id]?.let { return it }
+        val bmp: android.graphics.Bitmap? = runCatching {
+            when {
+                e.previewUrl?.startsWith("asset:") == true -> context.assets.open(e.previewUrl!!.removePrefix("asset:")).use { BitmapFactory.decodeStream(it) }
+                isBundled(e) -> runCatching { context.assets.open("environments/thumbs/" + e.mainFile.substringAfterLast('/')).use { BitmapFactory.decodeStream(it) } }.getOrNull()
+                e.kind == EnvironmentKind.PANORAMA_360 && e.mainFile.isNotEmpty() -> {
+                    val dir = dirOf(e.id); val cached = File(dir, "preview.jpg")
+                    if (!cached.isFile) {
+                        val src = File(dir, e.mainFile)
+                        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(src.path, o)
+                        val big = BitmapFactory.decodeFile(src.path, BitmapFactory.Options().apply { inSampleSize = maxOf(1, o.outWidth / 1024) })
+                        android.graphics.Bitmap.createScaledBitmap(big, 512, 256, true).compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, cached.outputStream())
+                    }
+                    BitmapFactory.decodeFile(cached.path)
+                }
+                e.previewUrl?.startsWith("http") == true -> {
+                    val cached = File(context.cacheDir, "envprev_" + e.id.replace(Regex("[^A-Za-z0-9]"), "_") + ".png")
+                    if (!cached.isFile) (URL(e.previewUrl).openConnection() as HttpURLConnection).run {
+                        setRequestProperty("User-Agent", USER_AGENT); connectTimeout = 15000; readTimeout = 30000
+                        inputStream.use { i -> cached.outputStream().use { i.copyTo(it) } }
+                    }
+                    BitmapFactory.decodeFile(cached.path)
+                }
+                else -> null
+            }
+        }.getOrNull()
+        bmp?.let { thumbCache[e.id] = it }
+        return bmp
+    }
+
+    /** Preview of a catalog item (network). */
+    fun preview(item: CatalogItem): android.graphics.Bitmap? = preview(EnvironmentEntry(
+        id = "catalog:${item.id}", name = item.name, kind = EnvironmentKind.SCENE_3D, author = item.author, source = "Poly Haven",
+        sourceUrl = "", license = "CC0-1.0", licenseUrl = "", format = "", downloadBytes = 0, previewUrl = item.previewUrl, compatibility = ""))
+
+    fun installed(): List<EnvironmentEntry> = listOf(PolyHavenCatalog.STUDIO) + BUNDLED + bundledPolyHaven + root.listFiles().orEmpty().mapNotNull { dir ->
         val f = File(dir, "entry.json")
         if (!f.isFile || !File(dir, "complete").exists()) null else try { json.decodeFromString(EnvironmentEntry.serializer(), f.readText()) } catch (e: Exception) { null }
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -196,7 +197,19 @@ fun EnvironmentsSection(a: MainActivity) {
 
     SectionCard("Instalados") {
         installed.forEach { e ->
+            // a picture of the environment (shipped preview, or made once from the panorama)
+            LaunchedEffect(e.id) {
+                if (previews["inst:${e.id}"] == null) a.io.execute {
+                    repo.preview(e)?.let { b -> a.runOnUiThread { previews["inst:${e.id}"] = b.asImageBitmap() } }
+                }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                previews["inst:${e.id}"]?.let { img ->
+                    androidx.compose.foundation.Image(img, contentDescription = e.name,
+                        modifier = Modifier.padding(end = 12.dp).size(width = 160.dp, height = 80.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                }
                 Column(Modifier.weight(1f)) {
                     Text(e.name + if (e.id == current) "  (em uso)" else "", color = HxColors.text, fontWeight = FontWeight.SemiBold)
                     Note("${kindLabel(e.kind)} • ${e.license} • ${e.author} • ${e.format}")

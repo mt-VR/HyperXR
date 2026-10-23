@@ -87,33 +87,87 @@ class QuickSettingsPanel(private val a: LauncherActions, private val open: (Stri
     }
 }
 
-class EnvironmentsPanel(private val a: LauncherActions) : XrPanel(1.25f, 1.0f, title = "HyperXR Environments") {
+class EnvironmentsPanel(private val a: LauncherActions) : XrPanel(1.6f, 1.15f, title = "Ambientes") {
     private val repo = HyperXRApp.instance.environments
     @Volatile private var catalog: List<CatalogItem>? = null
     @Volatile private var status = ""
     private var showCatalog = false
+    private var page = 0
+    /** Previews, loaded in the background (shipped thumbnails, or made once from the panorama). */
+    private val previews = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+    private val loading = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+    private val imgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+    private val boxPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    private fun preview(key: String, load: () -> Bitmap?): Bitmap? {
+        previews[key]?.let { return it }
+        if (loading.add(key)) background.execute { load()?.let { previews[key] = it; dirty = true } }
+        return null
+    }
+
     override fun draw(c: PanelCanvas) {
-        c.button("tabInst", "Instalados", c.pad, c.y, 260f, 70f, accent = !showCatalog) { showCatalog = false; dirty = true }
+        c.button("tabInst", "Instalados", c.pad, c.y, 260f, 70f, accent = !showCatalog) { showCatalog = false; page = 0; dirty = true }
         c.button("tabCat", "Catálogo (Poly Haven, CC0)", c.pad + 280f, c.y, 460f, 70f, accent = showCatalog) {
-            showCatalog = true; dirty = true
+            showCatalog = true; page = 0; dirty = true
             if (catalog == null) loadCatalog()
         }
         c.y += 90f
         if (status.isNotEmpty()) c.paragraph(status, 26f, XrTheme.accent2)
+        // grid of pictures: what each environment looks like
+        val cols = 3; val rows = 2; val per = cols * rows
+        val gap = 24f
+        val tw = (c.w - 2 * c.pad - (cols - 1) * gap) / cols
+        val ih = tw / 2f
+        val th = ih + 96f
+        val top = c.y
         if (!showCatalog) {
-            for (e in repo.installed()) {
-                val kind = when (e.kind) { EnvironmentKind.SCENE_3D -> "Cena 3D"; EnvironmentKind.PANORAMA_360 -> "Panorama 360° (sem geometria)"; else -> "Procedural" }
-                c.row("env:${e.id}", e.name, accent = e.id == a.currentEnvironmentId(), detail = "$kind • ${e.license} • ${e.author}") { a.selectEnvironment(e); dirty = true }
+            val list = repo.installed()
+            val pages = maxOf(1, (list.size + per - 1) / per); page = page.coerceIn(0, pages - 1)
+            list.drop(page * per).take(per).forEachIndexed { i, e ->
+                val x = c.pad + (i % cols) * (tw + gap); val y = top + (i / cols) * (th + gap)
+                val kind = when (e.kind) { EnvironmentKind.SCENE_3D -> "Cena 3D"; EnvironmentKind.PANORAMA_360 -> "360°"; else -> "Procedural" }
+                tile(c, "env:${e.id}", x, y, tw, ih, preview(e.id) { repo.preview(e) }, e.name, "$kind • ${e.license} • ${e.author}", e.id == a.currentEnvironmentId()) {
+                    a.selectEnvironment(e); dirty = true
+                }
             }
+            pager(c, pages)
         } else {
             val list = catalog
             if (list == null) { c.paragraph("Carregando catálogo…"); return }
-            for (item in list.take(6)) {
-                val kind = if (item.kind == EnvironmentKind.SCENE_3D) "Cena 3D" else "Panorama 360°"
-                c.row("dl:${item.id}", "Baixar: ${item.name}", detail = "$kind • CC0 • ${item.author}") { download(item) }
+            val pages = maxOf(1, (list.size + per - 1) / per); page = page.coerceIn(0, pages - 1)
+            list.drop(page * per).take(per).forEachIndexed { i, item ->
+                val x = c.pad + (i % cols) * (tw + gap); val y = top + (i / cols) * (th + gap)
+                val kind = if (item.kind == EnvironmentKind.SCENE_3D) "Cena 3D" else "360°"
+                tile(c, "dl:${item.id}", x, y, tw, ih, preview("cat:${item.id}") { repo.preview(item) }, "Baixar: ${item.name}", "$kind • CC0 • ${item.author}", false) { download(item) }
             }
-            c.paragraph("Catálogo completo, prévias e tamanhos: app 2D > Ambientes.", 24f)
+            pager(c, pages)
         }
+    }
+
+    private fun tile(c: PanelCanvas, id: String, x: Float, y: Float, w: Float, ih: Float, img: Bitmap?, title: String, detail: String, current: Boolean, action: () -> Unit) {
+        val r = android.graphics.RectF(x, y, x + w, y + ih)
+        boxPaint.color = XrTheme.button
+        c.canvas.drawRoundRect(r, 22f, 22f, boxPaint)
+        if (img != null) {
+            c.canvas.save()
+            val path = android.graphics.Path().apply { addRoundRect(r, 22f, 22f, android.graphics.Path.Direction.CW) }
+            c.canvas.clipPath(path); c.canvas.drawBitmap(img, null, r, imgPaint); c.canvas.restore()
+        } else c.label("Prévia…", x + 24f, y + ih / 2 - 16f, 24f, XrTheme.textDim)
+        if (current || isHovered(id)) {
+            boxPaint.style = android.graphics.Paint.Style.STROKE; boxPaint.strokeWidth = if (current) 8f else 4f
+            boxPaint.color = if (current) XrTheme.accent else android.graphics.Color.WHITE
+            c.canvas.drawRoundRect(r, 22f, 22f, boxPaint); boxPaint.style = android.graphics.Paint.Style.FILL
+        }
+        c.label(title, x + 4f, y + ih + 12f, 28f, XrTheme.text, bold = true, maxWidth = w - 8f, maxLines = 1)
+        c.label(detail, x + 4f, y + ih + 52f, 22f, XrTheme.textDim, maxWidth = w - 8f, maxLines = 1)
+        addRegion(Region(android.graphics.RectF(x, y, x + w, y + ih + 90f), id, action))
+    }
+
+    private fun pager(c: PanelCanvas, pages: Int) {
+        val by = c.h - 96f
+        c.button("prev", "Anterior", c.pad, by, 220f, 76f, enabled = page > 0) { page--; dirty = true }
+        c.label("${page + 1} / $pages", c.w / 2 - 40f, by + 20f, 28f, XrTheme.textDim)
+        c.button("next", "Próxima", c.w - c.pad - 220f, by, 220f, 76f, enabled = page < pages - 1) { page++; dirty = true }
     }
 
     private fun loadCatalog() {
