@@ -188,3 +188,42 @@ A última rejeição aparece no status do teste de mãos, por exemplo "grande de
   Android 12 ou mais novo, a inferência e a renderização informam o tempo de cada quadro ao
   PerformanceHintManager, e o sistema sobe o clock da CPU para cumprir o prazo em vez de deixá-la
   ociosa entre quadros.
+
+## Tremor corrigido (filtro novo)
+
+O tremor vinha de dois lugares:
+1. **Previsão em dobro sobre velocidade ruidosa.**
+   - O `HandTracker` adiantava cada junta até 60 ms com a velocidade do Kalman, que não é
+     filtrada.
+   - Depois o `snapshot()` adiantava mais até 60 ms, com uma velocidade tirada da diferença
+     entre resultados já adiantados.
+   - Numa mão parada, o ruído de 3 mm virava centímetros na tela.
+2. **Cada junta filtrada sozinha.** O ruído de profundidade (a distância vem do tamanho da mão)
+   mexe a mão inteira de uma vez.
+
+Filtro novo (`HandTracker`):
+- **Centro e forma separados.**
+  - O centro da palma (média do pulso e dos 4 nós dos dedos) tem filtros One Euro que abrem com
+    a velocidade.
+  - A distância ao longo do raio da câmera é suavizada à parte e com mais força (0,45 Hz em
+    repouso; 1,2 Hz com mapa de profundidade).
+  - A forma (cada junta relativa à palma) tem filtros mais leves. A pinça é decidida nos pontos
+    brutos do modelo, então nunca atrasa.
+- **Uma só velocidade.**
+  - Vem do centro medido, suavizada por um filtro que também abre com a velocidade (3 Hz + 12 Hz
+    por m/s).
+  - É aplicada à mão inteira, nunca por junta.
+  - Some com a mão parada: a previsão entra gradualmente entre 0,06 e 0,30 m/s.
+- **Compensação do atraso do filtro:** a previsão inclui o tempo que o filtro do centro fica
+  atrás de um movimento constante, que é 1/(2π·corte).
+- **Correção suave:** entre quadros da câmera a mão segue com essa velocidade (`HandMotion`), e
+  cada resultado novo entra na tela em cerca de 20 ms, sem salto.
+
+Medido em `HandJitterTest`: 30 Hz, 3 mm de ruído por junta, 8 mm de ruído comum na
+profundidade, imagem com 50 ms de atraso, tela a 90 Hz.
+
+| | Antes | Agora |
+|---|---|---|
+| Tremor com a mão parada (segunda diferença, ponta do indicador) | 9,61 mm | **0,49 mm** |
+| Erro com a mão parada | 9,5 mm | 4,8 mm |
+| Erro com a mão em movimento (pico de 0,94 m/s) | 66,6 mm | **29,5 mm** |

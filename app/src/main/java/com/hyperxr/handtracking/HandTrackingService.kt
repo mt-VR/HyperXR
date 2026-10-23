@@ -387,7 +387,9 @@ class HandTrackingService(private val context: Context) {
                 Diagnostics.log("Hand size measured with ARCore Depth: palm ${"%.1f".format(palm * 100)} cm")
                 onPalmMeasured?.invoke(palm)
             }
-            trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k])
+            // depth is smoothed along the ray from where the camera was (world space when its
+            // pose is known, otherwise camera space with the camera at the origin)
+            trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k], slot.pose?.position ?: ORIGIN)
             seen += side
         }
         verifier.endFrame()
@@ -397,7 +399,7 @@ class HandTrackingService(private val context: Context) {
                 val dst = published.getValue(side)
                 copy(tracker.state, dst)
                 dst.timestampNs = System.nanoTime()  // when this state became current (extrapolation base)
-                updateVelocity(side, dst)
+                motions.getValue(side).set(tracker.motion)
             }
         }
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
@@ -434,32 +436,14 @@ class HandTrackingService(private val context: Context) {
         }
     }
 
-    /** Per side: joint velocities (m/s) between the last two results, for display-rate extrapolation. */
-    private val velocity = mapOf(Handedness.LEFT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() }, Handedness.RIGHT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() })
-    private val prevJoints = mapOf(Handedness.LEFT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() }, Handedness.RIGHT to Array(HandJoint.COUNT) { com.hyperxr.math.Vec3() })
-    private val prevTime = HashMap<Handedness, Long>()
-
-    /** Called with [lock] held after a new result: updates the velocities used by snapshot(). */
-    private fun updateVelocity(side: Handedness, s: HandState) {
-        val v = velocity.getValue(side); val p = prevJoints.getValue(side)
-        val t0 = prevTime[side] ?: 0L
-        val dt = (s.timestampNs - t0) / 1e9f
-        val ok = s.state == TrackingState.TRACKING && t0 != 0L && dt in 0.005f..0.2f
-        for (j in 0 until HandJoint.COUNT) {
-            if (ok) {
-                // smoothed so one noisy result does not fling the hand
-                val nx = (s.joints[j].x - p[j].x) / dt; val ny = (s.joints[j].y - p[j].y) / dt; val nz = (s.joints[j].z - p[j].z) / dt
-                v[j].set(v[j].x * 0.4f + nx * 0.6f, v[j].y * 0.4f + ny * 0.6f, v[j].z * 0.4f + nz * 0.6f)
-            } else v[j].set(0f, 0f, 0f)
-            p[j].set(s.joints[j])
-        }
-        prevTime[side] = s.timestampNs
-    }
+    /** Per side: how the published hand keeps moving until the next result (see HandMotion). */
+    private val motions = mapOf(Handedness.LEFT to HandMotion(), Handedness.RIGHT to HandMotion())
 
     /**
      * Thread-safe copy of the latest hand states, moved forward to now: the camera gives a result
-     * every 33 ms but the display draws every 8-16 ms, so between results the joints keep moving
-     * at their measured velocity (up to 50 ms ahead) instead of standing still.
+     * every 16-33 ms but the display draws every 8-16 ms. Between results a moving hand keeps
+     * moving as a whole with its smoothed velocity (a still hand stays exactly still, so noise is
+     * never turned into shaking), and each new result blends in over ~20 ms instead of jumping.
      */
     fun snapshot(left: HandState, right: HandState) {
         val now = System.nanoTime()
@@ -470,8 +454,7 @@ class HandTrackingService(private val context: Context) {
                 if (src.state != TrackingState.TRACKING || src.timestampNs == 0L) continue
                 // forward to now, plus one display frame (when the frame drawn now reaches the eyes)
                 val dt = ((now - src.timestampNs) / 1e9f + DISPLAY_AHEAD_S).coerceIn(0f, 0.06f)
-                val v = velocity.getValue(side)
-                for (j in 0 until HandJoint.COUNT) out.joints[j].addScaled(v[j], dt)
+                motions.getValue(side).extrapolate(src, dt, out.joints)
             }
         }
     }
@@ -532,6 +515,7 @@ class HandTrackingService(private val context: Context) {
     companion object {
         const val MODEL_ASSET = "models/hand_landmarker.task"
         const val DISPLAY_AHEAD_S = 0.012f
+        private val ORIGIN = com.hyperxr.math.Vec3()
         /** Full 640x480 frames: hands at arm's length are small, and downscaling cost landmark quality. */
         const val MAX_WIDTH = 640
     }

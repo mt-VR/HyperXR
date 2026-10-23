@@ -187,16 +187,22 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         var tc = frameTs
         if (kotlin.math.abs(now - tc) > 500_000_000L) tc = now - 35_000_000L  // camera clock not REALTIME
         val target = now + predictionNs
+        qAtPose.set(out.orientation)
         if (g.delta(tc, target, dDev)) {
             toHead(dDev, fix, dHead)
             out.orientation.mul(dHead, out.orientation).normalize()
         }
-        // translation: the head's recent velocity carried forward the same span (capped)
-        val dt = ((target - tc) / 1e9f).coerceIn(0f, 0.06f)
-        out.position.addScaled(velocity, dt)
+        // translation: the eyes swing around the neck with the (current, gyro) orientation, plus
+        // the neck's own velocity while the head really moves (see HeadTranslationPredictor)
+        posAtPose.set(out.position)
+        translation.predict(posAtPose, qAtPose, out.orientation, (target - tc) / 1e9f, out.position)
     }
 
-    override fun recenter() { recenterPending = true; velocity.set(0f, 0f, 0f); prevTs = 0L }
+    private val translation = com.hyperxr.headtracking.HeadTranslationPredictor()
+    private val qAtPose = Quat()
+    private val posAtPose = Vec3()
+
+    override fun recenter() { recenterPending = true; translation.reset(); prevTs = 0L }
 
     // ---------------------------------------------------------------- gyro fusion
     /** Full-rate gyroscope history (set by the engine); null = ARCore pose only. */
@@ -204,7 +210,6 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private var frameTs = 0L
     private var prevTs = 0L
     private val prevRel = Vec3()
-    private val velocity = Vec3()
     private val dDev = Quat(); private val dHead = Quat()
     private val prevOri = Quat()
 
@@ -235,15 +240,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private fun onArPose(ts: Long) {
         val rel = origin.inverse().compose(headPose)
         val g = gyro
+        translation.onPose(rel.position, rel.orientation, ts)
         if (prevTs != 0L && ts > prevTs) {
-            val dt = (ts - prevTs) / 1e9f
-            if (dt in 0.005f..0.2f) {
-                val vx = (rel.position.x - prevRel.x) / dt; val vy = (rel.position.y - prevRel.y) / dt; val vz = (rel.position.z - prevRel.z) / dt
-                // smoothed and capped: tracking jitter must not turn into prediction jitter
-                velocity.set(velocity.x * 0.6f + vx * 0.4f, velocity.y * 0.6f + vy * 0.4f, velocity.z * 0.6f + vz * 0.4f)
-                val sp = velocity.length()
-                if (sp > 3f) velocity.scale(3f / sp)
-            }
             // score the sensor-to-head candidates while the head turns
             if (g != null && calibrationSamples < 90 && g.delta(prevTs, ts, dDev)) {
                 prevOri.conjugate(tmpA).mul(headPose.orientation, dHead)  // ARCore's own rotation

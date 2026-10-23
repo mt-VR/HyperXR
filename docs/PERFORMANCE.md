@@ -69,6 +69,33 @@ LOD, carregamento assíncrono de glTF fora do thread GL, reação ao `PowerManag
 - **Sincronia com a GPU:** um fence faz a CPU esperar a GPU terminar o quadro anterior, e nenhum
   quadro fica na fila atrás de outro.
 
+### Rodada 4: previsão de segunda ordem e modelo do pescoço
+
+- **Giroscópio (`GyroHistory`):** a previsão até o fóton usa a velocidade e a aceleração angular,
+  ajustadas por mínimos quadrados nos últimos 20 ms, com 80% da aceleração e limite de 80 rad/s².
+  Antes usava só a última velocidade.
+  - Medido em `GyroHistoryTest`, numa virada de 90° em 0,4 s, 33 ms à frente:
+
+    | | Velocidade constante | Segunda ordem |
+    |---|---|---|
+    | Erro RMS | 1,15° | **0,43°** |
+    | Pior erro | 1,95° | 0,76° |
+
+  - Com a cabeça parada continua parada (0,06°).
+- **Posição 6DoF (`HeadTranslationPredictor`, no ARCore):**
+  - Os olhos giram em volta do pescoço (8 cm à frente, 7,5 cm acima) com a orientação já prevista
+    pelo giroscópio. Olhar em volta move a vista sem esperar a pose do ARCore.
+  - O pescoço tem velocidade própria só quando a cabeça anda de verdade.
+  - Parado, a posição do pescoço é suavizada.
+  - Medido em `HeadTranslationTest` (poses a 30 Hz, 40 ms de atraso, 73 ms à frente):
+
+    | | Antes | Agora |
+    |---|---|---|
+    | Olhando em volta: erro | 8,2 mm | **0,8 mm** |
+    | Olhando em volta: tremor | 8,1 mm | 0,7 mm |
+    | Andando a 0,8 m/s: erro | 18,6 mm | 10,0 mm |
+    | Cabeça parada: tremor | 7,3 mm | **1,2 mm** |
+
 ## Giroscópio computacional (celulares sem giroscópio)
 
 Em Head tracking > Fonte, a opção **Giroscópio computacional (câmera)** liga isso. No modo

@@ -23,10 +23,14 @@ class OneEuroFilter(var minCutoff: Float = 1.0f, var beta: Float = 0.02f, var dC
         val edx = lowpass(dx, dxPrev, alpha(dCutoff, dtSeconds))
         dxPrev = edx
         val cutoff = minCutoff + beta * abs(edx)
+        lastCutoff = cutoff
         val result = lowpass(x, xPrev, alpha(cutoff, dtSeconds))
         xPrev = result
         return result
     }
+
+    /** Cutoff (Hz) used for the last sample: the filter trails a steady motion by 1/(2π·cutoff) s. */
+    var lastCutoff = minCutoff; private set
 
     /** Last filtered derivative (units/s), used for motion prediction. */
     val velocity: Float get() = dxPrev

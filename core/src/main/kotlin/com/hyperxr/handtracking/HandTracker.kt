@@ -3,12 +3,49 @@ package com.hyperxr.handtracking
 import com.hyperxr.math.Vec3
 
 /**
+ * How a published hand keeps moving on the display between camera results: the centre's
+ * velocity, how much of it to use, and the correction of the last result still blending in.
+ * A copy travels with each published [HandState] so the render thread can [extrapolate] safely.
+ */
+class HandMotion {
+    val velocity = Vec3()
+    var gain = 0f
+    val residual = Array(HandJoint.COUNT) { Vec3() }
+    var blendSeconds = 0.02f
+    var moving = false
+
+    fun set(o: HandMotion) {
+        velocity.set(o.velocity); gain = o.gain; blendSeconds = o.blendSeconds; moving = o.moving
+        for (i in 0 until HandJoint.COUNT) residual[i].set(o.residual[i])
+    }
+
+    /**
+     * [src]'s joints [aheadSeconds] after its update: moved as a whole by the velocity (not at all
+     * while still), with the last correction fading in.
+     */
+    fun extrapolate(src: HandState, aheadSeconds: Float, out: Array<Vec3>) {
+        val s = if (moving) aheadSeconds * gain else 0f
+        val r = kotlin.math.exp(-aheadSeconds / blendSeconds)
+        for (i in 0 until HandJoint.COUNT) out[i].set(src.joints[i]).addScaled(velocity, s).addScaled(residual[i], r)
+    }
+}
+
+/**
  * Temporal layer for one hand. Each accepted frame goes through:
  *  1. skeleton fit: the observation is fitted to the user's bone lengths (no stretching bones);
- *  2. per-joint constant-velocity Kalman filter, weighted by how trustworthy the depth is;
- *  3. One Euro filter on the Kalman estimate (removes the remaining jitter when the hand is still,
- *     stays responsive when it moves);
- *  4. skeleton fit again, then prediction to display time with the Kalman velocity.
+ *  2. split into the hand's centre (palm) and its shape (each joint relative to the palm). On a
+ *     phone most of the tremor is the whole hand moving together: its depth comes from the
+ *     hand-size prior and jumps along the camera ray. So:
+ *       - the distance along the ray from the camera is smoothed hard ([depthCutoffHz]),
+ *       - the centre is smoothed by One Euro filters that open up with speed (still = steady,
+ *         moving = little lag),
+ *       - the shape has its own lighter One Euro filters (fingers stay quick; the pinch itself is
+ *         decided on the model's raw landmarks, so it is never delayed by filtering);
+ *  3. prediction to display time with one smoothed velocity of the centre, applied to the hand
+ *     as a whole and faded out when the hand is (nearly) still: prediction is what turned
+ *     measurement noise into visible shaking, because a still hand's noisy velocity was
+ *     multiplied by 30-60 ms;
+ *  4. [extrapolate] carries the result forward between camera frames the same way.
  * Plausibility checks, loss coasting and jump-free recovery work on top of that.
  */
 class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float = 0.02f) {
@@ -28,25 +65,64 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     var jumpThreshold = 0.12f
     var recoveryNs = 120_000_000L
     var predictionSeconds = 0.0f
-    /** Measurement standard deviation (m) with a depth map, and with the hand-size prior. */
-    var depthMapSigma = 0.005f
-    var sizePriorSigma = 0.012f
 
-    private val filters = Array(HandJoint.COUNT * 3) { OneEuroFilter(minCutoff, beta) }
-    private val kalman = Array(HandJoint.COUNT * 3) { Kalman1D(q = 3f) }
+    /** Centre of the hand across the view (Hz at rest; [lateralBeta] opens it with speed). */
+    var lateralCutoffHz = 1.0f
+    var lateralBeta = 6f
+    /** Distance from the camera: the noisiest part with the hand-size prior. */
+    var depthCutoffHz = 0.45f
+    var depthBeta = 4f
+    /** With a depth map the distance is measured, not guessed: less smoothing. */
+    var depthMapDepthCutoffHz = 1.2f
+    /** Shape of the hand (joints relative to the palm). */
+    var shapeCutoffHz = 1.1f
+    var shapeBeta = 2.5f
+    /** Prediction fades in between these hand speeds (m/s). */
+    var stillSpeed = 0.06f
+    var movingSpeed = 0.30f
+    var velocityCutoffHz = 3f
+    var velocityBeta = 12f
+
+    private val lateral = Array(3) { OneEuroFilter() }
+    private val depth = OneEuroFilter()
+    private val shape = Array(HandJoint.COUNT * 3) { OneEuroFilter() }
     private val meas = Array(HandJoint.COUNT) { Vec3() }
     private val offset = Array(HandJoint.COUNT) { Vec3() }
+    /** Velocity, prediction gain and blending correction for the display (see [HandMotion]). */
+    val motion = HandMotion()
+    private val residual get() = motion.residual
+    /** Time constant over which each new camera result is blended in on the display. */
+    var blendSeconds: Float
+        get() = motion.blendSeconds
+        set(v) { motion.blendSeconds = v }
+    private val rawRoot = Vec3()
+    private val root = Vec3()
+    private val prevRoot = Vec3()
+    private var haveRoot = false
+    /** Smoothed velocity of the hand's centre (m/s). */
+    val velocity get() = motion.velocity
+    /** 0 (still: no prediction) .. 1 (moving: full prediction). */
+    var predictionGain: Float
+        get() = motion.gain
+        private set(v) { motion.gain = v }
     private val gestures = GestureRecognizer()
     private var lastSeenNs = 0L
     private var lastUpdateNs = 0L
     private var recoveryStartNs = 0L
 
-    fun setFilterParams(minCutoff: Float, beta: Float) {
-        filters.forEach { it.minCutoff = minCutoff; it.beta = beta }
+    init { setFilterParams(minCutoff, beta) }
+
+    /**
+     * [minCutoff] (the "smoothing" setting, Hz) scales every stage: lower = steadier, higher =
+     * quicker. [beta] is kept for compatibility; speed adaptation uses the per-stage betas.
+     */
+    fun setFilterParams(minCutoff: Float, @Suppress("UNUSED_PARAMETER") beta: Float) {
+        val k = (minCutoff / 1.2f).coerceIn(0.3f, 4f)
+        lateralCutoffHz = 1.0f * k; depthCutoffHz = 0.45f * k; depthMapDepthCutoffHz = 1.2f * k; shapeCutoffHz = 1.1f * k
     }
 
-    /** Kalman process noise (m/s^2)^2: higher follows fast hands better, lower smooths more. */
-    fun setProcessNoise(q: Float) { kalman.forEach { it.q = q } }
+    /** Former Kalman process noise: now how fast the centre filter opens up with speed. */
+    fun setProcessNoise(q: Float) { lateralBeta = 2f * q.coerceIn(0.5f, 20f) }
 
     /** Pinch closes when thumb-index distance / palm length drops below this ratio (scale-free). */
     var pinchRatio: Float
@@ -55,9 +131,11 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
 
     /**
      * @param rawPinchRatio pinch ratio measured on this frame's model landmarks (preferred over the
-     *   filtered camera-space joints, which lag and carry depth noise); NaN to use the joints.
+     *   filtered joints); NaN to use the joints.
+     * @param viewOrigin where the camera was when the image was taken (same space as [joints]), so
+     *   depth along its ray can be smoothed on its own; null treats all directions alike.
      */
-    fun update(joints: Array<Vec3>?, score: Float, depthSource: DepthSource, timestampNs: Long, rawPinchRatio: Float = Float.NaN) {
+    fun update(joints: Array<Vec3>?, score: Float, depthSource: DepthSource, timestampNs: Long, rawPinchRatio: Float = Float.NaN, viewOrigin: Vec3? = null) {
         val dt = if (lastUpdateNs == 0L) 0f else ((timestampNs - lastUpdateNs) / 1e9f).coerceIn(0f, 0.25f)
         lastUpdateNs = timestampNs
         state.timestampNs = timestampNs
@@ -98,38 +176,113 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
             (1f - (timestampNs - recoveryStartNs).toFloat() / recoveryNs).coerceIn(0f, 1f)
         } else 0f
 
-        // less trusted observations (size prior, low score) count for less in the Kalman update
-        val sigma = (if (depthSource == DepthSource.DEPTH_MAP) depthMapSigma else sizePriorSigma) / score.coerceIn(0.3f, 1f)
-        val r = sigma * sigma
+        // where the display has been drawing the hand for this instant (last result carried
+        // forward): the new result is blended in from there instead of jumping to it
+        val shownGain = predictionGain
+        for (i in 0 until HandJoint.COUNT) residual[i].set(state.joints[i]).addScaled(velocity, dt * shownGain)
+
+        // centre of the palm, and its distance along the camera ray smoothed on its own
+        palmCentre(meas, rawRoot)
+        val corrected = Vec3().set(rawRoot)
+        if (viewOrigin != null) {
+            val dx = rawRoot.x - viewOrigin.x; val dy = rawRoot.y - viewOrigin.y; val dz = rawRoot.z - viewOrigin.z
+            val d = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz)
+            if (d > 1e-3f) {
+                depth.minCutoff = if (depthSource == DepthSource.DEPTH_MAP) depthMapDepthCutoffHz else depthCutoffHz
+                depth.beta = depthBeta
+                // less trusted observations are smoothed more
+                depth.minCutoff *= score.coerceIn(0.4f, 1f)
+                val df = depth.filter(d, dt) / d
+                corrected.set(viewOrigin.x + dx * df, viewOrigin.y + dy * df, viewOrigin.z + dz * df)
+            }
+        }
+        for (a in 0..2) { lateral[a].minCutoff = lateralCutoffHz; lateral[a].beta = lateralBeta }
+        root.set(lateral[0].filter(corrected.x, dt), lateral[1].filter(corrected.y, dt), lateral[2].filter(corrected.z, dt))
+
+        // the shape, relative to the palm
         for (i in 0 until HandJoint.COUNT) {
             val m = meas[i]
-            val kx = kalman[i * 3]; val ky = kalman[i * 3 + 1]; val kz = kalman[i * 3 + 2]
-            kx.predict(dt); ky.predict(dt); kz.predict(dt)
-            kx.update(m.x, r); ky.update(m.y, r); kz.update(m.z, r)
+            for (a in 0..2) { shape[i * 3 + a].minCutoff = shapeCutoffHz; shape[i * 3 + a].beta = shapeBeta }
             state.joints[i].set(
-                filters[i * 3].filter(kx.x, dt),
-                filters[i * 3 + 1].filter(ky.x, dt),
-                filters[i * 3 + 2].filter(kz.x, dt),
+                root.x + shape[i * 3].filter(m.x - rawRoot.x, dt),
+                root.y + shape[i * 3 + 1].filter(m.y - rawRoot.y, dt),
+                root.z + shape[i * 3 + 2].filter(m.z - rawRoot.z, dt),
             )
         }
         skeleton.fit(state.joints)
-        val p = predictionSeconds
+
+        // velocity of the centre (from the depth-smoothed measurement, not the filtered centre,
+        // so it does not carry the filter's lag), smoothed at [velocityCutoffHz]
+        if (haveRoot && dt > 0f) {
+            // opens up with speed (One Euro style): steady when still, quick when moving
+            val a = alpha(velocityCutoffHz + velocityBeta * velocity.length().coerceAtMost(1.5f), dt)
+            velocity.set(
+                velocity.x + ((corrected.x - prevRoot.x) / dt - velocity.x) * a,
+                velocity.y + ((corrected.y - prevRoot.y) / dt - velocity.y) * a,
+                velocity.z + ((corrected.z - prevRoot.z) / dt - velocity.z) * a,
+            )
+        } else velocity.set(0f, 0f, 0f)
+        prevRoot.set(corrected); haveRoot = true
+        predictionGain = smoothstep(stillSpeed, movingSpeed, velocity.length())
+
+        // ahead by the image's age, plus the time the centre filter trails a moving hand
+        // (a first-order filter is 1/(2π·cutoff) behind a steady motion), only while moving
+        val g = predictionGain
+        val px = (predictionSeconds + lag(lateral[0])) * g
+        val py = (predictionSeconds + lag(lateral[1])) * g
+        val pz = (predictionSeconds + lag(lateral[2])) * g
         for (i in 0 until HandJoint.COUNT) {
-            state.joints[i].x += kalman[i * 3].v * p + offset[i].x * fade
-            state.joints[i].y += kalman[i * 3 + 1].v * p + offset[i].y * fade
-            state.joints[i].z += kalman[i * 3 + 2].v * p + offset[i].z * fade
+            state.joints[i].x += velocity.x * px + offset[i].x * fade
+            state.joints[i].y += velocity.y * py + offset[i].y * fade
+            state.joints[i].z += velocity.z * pz + offset[i].z * fade
         }
-        if (p != 0f) skeleton.fit(state.joints)
         if (fade == 0f) offset.forEach { it.set(0f, 0f, 0f) }
+        // residual = what was shown minus the new estimate; dropped after a re-acquisition or a jump
+        var big = state.state != TrackingState.TRACKING || dt == 0f
+        for (i in 0 until HandJoint.COUNT) {
+            residual[i].sub(state.joints[i])
+            if (residual[i].length() > 0.04f) big = true
+        }
+        if (big) residual.forEach { it.set(0f, 0f, 0f) }
         lastSeenNs = timestampNs
         state.confidence = score
         state.depthSource = depthSource
+        motion.moving = state.state == TrackingState.TRACKING || state.state == TrackingState.RECOVERING
         gestures.update(state, rawPinchRatio)
     }
 
+    /**
+     * The hand [aheadSeconds] after its last update, for the display between camera frames: moved
+     * as a whole by the centre's velocity, and not at all while it is still.
+     */
+    fun extrapolate(aheadSeconds: Float, out: Array<Vec3>) = motion.extrapolate(state, aheadSeconds, out)
+
+    private fun lag(f: OneEuroFilter) = (1f / (2f * Math.PI.toFloat() * f.lastCutoff)).coerceAtMost(0.08f)
+
+    private fun palmCentre(j: Array<Vec3>, out: Vec3): Vec3 {
+        out.set(0f, 0f, 0f)
+        for (k in PALM) out.add(j[k])
+        return out.scale(1f / PALM.size)
+    }
+
+    private fun alpha(cutoff: Float, dt: Float): Float {
+        val tau = 1f / (2f * Math.PI.toFloat() * cutoff)
+        return 1f / (1f + tau / dt)
+    }
+
+    private fun smoothstep(a: Float, b: Float, x: Float): Float {
+        val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
+        return t * t * (3 - 2 * t)
+    }
+
     private fun resetFilters() {
-        filters.forEach { it.reset() }
-        kalman.forEach { it.reset() }
+        lateral.forEach { it.reset() }
+        depth.reset()
+        shape.forEach { it.reset() }
+        residual.forEach { it.set(0f, 0f, 0f) }
+        haveRoot = false
+        velocity.set(0f, 0f, 0f)
+        predictionGain = 0f
     }
 
     private fun handleMissing(now: Long, dt: Float) {
@@ -137,6 +290,7 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
             TrackingState.TRACKING, TrackingState.RECOVERING, TrackingState.LOST_PREDICTING -> {
                 if (now - lastSeenNs > lostTimeoutNs) {
                     state.state = TrackingState.NOT_TRACKED
+                    motion.moving = false
                     state.confidence = 0f
                     state.gesture = Gesture.NONE
                     state.pinchStrength = 0f
@@ -144,17 +298,13 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
                     return
                 }
                 state.state = TrackingState.LOST_PREDICTING
-                // Kalman prediction with a velocity that decays quickly: short gaps stay continuous,
-                // long ones leave the hand where it was last seen instead of flying off.
-                val decay = kotlin.math.exp(-dt / coastDecaySeconds)
-                for (i in 0 until HandJoint.COUNT) {
-                    val kx = kalman[i * 3]; val ky = kalman[i * 3 + 1]; val kz = kalman[i * 3 + 2]
-                    state.joints[i].x += kx.v * dt
-                    state.joints[i].y += ky.v * dt
-                    state.joints[i].z += kz.v * dt
-                    kx.predict(dt); ky.predict(dt); kz.predict(dt)
-                    kx.dampVelocity(decay); ky.dampVelocity(decay); kz.dampVelocity(decay)
-                }
+                motion.moving = false
+                residual.forEach { it.set(0f, 0f, 0f) }
+                // carried by the centre's velocity, which decays quickly: short gaps stay
+                // continuous, long ones leave the hand where it was last seen instead of flying off
+                val s = dt * predictionGain
+                for (i in 0 until HandJoint.COUNT) state.joints[i].addScaled(velocity, s)
+                velocity.scale(kotlin.math.exp(-dt / coastDecaySeconds))
                 state.confidence *= 0.85f
             }
             TrackingState.NOT_TRACKED -> Unit
@@ -171,6 +321,8 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
         return true
     }
 }
+
+private val PALM = intArrayOf(HandJoint.WRIST, HandJoint.INDEX_MCP, HandJoint.MIDDLE_MCP, HandJoint.RING_MCP, HandJoint.PINKY_MCP)
 
 /** Gesture classification from 3D joints, with hysteresis so states do not flicker. */
 class GestureRecognizer {
