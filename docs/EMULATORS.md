@@ -9,6 +9,7 @@ vem incluído.** O usuário usa as próprias ROMs.
 |---|---|---|---|---|
 | NES | QuickNES | Shay Green (blargg), kode54, equipe libretro | GPL-2.0 | https://github.com/libretro/QuickNES_Core (26bb785c9ded) |
 | Game Boy / Color | Gambatte | Sindre Aamås (sinamas), equipe libretro | GPL-2.0 | https://github.com/libretro/gambatte-libretro (d9d6cd06382d) |
+| PC (MS-DOS, Windows 3.x/9x) | DOSBox Pure | Bernhard Schelling, equipe do DOSBox | GPL-2.0 | https://codeberg.org/schelling/dosbox-pure (468dad01566b) |
 | Game Boy Advance | mGBA | Vicki Pfau (endrift) e colaboradores | MPL-2.0 | https://github.com/libretro/mgba (7a12d6d4b9ac) |
 
 A API libretro (`native/libretro/include/libretro.h`) é MIT, do RetroArch team. Os créditos
@@ -43,6 +44,22 @@ Ficaram de fora núcleos com licença não comercial, como Snes9x, Genesis Plus 
   primeira ROM do zip). Com o acesso aos arquivos, as ROMs do celular também aparecem na lista.
 - **Arquivos:** `files/emulators/{roms,saves,states,system}`. O mGBA usa a BIOS própria (HLE);
   uma `gba_bios.bin` em `system/` também funciona.
+
+## PC (DOSBox Pure)
+
+- **O que abre:** o .zip do jogo (o jeito comum de distribuir jogos de DOS), .exe, .com, .bat,
+  .iso/.cue/.chd (CD), .img/.ima/.vhd (disquete e disco rígido) ou .dosz.
+- **ZIP e EXE:** só aparecem depois de importados, porque o celular tem muitos .zip que não são
+  jogos. Um .zip com ROM de console dentro continua indo para o console.
+- **Teclado:** o teclado Bluetooth vai direto para o DOS, e o teclado do XR digita no jogo (botão
+  Teclado na barra da janela).
+- **Controle:** o DOSBox Pure mapeia o joypad para as teclas de cada jogo.
+- **Mouse:** apontar na tela move o mouse; a pinça ou o clique é o botão esquerdo.
+- **Testado no servidor:** o mesmo frontend com o DOSBox Pure compilado para Linux rodou um
+  programa de DOS feito para o teste. Ele entra no modo gráfico 320x200 e pinta a tela com o
+  scancode da tecla apertada. As teclas "1" e "a" chegaram ao DOS com os scancodes certos (0x02 e
+  0x1E). O mouse não foi testado lá.
+- **Voltar no tempo:** fica desligado no PC, porque o estado da máquina é grande demais.
 
 ## Voltar no tempo, acelerar e cinema
 

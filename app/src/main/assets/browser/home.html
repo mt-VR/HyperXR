@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova aba</title>
+<style>
+  :root { --bg: #17181c; --card: #23252b; --card-hover: #2f323a; --text: #f2f3f5; --dim: #a3a7b0; --accent: #2874f0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 9vh 32px 48px; }
+  h1 { font-size: 56px; font-weight: 600; letter-spacing: -1px; margin: 0 0 8px; text-align: center; }
+  p.sub { color: var(--dim); text-align: center; font-size: 22px; margin: 0 0 40px; }
+  form { display: flex; gap: 14px; }
+  input[type=search] { flex: 1; font-size: 30px; padding: 22px 28px; border-radius: 22px; border: 2px solid #3a3d45;
+    background: var(--card); color: var(--text); outline: none; }
+  input[type=search]:focus { border-color: var(--accent); }
+  button { font-size: 28px; padding: 0 34px; border-radius: 22px; border: 0; background: var(--accent); color: #fff; }
+  h2 { font-size: 22px; color: var(--dim); font-weight: 500; margin: 48px 0 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .grid a { display: block; padding: 26px 20px; border-radius: 20px; background: var(--card); color: var(--text);
+    text-decoration: none; font-size: 26px; font-weight: 500; }
+  .grid a span { display: block; color: var(--dim); font-size: 18px; font-weight: 400; margin-top: 6px; }
+  .grid a:hover, .grid a:focus { background: var(--card-hover); }
+  footer { color: var(--dim); font-size: 16px; text-align: center; margin-top: 56px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HyperXR</h1>
+  <p class="sub">Navegando com o motor do Wolvic (GeckoView)</p>
+  <form action="https://www.google.com/search" method="get">
+    <input type="search" name="q" placeholder="Pesquisar ou digitar endereço" autocomplete="off">
+    <button type="submit">Buscar</button>
+  </form>
+  <h2>Atalhos</h2>
+  <div class="grid">
+    <a href="https://www.youtube.com">YouTube<span>vídeos</span></a>
+    <a href="https://pt.wikipedia.org">Wikipédia<span>enciclopédia</span></a>
+    <a href="https://itch.io/games/tag-virtual-reality">itch.io VR<span>jogos independentes</span></a>
+    <a href="https://github.com/topics/openxr">GitHub OpenXR<span>projetos open source</span></a>
+    <a href="https://immersive-web.github.io/webxr-samples/">WebXR<span>exemplos no navegador</span></a>
+    <a href="https://www.twitch.tv">Twitch<span>lives</span></a>
+    <a href="https://web.whatsapp.com">WhatsApp Web<span>mensagens</span></a>
+    <a href="https://news.google.com">Notícias<span>Google Notícias</span></a>
+  </div>
+  <footer>Página inicial do HyperXR. A busca usa o Google, o padrão do Wolvic.</footer>
+</main>
+<script>
+  // typing an address goes straight to it, like the address bar
+  document.querySelector('form').addEventListener('submit', function (e) {
+    var t = this.q.value.trim();
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) { e.preventDefault(); location.href = t; }
+    else if (!/\s/.test(t) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(t)) { e.preventDefault(); location.href = 'https://' + t; }
+  });
+</script>
+</body>
+</html>

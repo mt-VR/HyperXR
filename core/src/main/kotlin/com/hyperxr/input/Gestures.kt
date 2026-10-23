@@ -55,23 +55,18 @@ class RadialMenu(val items: List<String>, var holdNs: Long = 450_000_000L, var d
      * @param overTarget true when the hand's pointer is on a button/window (the pinch belongs to it)
      * @return the confirmed item index on release, or null
      */
-    fun update(pinching: Boolean, pinchPoint: Vec3, head: Pose, overTarget: Boolean, nowNs: Long): Int? {
+    fun update(pinching: Boolean, pinchPoint: Vec3, head: Pose, overTarget: Boolean, nowNs: Long, instant: Boolean = false): Int? {
         when (phase) {
-            Phase.IDLE -> if (pinching && !overTarget) {
-                phase = Phase.ARMING; pinchStartNs = nowNs; start.set(pinchPoint)
+            Phase.IDLE -> if (pinching && instant) {
+                // pinch with the palm up: the menu opens at once, wherever the pointer is
+                open(pinchPoint, head); openedInstantly = true
+            } else if (pinching && !overTarget) {
+                phase = Phase.ARMING; pinchStartNs = nowNs; start.set(pinchPoint); openedInstantly = false
             }
             Phase.ARMING -> when {
                 !pinching -> phase = Phase.IDLE
                 pinchPoint.distanceTo(start) > deadZone -> phase = Phase.IDLE // it was a drag, not a hold
-                nowNs - pinchStartNs >= holdNs -> {
-                    phase = Phase.OPEN
-                    center.set(pinchPoint)
-                    plane.position.set(pinchPoint)
-                    val dx = pinchPoint.x - head.position.x
-                    val dz = pinchPoint.z - head.position.z
-                    com.hyperxr.math.Quat.fromAxisAngle(0f, 1f, 0f, atan2(-dx, -dz), plane.orientation)
-                    selected = -1
-                }
+                nowNs - pinchStartNs >= holdNs -> open(pinchPoint, head)
             }
             Phase.OPEN -> {
                 plane.inverse().transformPoint(pinchPoint, local)
@@ -86,6 +81,20 @@ class RadialMenu(val items: List<String>, var holdNs: Long = 450_000_000L, var d
             }
         }
         return null
+    }
+
+    /** Opened by a palm-up pinch (it then owns the pinch even over a window). */
+    var openedInstantly = false
+        private set
+
+    private fun open(pinchPoint: Vec3, head: Pose) {
+        phase = Phase.OPEN
+        center.set(pinchPoint)
+        plane.position.set(pinchPoint)
+        val dx = pinchPoint.x - head.position.x
+        val dz = pinchPoint.z - head.position.z
+        com.hyperxr.math.Quat.fromAxisAngle(0f, 1f, 0f, atan2(-dx, -dz), plane.orientation)
+        selected = -1
     }
 
     /** Items are laid out clockwise starting at the top. */

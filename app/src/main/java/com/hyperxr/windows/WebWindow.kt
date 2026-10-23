@@ -57,7 +57,7 @@ class WebWindow(
         }
         wv.isFocusableInTouchMode = true
         wv.requestFocus()
-        wv.loadUrl(url)
+        wv.loadUrl(if (url == com.hyperxr.browser.UrlInput.HOME) com.hyperxr.browser.UrlInput.HOME_WEBVIEW else url)
     }
 
     override fun injectTouch(action: Int, x: Float, y: Float, downTimeMs: Long, eventTimeMs: Long) {
@@ -101,7 +101,7 @@ class WebWindow(
         }
     }
 
-    override fun openUrl(url: String) { activity.runOnUiThread { web?.loadUrl(url) } }
+    override fun openUrl(url: String) { activity.runOnUiThread { web?.loadUrl(if (url == com.hyperxr.browser.UrlInput.HOME) com.hyperxr.browser.UrlInput.HOME_WEBVIEW else url) } }
 
     /** Long pinch on a link picks it up for drag-and-drop to another window. */
     override fun onLongPress(x: Float, y: Float, pointerId: Int) {

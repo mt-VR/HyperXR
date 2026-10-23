@@ -381,5 +381,5 @@ class BrowserWindow(
         }
     }
 
-    companion object { const val HOME = "https://duckduckgo.com" }
+    companion object { const val HOME = com.hyperxr.browser.UrlInput.HOME }
 }

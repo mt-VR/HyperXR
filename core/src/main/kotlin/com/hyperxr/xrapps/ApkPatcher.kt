@@ -33,6 +33,10 @@ data class PatchReport(
  *  - Meta's OpenXR loader (or an unknown one) replaced by the Khronos loader;
  *  - Daydream-only apps: the DAYDREAM launcher category becomes CARDBOARD, so the GVR SDK and
  *    launchers treat them as Cardboard apps (no Google VR Services or Daydream phone needed);
+ *  - Daydream checks in the app's own code ("is this a Daydream-ready phone?") answer yes
+ *    ([DexPatcher]); the Google VR SDK itself keeps running in Cardboard mode;
+ *  - 32-bit only apps: run as they are on phones that execute 32-bit code; on 64-bit-only phones
+ *    they are refused with the reason (native ARM code cannot be converted to 64 bits);
  *  - VrApi (Gear VR / old Quest) games are refused: HyperXR supports OpenXR only;
  *  - old signatures removed (the caller signs the result).
  */
@@ -77,7 +81,10 @@ object ApkPatcher {
     }
 
     /** Plans and writes the unsigned patched APK to [output]. With [dryRun] only the report is made. */
-    fun patch(input: File, output: File, libs: CompatLibraries, dryRun: Boolean = false): PatchReport {
+    /**
+     * @param device32Bit whether this phone runs 32-bit ARM code (null = unknown, no check).
+     */
+    fun patch(input: File, output: File, libs: CompatLibraries, dryRun: Boolean = false, device32Bit: Boolean? = null): PatchReport {
         ZipFile(input).use { zip ->
             val entries = zip.entries().asSequence().toList()
             val names = entries.map { it.name }.toSet()
@@ -98,7 +105,14 @@ object ApkPatcher {
 
             val abiDirs = ABI_DIRS.filter { abi -> names.any { it.startsWith("lib/$abi/") } }
             if (abiDirs.isEmpty() && names.any { it.startsWith("lib/") }) blockers += "O APK não tem bibliotecas ARM (arm64-v8a/armeabi-v7a): não roda num celular"
-            if (abiDirs.isNotEmpty() && "arm64-v8a" !in abiDirs && !daydreamOrCardboard(manifestBytes)) warnings += "Jogo 32 bits: o runtime HyperXR é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
+            val only32 = abiDirs.isNotEmpty() && "arm64-v8a" !in abiDirs
+            when {
+                only32 && device32Bit == false -> blockers += "App só 32 bits (armeabi-v7a) e este celular só executa código 64 bits. " +
+                    "Código nativo ARM não pode ser convertido de 32 para 64 bits com segurança: procure a versão 64 bits (arm64-v8a) do app"
+                only32 && daydreamOrCardboard(manifestBytes) -> changes += "App 32 bits: roda como está (o SDK de VR do Google vem dentro do app)" +
+                    if (device32Bit == true) "; este celular executa código 32 bits" else ""
+                only32 -> warnings += "Jogo OpenXR 32 bits: o runtime HyperXR é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
+            }
             val libNames = names.filter { it.startsWith("lib/") }.map { it.substringAfterLast('/') }.toSet()
             ENTITLEMENT.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
                 warnings += "Verificação de compra da Meta (${it.joinToString()}): se o jogo exigir, ele fecha ao iniciar"
@@ -121,6 +135,16 @@ object ApkPatcher {
                     }
                 }
             }
+            // Daydream checks in the app's own code
+            val dexPatched = HashMap<String, ByteArray>()
+            for (name in names.filter { Regex("^classes\\d*\\.dex$").matches(it) }) {
+                val bytes = zip.getInputStream(zip.getEntry(name)).use { it.readBytes() }
+                val r = DexPatcher.patch(bytes)
+                if (r.sites > 0) {
+                    dexPatched[name] = r.dex
+                    changes += "Verificação \"celular Daydream?\" removida em ${r.sites} ponto(s) de $name (${r.methods.distinct().take(3).joinToString()}${if (r.methods.distinct().size > 3) "…" else ""})"
+                }
+            }
             val questGame = QUEST_HINTS.any { hint -> manifest.descendants("category").any { it.attr("name") == hint } } ||
                 manifest.all("application").firstOrNull()?.all("meta-data")?.any { it.attr("name") == "com.oculus.supportedDevices" } == true
             val report = PatchReport(changes, warnings, blockers, pkg, questGame, daydream)
@@ -136,6 +160,7 @@ object ApkPatcher {
                     when {
                         name == "AndroidManifest.xml" -> putBytes(out, name, newManifest, stored = e.method == ZipEntry.STORED)
                         name in replace -> putFile(out, name, replace.getValue(name), stored = true)
+                        name in dexPatched -> putBytes(out, name, dexPatched.getValue(name), stored = e.method == ZipEntry.STORED)
                         // native libraries and resources.arsc stay uncompressed (mapped in place)
                         else -> putEntry(out, zip, e, stored = e.method == ZipEntry.STORED || name.endsWith(".so") || name == "resources.arsc")
                     }

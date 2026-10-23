@@ -130,5 +130,7 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - Emuladores embutidos (libretro, compilados do código-fonte por `tools/build_libretro_cores.sh`):
   QuickNES — GPL-2.0, Gambatte — GPL-2.0, mGBA — MPL-2.0; `libretro.h` — MIT. Fontes e commits em
   `native/libretro/CORES` e [docs/EMULATORS.md](docs/EMULATORS.md). Nenhum jogo incluído.
+- DOSBox Pure (núcleo de PC, compilado do código-fonte) — GPL-2.0, https://codeberg.org/schelling/dosbox-pure
+- Ícones do navegador: ícones originais do Wolvic (Igalia) — MPL-2.0 (`native/WOLVIC_ICONS.md`)
 - Ambientes 360 embutidos (`app/src/main/assets/environments`) — imagens fornecidas pelo dono do projeto
 - Ícones dos apps — arte original do autor do HyperXR (não afiliada à Meta)

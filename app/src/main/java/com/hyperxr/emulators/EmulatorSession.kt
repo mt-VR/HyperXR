@@ -28,6 +28,9 @@ object EmulatorFiles {
 class EmulatorSession(private val context: Context, val core: EmulatorCore, val rom: File) {
     @Volatile var status: String? = "Carregando…"; private set
     @Volatile var aspect = 4f / 3f; private set
+    /** Base picture size of the game (pixels), for mouse movement. */
+    @Volatile var width = 0; private set
+    @Volatile var height = 0; private set
     @Volatile var paused = false
     @Volatile var muted = false
     @Volatile private var running = false
@@ -79,6 +82,7 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
         if (ramFile.isFile) RetroNative.loadRam(ramFile.path)
         val av = RetroNative.avInfo()
         aspect = av[2].toFloat().takeIf { it > 0.3f && it < 4f } ?: (4f / 3f)
+        width = av[0].toInt(); height = av[1].toInt()
         val fps = av[3].takeIf { it in 20.0..120.0 } ?: 60.0
         val rate = av[4].toInt().takeIf { it in 8000..192000 } ?: 44100
         Diagnostics.log("Emulator ${core.coreName}: ${rom.name}, ${av[0].toInt()}x${av[1].toInt()} @ ${"%.2f".format(fps)} fps, $rate Hz")

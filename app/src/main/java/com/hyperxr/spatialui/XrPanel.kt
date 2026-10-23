@@ -322,6 +322,28 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         panel.addRegion(XrPanel.Region(r, id, action, onLong))
     }
 
+    /**
+     * Round button with a monochrome glyph (browser bar, Wolvic style): a soft disc that lights up
+     * when hovered, the glyph dimmed when disabled.
+     */
+    fun roundIconButton(id: String, glyph: Bitmap, x: Float, top: Float, size: Float, enabled: Boolean = true, accent: Boolean = false, action: () -> Unit) {
+        val r = RectF(x, top, x + size, top + size)
+        val hover = panel.isHovered(id); val press = panel.isPressed(id)
+        fill.color = when {
+            !enabled -> XrTheme.buttonDisabled
+            press && accent -> XrTheme.accentPressed
+            press -> XrTheme.buttonPressed
+            accent -> XrTheme.accent
+            hover -> XrTheme.buttonHover
+            else -> XrTheme.button
+        }
+        canvas.drawOval(r, fill)
+        val inset = size * (if (press) 0.30f else 0.27f)
+        val p = Paint(bmpPaint).apply { alpha = if (enabled) 255 else 90 }
+        canvas.drawBitmap(glyph, null, RectF(x + inset, top + inset, x + size - inset, top + size - inset), p)
+        if (enabled) panel.addRegion(XrPanel.Region(r, id, action))
+    }
+
     /** Square button showing only an app icon (taskbar). */
     fun iconButton(id: String, icon: Bitmap, x: Float, top: Float, size: Float, active: Boolean = false, action: () -> Unit) {
         val r = RectF(x, top, x + size, top + size)

@@ -24,19 +24,20 @@ object RomLibrary {
         }
         val dir = EmulatorFiles.roms(c)
         if (name.endsWith(".zip", true)) {
+            // a console ROM inside is taken out; otherwise the zip is a PC (DOS) game as a whole
             c.contentResolver.openInputStream(uri)?.use { raw ->
                 ZipInputStream(raw).use { z ->
                     while (true) {
                         val e = z.nextEntry ?: break
                         val base = e.name.substringAfterLast('/')
-                        if (e.isDirectory || EmulatorCatalog.forFile(base) == null) continue
+                        val core = EmulatorCatalog.forFile(base, imported = false)
+                        if (e.isDirectory || core == null || core.pc) continue
                         val out = File(dir, base)
                         out.outputStream().use { z.copyTo(it, 1 shl 16) }
                         return out
                     }
                 }
             }
-            return null
         }
         if (EmulatorCatalog.forFile(name) == null) return null
         val out = File(dir, name)
@@ -46,7 +47,7 @@ object RomLibrary {
 
     fun scan(c: Context): List<File> {
         val out = ArrayList<File>()
-        EmulatorFiles.roms(c).listFiles()?.filter { EmulatorCatalog.forFile(it.name) != null }?.let { out += it }
+        EmulatorFiles.roms(c).listFiles()?.filter { EmulatorCatalog.forFile(it.name, imported = true) != null }?.let { out += it }
         val root = Environment.getExternalStorageDirectory()
         fun walk(d: File, depth: Int) {
             if (depth > 4 || out.size >= 500) return
@@ -55,7 +56,7 @@ object RomLibrary {
                 if (f.isDirectory) {
                     if (f.name.startsWith(".") || (depth == 0 && f.name == "Android")) continue
                     walk(f, depth + 1)
-                } else if (EmulatorCatalog.forFile(f.name) != null) out += f
+                } else if (EmulatorCatalog.forFile(f.name, imported = false) != null) out += f
             }
         }
         runCatching { walk(root, 0) }
@@ -105,7 +106,7 @@ class EmulatorPanel(private val host: MediaHost, private val play: (EmulatorCore
         if (all == null) { c.paragraph("Procurando ROMs…", 26f); return }
         val list = all.filter { f -> filter == null || EmulatorCatalog.forFile(f.name)?.id == filter }
         if (list.isEmpty()) {
-            c.paragraph("Nenhuma ROM encontrada. Toque em Importar ROM (aceita .nes, .gb, .gbc, .gba e .zip).", 26f)
+            c.paragraph("Nenhum jogo encontrado. Toque em Importar ROM: aceita .nes, .gb, .gbc, .gba e .zip; para PC (DOS), o .zip do jogo, .exe, .iso ou .img.", 26f)
             return
         }
         val per = 6

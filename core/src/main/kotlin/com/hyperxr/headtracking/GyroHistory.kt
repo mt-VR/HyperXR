@@ -29,6 +29,8 @@ class GyroHistory(private val capacity: Int = 1024) {
     /** When false, extrapolation uses the newest rate only (the earlier behaviour, for comparison). */
     var secondOrder = true
     private val fit = FloatArray(6)
+    /** Called before every read: lets a polled source (direct sensor channel) add its newest samples. */
+    @Volatile var beforeRead: (() -> Unit)? = null
     private var head = -1
     private var count = 0
     private val acc = Quat()
@@ -116,6 +118,7 @@ class GyroHistory(private val capacity: Int = 1024) {
 
     /** Device-frame rotation from [fromNs] to [toNs]: orientation(to) = orientation(from) * delta. */
     fun delta(fromNs: Long, toNs: Long, out: Quat): Boolean {
+        beforeRead?.invoke()
         val qa = Quat(); val qb = Quat()
         if (!at(fromNs, qa) || !at(toNs, qb)) return false
         qa.conjugate(out).mul(qb, out)

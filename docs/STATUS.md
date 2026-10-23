@@ -118,6 +118,12 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Luz que combina com o ambiente 360 (cor média do panorama) e ambiente pelo horário | ✅ testes · 🟡 aparelho |
 | Menu na palma da mão e fita métrica com as duas mãos | ✅ testes da pose e da medida · 🟡 aparelho |
 | Emuladores: voltar no tempo (buffer de save states), acelerar 3x, modo cinema | ✅ voltar no tempo testado no servidor com os 3 núcleos · 🟡 aparelho |
+| PC (DOSBox Pure) com teclado, teclado XR e mouse | ✅ teclado testado no servidor · 🟡 aparelho |
+| Menu de pinça com a palma para cima (junta o menu radial e o da palma) | ✅ testes da pose · 🟡 aparelho |
+| Barra do navegador com ícones do Wolvic; página inicial própria no Gecko; busca Google | ✅ build · 🟡 aparelho |
+| Jogos VR open source (selecionados + busca no GitHub + itch.io) | ✅ testes do filtro de licença · 🟡 aparelho |
+| Corrigir APK: verificações de Daydream no código do app; 32 bits explicado | ✅ testes + dexdump · 🟡 aparelho |
+| Giroscópio por canal direto do sensor | 🟡 aparelho |
 | Emuladores embutidos (QuickNES, Gambatte, mGBA; libretro compilado do código-fonte) com créditos, controle para as mãos, saves e save states | ✅ frontend testado no servidor com os 3 núcleos · 🟡 aparelho |
 | Apps web (TikTok, Twitch, YouTube, WhatsApp Web, Facebook, Instagram): 2D e painel espacial | 🟡 |
 

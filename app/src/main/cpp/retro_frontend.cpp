@@ -9,6 +9,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <atomic>
+#include <mutex>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -56,6 +57,19 @@ retro_system_av_info av {};
 ANativeWindow* window = nullptr;
 int winW = 0, winH = 0;
 std::atomic<uint32_t> buttons {0};
+
+// Keyboard and mouse (PC cores): events queued from Java, delivered on the emulator thread
+// right before retro_run (keyboard callback + key state for polling cores).
+struct KeyEvt { bool down; unsigned key; uint32_t ch; uint16_t mods; };
+std::mutex inputLock;
+std::vector<KeyEvt> keyQueue;
+retro_keyboard_event_t keyboardCb = nullptr;
+bool keyDown[RETROK_LAST] = {};
+uint16_t keyMods = 0;
+int pointerX = 0, pointerY = 0, mouseButtons = 0;
+bool pointerValid = false;
+int mouseDx = 0, mouseDy = 0;      // accumulated since the last frame (screen pixels)
+int frameMouseDx = 0, frameMouseDy = 0;
 std::vector<int16_t> audio;
 size_t audioMax = 0;
 
@@ -88,6 +102,7 @@ bool environment(unsigned cmd, void* data) {
         case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO: av = *static_cast<const retro_system_av_info*>(data); return true;
         case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: if (data) *static_cast<int*>(data) = 3; return true;
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE: *static_cast<bool*>(data) = false; return true;
+        case RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK: keyboardCb = static_cast<const retro_keyboard_callback*>(data)->callback; return true;
         // accepted and ignored: the defaults of each option are used
         case RETRO_ENVIRONMENT_SET_VARIABLES:
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
@@ -157,8 +172,31 @@ size_t audioBatch(const int16_t* data, size_t frames) {
 
 void inputPoll() {}
 
-int16_t inputState(unsigned port, unsigned device, unsigned, unsigned id) {
-    if (port != 0 || (device & RETRO_DEVICE_MASK) != RETRO_DEVICE_JOYPAD) return 0;
+int16_t inputState(unsigned port, unsigned device, unsigned index, unsigned id) {
+    if (port != 0) return 0;
+    switch (device & RETRO_DEVICE_MASK) {
+        case RETRO_DEVICE_KEYBOARD: return id < RETROK_LAST && keyDown[id] ? 1 : 0;
+        case RETRO_DEVICE_MOUSE:
+            switch (id) {
+                case RETRO_DEVICE_ID_MOUSE_X: return (int16_t) frameMouseDx;
+                case RETRO_DEVICE_ID_MOUSE_Y: return (int16_t) frameMouseDy;
+                case RETRO_DEVICE_ID_MOUSE_LEFT: return (mouseButtons & 1) ? 1 : 0;
+                case RETRO_DEVICE_ID_MOUSE_RIGHT: return (mouseButtons & 2) ? 1 : 0;
+                case RETRO_DEVICE_ID_MOUSE_MIDDLE: return (mouseButtons & 4) ? 1 : 0;
+                default: return 0;
+            }
+        case RETRO_DEVICE_POINTER:
+            if (index != 0 || !pointerValid) return 0;
+            switch (id) {
+                case RETRO_DEVICE_ID_POINTER_X: return (int16_t) pointerX;
+                case RETRO_DEVICE_ID_POINTER_Y: return (int16_t) pointerY;
+                case RETRO_DEVICE_ID_POINTER_PRESSED: return (mouseButtons & 1) ? 1 : 0;
+                case RETRO_DEVICE_ID_POINTER_COUNT: return 1;
+                default: return 0;
+            }
+        case RETRO_DEVICE_JOYPAD: break;
+        default: return 0;
+    }
     uint32_t b = buttons.load(std::memory_order_relaxed);
     if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return (int16_t) (b & 0xffff);
     return id < 16 ? (int16_t) ((b >> id) & 1) : 0;
@@ -172,8 +210,26 @@ template <typename T> bool sym(T& out, const char* name) {
 
 void rewindReset() { ring.clear(); ring.shrink_to_fit(); ringHead = ringCount = 0; frameNo = 0; }
 
+void deliverInput() {
+    std::vector<KeyEvt> evs;
+    {
+        std::lock_guard<std::mutex> l(inputLock);
+        evs.swap(keyQueue);
+        frameMouseDx = mouseDx; frameMouseDy = mouseDy; mouseDx = mouseDy = 0;
+    }
+    for (auto& e : evs) {
+        if (e.key < RETROK_LAST) keyDown[e.key] = e.down;
+        keyMods = e.mods;
+        if (keyboardCb) keyboardCb(e.down, e.key, e.ch, e.mods);
+    }
+}
+
 void closeAll() {
     rewindReset(); rewindOn = false;
+    keyboardCb = nullptr;
+    memset(keyDown, 0, sizeof keyDown);
+    { std::lock_guard<std::mutex> l(inputLock); keyQueue.clear(); mouseDx = mouseDy = 0; }
+    mouseButtons = 0; pointerValid = false;
     if (core.handle) {
         if (gameLoaded && core.unload_game) core.unload_game();
         if (core.deinit) core.deinit();
@@ -298,6 +354,7 @@ JNIEXPORT jint JNICALL Java_com_hyperxr_emulators_RetroNative_runFrame(JNIEnv* e
     audioMax = (size_t) env->GetArrayLength(out);
     audio.clear();
     if (audio.capacity() < audioMax) audio.reserve(audioMax);
+    deliverInput();
     core.run();
     if (rewindOn && !ring.empty() && ++frameNo % rewindInterval == 0) {
         auto& slot = ring[ringHead];
@@ -348,6 +405,22 @@ JNIEXPORT jboolean JNICALL Java_com_hyperxr_emulators_RetroNative_rewindStep(JNI
 
 JNIEXPORT jint JNICALL Java_com_hyperxr_emulators_RetroNative_stateSize(JNIEnv*, jobject) {
     return gameLoaded ? (jint) core.serialize_size() : 0;
+}
+
+/** A key from the keyboard: [key] is a RETROK_* code, [ch] the Unicode character (0 if none). */
+JNIEXPORT void JNICALL Java_com_hyperxr_emulators_RetroNative_keyEvent(JNIEnv*, jobject, jboolean down, jint key, jint ch, jint mods) {
+    std::lock_guard<std::mutex> l(inputLock);
+    if (keyQueue.size() < 256) keyQueue.push_back({ (bool) down, (unsigned) key, (uint32_t) ch, (uint16_t) mods });
+}
+
+/**
+ * Mouse: [x]/[y] the pointer on the screen in -32767..32767 (or valid = false when it is off the
+ * screen), [buttons] bit 0 left, 1 right, 2 middle, [dx]/[dy] movement in screen pixels.
+ */
+JNIEXPORT void JNICALL Java_com_hyperxr_emulators_RetroNative_mouse(JNIEnv*, jobject, jboolean valid, jint x, jint y, jint buttons, jint dx, jint dy) {
+    std::lock_guard<std::mutex> l(inputLock);
+    pointerValid = valid; pointerX = x; pointerY = y; mouseButtons = buttons;
+    mouseDx += dx; mouseDy += dy;
 }
 
 JNIEXPORT void JNICALL Java_com_hyperxr_emulators_RetroNative_reset(JNIEnv*, jobject) { if (gameLoaded) core.reset(); }

@@ -2,7 +2,12 @@ package com.hyperxr.browser
 
 /** Address-bar logic shared by the XR browser (pure JVM so it is unit tested). */
 object UrlInput {
-    const val DEFAULT_SEARCH = "https://duckduckgo.com/?q="
+    /** Search used for typed words: Google, Wolvic's default search engine. */
+    const val DEFAULT_SEARCH = "https://www.google.com/search?q="
+    /** HyperXR's own start page, bundled in the APK and opened by GeckoView (Wolvic's engine). */
+    const val HOME = "resource://android/assets/browser/home.html"
+    /** The same page for the WebView fallback. */
+    const val HOME_WEBVIEW = "file:///android_asset/browser/home.html"
 
     /** Turns what was typed into a URL: a URL or host as is, anything else becomes a search. */
     fun resolve(input: String, searchUrl: String = DEFAULT_SEARCH): String {
@@ -18,6 +23,7 @@ object UrlInput {
 
     /** Short form for the address bar and tab chips: host without "www.". */
     fun display(url: String): String {
+        if (url == HOME || url == HOME_WEBVIEW) return ""
         val host = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]+)").find(url)?.groupValues?.get(1) ?: return url
         return host.removePrefix("www.")
     }

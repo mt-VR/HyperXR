@@ -57,7 +57,7 @@ object BuiltinApps {
     val RETIRED_PACKAGES = listOf("com.hyperxr.stillshot", "com.hyperxr.forgelab", "com.hyperxr.primalrush")
 
     val all: List<AppEntry> = listOf(
-        AppEntry("hx:browser", "Navegador", AppKind.WEB, AppCategory.SYSTEM, "browser", "https://duckduckgo.com"),
+        AppEntry("hx:browser", "Navegador", AppKind.WEB, AppCategory.SYSTEM, "browser", com.hyperxr.browser.UrlInput.HOME),
         AppEntry("hx:settings", "Configurações", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "settings", "settings"),
         AppEntry("hx:files", "Arquivos", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "files", "files",
             limitations = "Lists HyperXR storage (.hyperx packages, environments, captures)"),
@@ -72,6 +72,9 @@ object BuiltinApps {
         AppEntry("hx:importapk", "Corrigir APK", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, null, "importapk",
             runtime = "HyperXR", compatibility = "Jogos OpenXR, de Quest e apps Daydream/Cardboard",
             limitations = "Escolha um APK do celular; o HyperXR diz se roda e corrige para o runtime HyperXR"),
+        AppEntry("hx:opengames", "Jogos open source", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "opengames",
+            runtime = "OpenXR (via Corrigir APK) ou Cardboard", compatibility = "Busca no GitHub e no itch.io, só licenças open source",
+            limitations = "Jogos feitos para o Quest podem usar recursos que o HyperXR ainda não tem"),
         AppEntry("hx:emulators", "Emuladores", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, null, "emulators",
             runtime = "Núcleos libretro open source embutidos", compatibility = "NES (QuickNES), Game Boy/Color (Gambatte), GBA (mGBA)",
             limitations = "Nenhum jogo incluído: use as suas próprias ROMs"),

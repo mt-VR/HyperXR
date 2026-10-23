@@ -71,6 +71,23 @@ class PalmGesturesTest {
         assertFalse(d.active)
     }
 
+    @Test fun palmUpOpensTheRadialMenu() {
+        // palm toward the face counts; the back of the hand does not
+        assertTrue(PalmMenuDetector.isPalmUp(hand(1f), right = true, head = head))
+        assertFalse(PalmMenuDetector.isPalmUp(hand(-1f), right = true, head = head))
+        // a hand lying flat with the palm to the sky (fingers forward)
+        val flat = Array(HandJoint.COUNT) { Vec3() }
+        flat[HandJoint.WRIST].set(0f, 1.2f, -0.3f)
+        flat[HandJoint.INDEX_MCP].set(0.025f, 1.2f, -0.38f)   // right hand palm up: thumb side to the right
+        flat[HandJoint.MIDDLE_MCP].set(0.005f, 1.2f, -0.38f)
+        flat[HandJoint.PINKY_MCP].set(-0.03f, 1.2f, -0.38f)
+        assertTrue(PalmMenuDetector.isPalmUp(flat, right = true, head = Vec3(0f, 1.6f, 0f)))
+        // the same hand turned over (palm to the floor) does not
+        val down = Array(HandJoint.COUNT) { Vec3().set(flat[it]) }
+        for (v in down) v.x = -v.x
+        assertFalse(PalmMenuDetector.isPalmUp(down, right = true, head = Vec3(0f, 1.6f, 3f)))
+    }
+
     @Test fun measuresAndFormats() {
         val a = hand(1f); val b = hand(1f).also { h -> h.forEach { it.x += 0.345f } }
         val d = HandMeasure.pinchPoint(a, Vec3()).distanceTo(HandMeasure.pinchPoint(b, Vec3()))

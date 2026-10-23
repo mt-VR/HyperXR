@@ -125,9 +125,28 @@ Em Ajustes > Launcher > **Ambiente pelo horário**, os panoramas embutidos segue
 
 O ambiente não troca enquanto o fundo é a câmera.
 
-## Menu na palma da mão
-Vire a palma de uma mão para o rosto, com os dedos abertos e a até 75 cm dos olhos. Em 0,35 s
-aparece um menu acima dos dedos com:
+## Menu de pinça (palma para cima)
+Faça a pinça com a palma virada para cima (ou para o rosto) e o menu circular abre na hora, em
+volta da pinça. Ainda segurando a pinça, mova os dedos até a opção e solte para escolher. Soltar
+no meio cancela. O gesto antigo continua valendo: segurar a pinça 0,45 s longe de qualquer
+janela.
+
+As opções são as do menu antigo mais as novas:
+- Voltar
+- Início
+- Teclado
+- Captura
+- Voz
+- Recentralizar
+- Biblioteca
+- Janelas
+- Fita métrica
+
+Com a palma para baixo ou para frente, a pinça continua sendo o clique normal (`PalmMenuDetector.isPalmUp`, com testes).
+
+## Menu na palma da mão (substituído)
+A versão anterior abria um menu com a mão aberta virada para o rosto. Foi trocada pelo menu de
+pinça acima. As opções eram:
 - Voz
 - Recentralizar
 - Captura
@@ -155,3 +174,53 @@ então serve para medidas aproximadas.
 ## Emuladores
 Veja [EMULATORS.md](EMULATORS.md). Inclui o controle para as mãos, que deixa segurar dois botões
 ao mesmo tempo, um com cada mão, e também voltar no tempo, acelerar e o modo cinema.
+
+
+## Navegador
+- **Barra:** ganhou os ícones originais do Wolvic (MPL-2.0, veja `native/WOLVIC_ICONS.md`):
+  - botões redondos de voltar, avançar, recarregar/parar e início;
+  - endereço em pílula, com o ícone de busca ou de site inseguro;
+  - favoritar e favoritos;
+  - abas em chips com o botão de nova aba;
+  - à direita, modo desktop, curvar, menor/maior, fechar aba e fechar janela.
+- **Motor:** é o GeckoView, o mesmo do Wolvic. A página inicial agora é do próprio HyperXR
+  (`assets/browser/home.html`), aberta pelo Gecko, e a busca usa o Google, o padrão do Wolvic.
+  O DuckDuckGo saiu.
+
+## Jogos VR open source
+App **Jogos open source** (categoria jogos HyperXR):
+- **Selecionados:** licença conferida no repositório de cada um.
+
+  | Jogo | Licença | Observação |
+  |---|---|---|
+  | Quest DOOM | GPL-2.0 | traz o shareware |
+  | QuestZDoom | GPL-3.0 | precisa de um WAD; o Freedoom é livre |
+  | Quake3Quest | GPL-2.0 | |
+  | Quake2Quest | GPL-2.0 | |
+  | OpenMW VR | GPL-3.0 | |
+  | Godot XR Tools | MIT | |
+  | Hello Cardboard (SDK oficial) | Apache-2.0 | |
+
+- **GitHub:** busca ao vivo no celular por tópicos OpenXR/Android e Cardboard. Só aparecem
+  projetos com licença open source (GPL, MIT, Apache, BSD, MPL...); repositórios sem licença
+  ficam de fora.
+- **itch.io:** abre as listas de jogos Cardboard para Android; a licença está na página de cada
+  jogo.
+- Quando a última versão do projeto tem APK, ele é baixado e abre direto no **Corrigir APK**.
+  Quando não tem, abre o código-fonte.
+- Os jogos feitos para o Quest não foram testados no HyperXR.
+
+## Corrigir APK: Daydream e 32 bits
+- **Verificações de Daydream no código do app:** são trocadas por "sim" direto no bytecode
+  (`DexPatcher`). Viram "sim" as chamadas a `DaydreamApi.isDaydreamReadyPlatform` e
+  `DaydreamUtils.isDaydreamPhone` feitas pelo próprio app. O SDK de VR do Google continua vendo a
+  verdade, então roda em modo Cardboard, que não precisa do Google VR Services.
+  - A instrução substituta tem o mesmo tamanho, então desvios e blocos try não mudam. O checksum
+    e a assinatura do DEX são recalculados; o `dexdump` do Android confere ("Checksum verified").
+  - A tela "celular incompatível" do SDK já sumia com a troca da categoria DAYDREAM por
+    CARDBOARD no manifesto, porque o SDK calcula "precisa de Daydream" a partir dela.
+- **32 bits:** apps 32 bits (armeabi-v7a) de Daydream ou Cardboard rodam como estão nos celulares
+  que executam código 32 bits. Num celular só 64 bits, o patcher explica que não dá e pede a
+  versão arm64. Converter código nativo ARM de 32 para 64 bits não é possível com segurança.
+- **Limite:** jogos Unity checam o Daydream pelo C#, com nomes montados em tempo de execução, e
+  isso o patcher não alcança.

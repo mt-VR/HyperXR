@@ -16,6 +16,10 @@ object RetroNative {
     external fun setButtons(mask: Int)
     /** Runs one frame; returns the interleaved stereo samples written to [audio]. */
     external fun runFrame(audio: ShortArray): Int
+    /** A keyboard key (RETROK_* code), with its character (0 if none) and RETROKMOD_* modifiers. */
+    external fun keyEvent(down: Boolean, key: Int, ch: Int, mods: Int)
+    /** Mouse on the game screen: position in -32767..32767, buttons (1 left, 2 right, 4 middle), movement in pixels. */
+    external fun mouse(valid: Boolean, x: Int, y: Int, buttons: Int, dx: Int, dy: Int)
     external fun reset()
     external fun saveRam(path: String): Boolean
     external fun loadRam(path: String): Boolean

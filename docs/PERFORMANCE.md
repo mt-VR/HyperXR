@@ -69,6 +69,13 @@ LOD, carregamento assíncrono de glTF fora do thread GL, reação ao `PowerManag
 - **Sincronia com a GPU:** um fence faz a CPU esperar a GPU terminar o quadro anterior, e nenhum
   quadro fica na fila atrás de outro.
 
+### Canal direto do sensor
+Nos celulares que suportam `SensorDirectChannel` a `RATE_VERY_FAST` (~800 Hz), o giroscópio
+escreve direto numa memória compartilhada. O HyperXR lê as amostras novas no momento em que
+calcula a pose, então a amostra mais nova não espera na fila de mensagens nem por uma thread
+acordar. Nos outros celulares continua o listener na taxa máxima. Isso não foi medido no celular
+ainda; o modo aparece no log ("Gyro: direct channel").
+
 ### Rodada 4: previsão de segunda ordem e modelo do pescoço
 
 - **Giroscópio (`GyroHistory`):** a previsão até o fóton usa a velocidade e a aceleração angular,

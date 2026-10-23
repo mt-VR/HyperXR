@@ -103,4 +103,34 @@ class ApkPatcherTest {
         assertEquals("com.example.daydreamgame", m.attr("package"))
         assertEquals(".VrActivity", m.descendants("activity")[0].attr("name"))
     }
+
+    private fun daydreamApk(withDex: Boolean): File {
+        val dd = ApkPatcherTest::class.java.getResourceAsStream("/daydream_manifest.axml")!!.readBytes()
+        val input = tmp("dd2.apk")
+        ZipOutputStream(input.outputStream()).use { z ->
+            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(dd); z.closeEntry()
+            z.putNextEntry(ZipEntry("lib/armeabi-v7a/libgvr.so")); z.write(ByteArray(10)); z.closeEntry()
+            if (withDex) {
+                z.putNextEntry(ZipEntry("classes.dex"))
+                z.write(ApkPatcherTest::class.java.getResourceAsStream("/dex/daydream_check.dex")!!.readBytes()); z.closeEntry()
+            }
+        }
+        return input
+    }
+
+    @Test fun daydreamChecksInTheAppCodeAreRemoved() {
+        val out = tmp("dd2-out.apk")
+        val r = ApkPatcher.patch(daydreamApk(true), out, CompatLibraries(emptyMap()), device32Bit = true)
+        assertTrue(r.blockers.toString(), r.blockers.isEmpty())
+        assertTrue(r.changes.toString(), r.changes.any { it.contains("Daydream?") && it.contains("2 ponto") })
+        assertTrue(r.changes.toString(), r.changes.any { it.contains("32 bits") })
+        val patched = ZipFile(out).use { z -> z.getInputStream(z.getEntry("classes.dex")).readBytes() }
+        val original = ApkPatcherTest::class.java.getResourceAsStream("/dex/daydream_check.dex")!!.readBytes()
+        assertFalse(patched.contentEquals(original))
+    }
+
+    @Test fun thirtyTwoBitOnlyAppOnSixtyFourBitOnlyPhoneIsExplained() {
+        val r = ApkPatcher.patch(daydreamApk(false), tmp("x.apk"), CompatLibraries(emptyMap()), dryRun = true, device32Bit = false)
+        assertTrue(r.blockers.toString(), r.blockers.any { it.contains("64 bits") })
+    }
 }

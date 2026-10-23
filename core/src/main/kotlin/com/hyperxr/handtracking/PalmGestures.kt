@@ -64,6 +64,19 @@ class PalmMenuDetector(
             return (n.x * dx + n.y * dy + n.z * dz) / d >= minFacing
         }
 
+        /**
+         * Palm turned up (or toward the face): the pose that opens the radial menu with a pinch.
+         * Normal clicking is done with the palm down or forward, so the two never mix.
+         */
+        fun isPalmUp(j: Array<Vec3>, right: Boolean, head: Vec3): Boolean {
+            val n = palmNormal(j, right, Vec3())
+            if (n.y > 0.5f) return true
+            val c = palmCenter(j, Vec3())
+            val dx = head.x - c.x; val dy = head.y - c.y; val dz = head.z - c.z
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            return d > 1e-3f && (n.x * dx + n.y * dy + n.z * dz) / d > 0.6f
+        }
+
         fun palmCenter(j: Array<Vec3>, out: Vec3): Vec3 {
             val w = j[HandJoint.WRIST]; val m = j[HandJoint.MIDDLE_MCP]
             return out.set((w.x + m.x) / 2, (w.y + m.y) / 2, (w.z + m.z) / 2)

@@ -251,10 +251,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var dragChipAspect = 4f
     private val pointerRays = HashMap<Int, Ray>()
     private val pointerDown = HashMap<Int, Boolean>()
-    private val radialItems = listOf("Voltar", "Início", "Teclado", "Captura")
+    // one menu for both gestures: pinch with the palm up (opens at once) or pinch and hold
+    private val radialItems = listOf("Voltar", "Início", "Teclado", "Captura", "Voz", "Recentralizar", "Biblioteca", "Janelas", "Fita métrica")
     private val radials = arrayOf(com.hyperxr.input.RadialMenu(radialItems), com.hyperxr.input.RadialMenu(radialItems))
-    private val radialTex = IntArray(4)
-    private val radialAspect = FloatArray(4)
+    private val radialTex = IntArray(radialItems.size)
+    private val radialAspect = FloatArray(radialItems.size)
+    private val wasPinching = BooleanArray(2)
     private val pinchPoint = Vec3()
     private val pinchBall = arrayOf(Vec3(), Vec3())
     private val ballPointers = arrayOf(com.hyperxr.input.BallPointer(), com.hyperxr.input.BallPointer())
@@ -320,9 +322,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 lab?.handBusy?.get(i) == true
             if (h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
-                radials[i].update(pinching, pinchPoint, input.head, overTarget, now)?.let { radialAction(it) }
+                // the pinch starting with the palm up opens the menu right away
+                val palmUp = pinching && !wasPinching[i] && !linkDrag.active && lab?.handBusy?.get(i) != true &&
+                    com.hyperxr.handtracking.PalmMenuDetector.isPalmUp(h.joints, h.handedness == com.hyperxr.handtracking.Handedness.RIGHT, input.head.position)
+                radials[i].update(pinching, pinchPoint, input.head, overTarget, now, instant = palmUp)?.let { radialAction(it) }
             } else radials[i].update(false, pinchPoint, input.head, true, now)
-            val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && !overTarget
+            wasPinching[i] = h.isUsable && pinching
+            val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && (!overTarget || radials[i].openedInstantly)
             // a hand working on the lab bench (holding or reaching an object) does not point at the UI
             val labBusy = lab?.handBusy?.get(i) == true
             // The pinch ball is the pointer: what is under the ball, as seen from the eyes, is what a
@@ -440,6 +446,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             2 -> appWindows.lastOrNull()?.let { w -> openKeyboard(w) }
                 ?: openWindow(InfoPanel("Teclado", "Abra um navegador ou app para digitar.").apply { placeInFront(ctx.input.head) })
             3 -> capture()
+            4 -> startVoice()
+            5 -> ctx.requestRecenter()
+            6 -> toggleLibrary()
+            7 -> toggleWindows()
+            8 -> handTools.toggleMeasuring()
         }
     }
 
@@ -452,7 +463,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                     radialAspect[k] = bmp.width.toFloat() / bmp.height
                     radialTex[k] = Gl.uploadBitmap(bmp); bmp.recycle()
                 }
-                val (ox, oy) = m.itemOffset(k)
+                val (ox, oy) = m.itemOffset(k, radius = 0.11f)
                 val p = ctx.scene.addPanel()
                 p.texture = radialTex[k]
                 p.pose.orientation.set(m.plane.orientation)
@@ -575,6 +586,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "reality" -> RealityWindow(ctx)
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
+            "opengames" -> com.hyperxr.files.OpenGamesPanel(this) { url -> openBrowser(url, false) }
             "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
@@ -999,7 +1011,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         override fun update(dt: Float) { if (w.status != lastStatus) { lastStatus = w.status; dirty = true } }
         override fun draw(c: com.hyperxr.spatialui.PanelCanvas) {
             w.status?.let { c.label(it, 420f, 34f, 24f, com.hyperxr.spatialui.XrTheme.accent2, maxWidth = c.w - 560f) }
-            val n = if (w.supportsReload) 8 else 7
+            val n = (if (w.supportsReload) 8 else 7) + (if ((w as? com.hyperxr.emulators.EmulatorWindow)?.wantsKeyboard == true) 1 else 0)
             val bw = (c.w - 2 * c.pad - (n - 1) * 10f) / n
             var x = c.pad
             val y = c.y
@@ -1008,6 +1020,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             b("back", if (game) "Soltar controle" else "Voltar") { w.back() }
             if (w.supportsReload) b("reload", if (game) "Reiniciar" else "Recarregar") { w.reload() }
             if (w is com.hyperxr.emulators.EmulatorWindow) {
+                if (w.wantsKeyboard) b("kbd", "Teclado") { openKeyboard(w) }
                 b("save", "Salvar estado") { w.session.saveState { ok -> w.status = if (ok) "Estado salvo" else "Este núcleo não salvou o estado" } }
                 b("load", "Carregar estado") { w.session.loadState { ok -> w.status = if (ok) "Estado carregado" else "Nenhum estado salvo" } }
             } else b("kbd", "Teclado") { openKeyboard(w) }

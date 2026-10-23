@@ -27,8 +27,8 @@ done < "$ROOT/native/libretro/CORES"
 
 for abi in $ABIS; do mkdir -p "$OUT/$abi"; done
 
-# QuickNES (NES) and Gambatte (Game Boy / Color): their own Android.mk
-for spec in "quicknes QuickNES_Core/jni" "gambatte gambatte-libretro/libgambatte/libretro/jni"; do
+# QuickNES (NES), Gambatte (Game Boy / Color) and DOSBox Pure (PC): their own Android.mk
+for spec in "quicknes QuickNES_Core/jni" "gambatte gambatte-libretro/libgambatte/libretro/jni" "dosbox_pure dosbox-pure/jni"; do
   set -- $spec
   (cd "$WORK/$2" && "$NDK_DIR/ndk-build" -j"$(nproc)" APP_ABI="$ABIS" APP_PLATFORM=android-26 APP_LDFLAGS="$PAGE" >/dev/null)
   for abi in $ABIS; do cp "$WORK/$2/../libs/$abi/libretro.so" "$OUT/$abi/libcore_$1.so"; done

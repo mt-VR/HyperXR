@@ -2,3 +2,4 @@
 QuickNES_Core https://github.com/libretro/QuickNES_Core.git 26bb785c9deddb66a17717b21bb4e328f03ade32
 gambatte-libretro https://github.com/libretro/gambatte-libretro.git d9d6cd06382d1ced30de34d56d3609452323dab1
 mgba https://github.com/libretro/mgba.git 7a12d6d4b9acb14c0ae62c9166b6a2f3d08007f6
+dosbox-pure https://codeberg.org/schelling/dosbox-pure.git 468dad01566b3082b68285ec4bf5d6fbe1912103

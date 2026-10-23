@@ -53,6 +53,14 @@ class EmulatorWindow(val session: EmulatorSession, private val focus: (EmulatorW
             if (e.action == KeyEvent.ACTION_UP) focus(null)
             return true
         }
+        // a PC takes a real keyboard as a keyboard (gamepads still go to the joypad, which the
+        // core maps to keys for each game)
+        if (session.core.pc && !isGamepad(e)) {
+            val k = RetroKeys.fromKeyCode(e.keyCode) ?: return false
+            if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) RetroNative.keyEvent(true, k, e.unicodeChar, mods(e))
+            else if (e.action == KeyEvent.ACTION_UP) RetroNative.keyEvent(false, k, 0, mods(e))
+            return true
+        }
         val bit = bitFor(e.keyCode) ?: return false
         if (e.action == KeyEvent.ACTION_DOWN) keyMask = keyMask or (1 shl bit)
         else if (e.action == KeyEvent.ACTION_UP) keyMask = keyMask and (1 shl bit).inv()
@@ -76,8 +84,59 @@ class EmulatorWindow(val session: EmulatorSession, private val focus: (EmulatorW
         return true
     }
 
-    override fun typeText(text: String) {}
-    override fun sendKey(keyCode: Int) {}
+    /** The XR keyboard: each character as a key press (Shift held for capitals and symbols). */
+    override fun typeText(text: String) {
+        if (!session.core.pc) return
+        for (c in text) {
+            val (k, shift) = RetroKeys.fromChar(c) ?: continue
+            val m = if (shift) RetroKeys.MOD_SHIFT else 0
+            if (shift) RetroNative.keyEvent(true, RetroKeys.LSHIFT, 0, m)
+            RetroNative.keyEvent(true, k, c.code, m)
+            RetroNative.keyEvent(false, k, 0, m)
+            if (shift) RetroNative.keyEvent(false, RetroKeys.LSHIFT, 0, 0)
+        }
+    }
+
+    override fun sendKey(keyCode: Int) {
+        if (!session.core.pc) return
+        val k = RetroKeys.fromKeyCode(keyCode) ?: return
+        RetroNative.keyEvent(true, k, 0, 0); RetroNative.keyEvent(false, k, 0, 0)
+    }
+
+    /** Wants the XR keyboard button (PC cores). */
+    val wantsKeyboard: Boolean get() = session.core.pc
+
+    private var mouseButtons = 0
+    private var lastU = Float.NaN; private var lastV = Float.NaN
+
+    /**
+     * A PC: pointing at the screen moves the mouse (hover too), pinch/click is the left button
+     * (the secondary pointer action the right one); the first click also gives it the controller.
+     */
+    override fun onPointerEvent(event: com.hyperxr.input.PointerEvent) {
+        if (!session.core.pc) return super.onPointerEvent(event)
+        val u = event.u.coerceIn(0f, 1f); val v = event.v.coerceIn(0f, 1f)
+        val w = session.width.coerceAtLeast(1); val h = session.height.coerceAtLeast(1)
+        val dx = if (lastU.isNaN()) 0 else ((u - lastU) * w).toInt()
+        val dy = if (lastV.isNaN()) 0 else ((v - lastV) * h).toInt()
+        if (dx != 0 || lastU.isNaN()) lastU = u
+        if (dy != 0 || lastV.isNaN()) lastV = v
+        val bit = if (event.secondary) 2 else 1
+        when (event.phase) {
+            com.hyperxr.input.PointerPhase.DOWN -> mouseButtons = mouseButtons or bit
+            com.hyperxr.input.PointerPhase.UP -> { mouseButtons = mouseButtons and bit.inv(); if (!captured) focus(this) }
+            com.hyperxr.input.PointerPhase.CANCEL, com.hyperxr.input.PointerPhase.EXIT -> { mouseButtons = 0; lastU = Float.NaN; lastV = Float.NaN }
+            else -> Unit
+        }
+        val valid = event.phase != com.hyperxr.input.PointerPhase.EXIT
+        RetroNative.mouse(valid, ((u * 2 - 1) * 32767).toInt(), ((v * 2 - 1) * 32767).toInt(), mouseButtons, dx, dy)
+    }
+
+    private fun isGamepad(e: KeyEvent) = e.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0 ||
+        KeyEvent.isGamepadButton(e.keyCode)
+
+    private fun mods(e: KeyEvent) = (if (e.isShiftPressed) RetroKeys.MOD_SHIFT else 0) or (if (e.isCtrlPressed) RetroKeys.MOD_CTRL else 0) or
+        (if (e.isAltPressed) RetroKeys.MOD_ALT else 0)
     override fun openUrl(url: String) {}
     override fun back() = focus(null)
     override val supportsReload: Boolean get() = true

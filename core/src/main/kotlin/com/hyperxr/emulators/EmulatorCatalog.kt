@@ -16,6 +16,10 @@ data class EmulatorCore(
     val licenseUrl: String,
     val sourceUrl: String,
     val commit: String,
+    /** A PC: takes the keyboard and the mouse (the joypad is mapped to keys by the core). */
+    val pc: Boolean = false,
+    /** Extensions only taken from imported files (a .zip on the phone is not necessarily a game). */
+    val importOnly: List<String> = emptyList(),
 )
 
 object EmulatorCatalog {
@@ -38,13 +42,21 @@ object EmulatorCatalog {
             "MPL-2.0", "https://www.mozilla.org/MPL/2.0/",
             "https://github.com/libretro/mgba", "7a12d6d4b9acb14c0ae62c9166b6a2f3d08007f6",
         ),
+        EmulatorCore(
+            "dos", "libcore_dosbox_pure.so", "PC (MS-DOS, Windows 3.x/9x)", "DOSBox Pure",
+            listOf("dosz", "exe", "com", "bat", "iso", "cue", "chd", "img", "ima", "vhd", "m3u"),
+            "Bernhard Schelling (DOSBox Pure), equipe do DOSBox",
+            "GPL-2.0", "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html",
+            "https://codeberg.org/schelling/dosbox-pure", "468dad01566b3082b68285ec4bf5d6fbe1912103",
+            pc = true, importOnly = listOf("zip", "exe", "com", "bat"),
+        ),
     )
 
     val extensions: Set<String> = cores.flatMap { it.extensions }.toSet()
 
-    fun forFile(name: String): EmulatorCore? {
+    fun forFile(name: String, imported: Boolean = true): EmulatorCore? {
         val ext = name.substringAfterLast('.', "").lowercase()
-        return cores.firstOrNull { ext in it.extensions }
+        return cores.firstOrNull { c -> (ext in c.extensions && (imported || ext !in c.importOnly)) || (imported && ext in c.importOnly) }
     }
 
     /** Credits as shown in the app (one block per core). */

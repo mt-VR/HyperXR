@@ -47,14 +47,14 @@ object CompatLayer {
         return CompatLibraries(abis.associateWith { File(dir, "$it/libopenxr_loader.so") })
     }
 
-    fun plan(ctx: Context, apk: File): PatchReport = ApkPatcher.patch(apk, File(ctx.cacheDir, "unused.apk"), libraries(ctx), dryRun = true)
+    fun plan(ctx: Context, apk: File): PatchReport = ApkPatcher.patch(apk, File(ctx.cacheDir, "unused.apk"), libraries(ctx), dryRun = true, device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
 
     /** Patches and signs [apk]; returns the report and the installable file (null when blocked). */
     fun patchAndSign(ctx: Context, apk: File, progress: (String) -> Unit): Pair<PatchReport, File?> {
         val work = File(ctx.cacheDir, "patch").apply { deleteRecursively(); mkdirs() }
         val unsigned = File(work, "unsigned.apk")
         progress("Corrigindo o APK...")
-        val report = ApkPatcher.patch(apk, unsigned, libraries(ctx))
+        val report = ApkPatcher.patch(apk, unsigned, libraries(ctx), device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
         if (report.blockers.isNotEmpty()) return report to null
         progress("Assinando...")
         val signed = File(work, "${report.packageName}-hyperxr.apk")
