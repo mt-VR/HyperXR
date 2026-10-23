@@ -91,11 +91,13 @@ renderizada enquanto algo a usa, em até 30 fps.
   `http://<ip-do-celular>:8090`. Qualquer navegador no mesmo Wi-Fi assiste em 720p (MJPEG).
 - **Telas externas:** HDMI/USB-C, Miracast ou transmissão que ofereça segunda tela recebem a
   imagem 16:9 sozinhas.
-- **Gravação externa em 16:9:** no Android 15 ou mais novo o sistema avisa quando outro app grava
-  ou espelha a tela. Com a opção ligada (padrão), a tela do celular mostra a imagem 16:9 enquanto
-  isso, então o gravador do sistema grava em 16:9. Durante a gravação o visor sai do modo lentes.
-  No Android 14 ou mais antigo o app não tem como saber que está sendo gravado: use *Gravar
-  vídeo*.
+- **Gravação de tela de outro app:** a tela do celular continua sempre em lentes (SBS), também
+  durante a gravação. Um gravador externo grava o que está na tela, então o arquivo dele sai em
+  SBS. Para ter 16:9, no Android 15 ou mais novo o sistema avisa quando outro app começa a
+  gravar. Com a opção ligada (padrão), o HyperXR grava junto a sua própria cópia 16:9, que é
+  salva em Filmes/HyperXR quando a outra gravação para. A cópia sai sem microfone, porque o
+  Android entrega o microfone a um app por vez. Em Android mais antigo, use "Gravar vídeo" (ou o
+  comando de voz).
 - **Limite:** o jogo Gato vs. Vovó tem um renderizador próprio e ainda não passa por isso.
 
 ## Ambientes 360 embutidos

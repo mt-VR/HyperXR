@@ -430,10 +430,6 @@ class XrEngine(
         } else {
             // Over a mono camera image, per-eye offsets would make virtual hands/panels double up
             // against the real ones; MR renders both eyes from the camera viewpoint unless asked.
-            if (share.monoScreen && spectator) {
-                // another app is recording or mirroring the screen: show it the 16:9 view
-                share.drawOnScreen(width, height)
-            } else {
             val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
             val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
             for (eye in 0..1) { eyes[eye].index = eye; setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2) }
@@ -442,7 +438,6 @@ class XrEngine(
                 for (eye in 0..1) renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
                 timewarp()
                 compositor.composite(settings.graphics)
-            }
             }
         }
         if (capture != null) {

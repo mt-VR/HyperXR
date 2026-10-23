@@ -353,7 +353,7 @@ class ExternalDisplays(private val activity: Activity, private val gl: (() -> Un
 
 /**
  * Android 15+ tells an app when something is recording or mirroring its window. While that
- * happens [recording] is true, and the engine puts the 16:9 view on the phone screen.
+ * happens [recording] is true, and ScreenShare records its own 16:9 copy alongside.
  */
 class ExternalRecordingDetector(private val activity: Activity) {
     @Volatile var recording = false; private set

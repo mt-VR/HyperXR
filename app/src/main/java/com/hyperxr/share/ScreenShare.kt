@@ -23,8 +23,9 @@ import java.util.concurrent.ConcurrentLinkedQueue
  *  - HyperXR's own video recording (MP4, H.264, optional microphone) and screenshots;
  *  - external displays (HDMI/USB-C, Miracast or casting that offers a second display);
  *  - a live stream any browser on the same Wi-Fi can open;
- *  - the phone screen itself while another app records it (Android 15+ tells apps when they
- *    are being recorded): the recording then comes out 16:9 instead of two lens views.
+ *  - a 16:9 copy of what another app records (Android 15+ tells apps when they are being
+ *    recorded): the phone screen stays side by side for the headset, and HyperXR records its own
+ *    16:9 video alongside, saved when the other recording stops.
  * Everything here runs on the GL thread except where noted.
  */
 class ScreenShare(private val activity: Activity) {
@@ -39,7 +40,7 @@ class ScreenShare(private val activity: Activity) {
     var steady: Boolean
         get() = prefs.getBoolean("steady", true)
         set(v) { prefs.edit().putBoolean("steady", v).apply() }
-    /** Show the 16:9 view on the phone screen while another app records or mirrors it. */
+    /** While another app records the screen, also record HyperXR's own 16:9 video. */
     var externalRecording16x9: Boolean
         get() = prefs.getBoolean("ext169", true)
         set(v) { prefs.edit().putBoolean("ext169", v).apply() }
@@ -69,13 +70,16 @@ class ScreenShare(private val activity: Activity) {
 
     init { displays.share = this }
 
-    /** True while the phone screen should show the 16:9 view instead of the two lens views. */
-    val monoScreen: Boolean get() = externalRecording16x9 && externalRecordingDetector.recording
+    /** True while [recorder] was started because another app is recording the screen. */
+    @Volatile var pairedRecording = false; private set
+    /** Name of the last video saved by a paired recording, for the panel. */
+    @Volatile var lastPairedSave = ""; private set
 
     /** Whether the spectator view must be rendered this frame. */
     fun wanted(captureRequested: Boolean): Boolean {
         while (true) { val op = pending.poll() ?: break; op() }
-        if (captureRequested || monoScreen) return true
+        followExternalRecording()
+        if (captureRequested) return true
         val now = System.nanoTime()
         // recordings, external displays and the stream run at up to 30 fps
         val busy = sinks.isNotEmpty() || stream.clients > 0
@@ -129,13 +133,6 @@ class ScreenShare(private val activity: Activity) {
             blit(t.texture, st.width, st.height, st.fbo)
             stream.offer(read(st))
         }
-    }
-
-    /** Draws the 16:9 view on the phone screen (pillarboxed) instead of the lens views. */
-    fun drawOnScreen(screenW: Int, screenH: Int) {
-        val t = target ?: return
-        ensureProgram()
-        blit(t.texture, screenW, screenH, 0)
     }
 
     /** The current 16:9 frame as a bitmap (screenshots). */
@@ -225,10 +222,24 @@ class ScreenShare(private val activity: Activity) {
     }
 
     // ---------------------------------------------------------------- recording
-    fun startRecording(): Boolean {
+    /**
+     * Starts and stops the paired 16:9 recording with another app's screen recording. Without
+     * the microphone: the other recorder keeps it (Android gives it to one app at a time).
+     */
+    private fun followExternalRecording() {
+        val ext = externalRecording16x9 && externalRecordingDetector.recording
+        if (ext && recorder == null) {
+            if (startRecording(mic = false)) { pairedRecording = true; Diagnostics.log("Screen share: paired 16:9 recording started") }
+        } else if (!ext && pairedRecording) {
+            pairedRecording = false
+            stopRecording { name -> lastPairedSave = name ?: "" }
+        }
+    }
+
+    fun startRecording(mic: Boolean = microphone): Boolean {
         if (recorder != null) return false
         error = ""
-        val r = VideoRecorder(activity, width, height, microphone && micAllowed())
+        val r = VideoRecorder(activity, width, height, mic && micAllowed())
         val input = try { r.start() } catch (t: Throwable) { Diagnostics.log("Recorder failed: $t"); error = "Não foi possível gravar: ${t.message}"; return false }
         val sink = addSink(input, width, height, recordable = true)
         if (sink == null) { r.stop(null); error = "Não foi possível gravar neste celular"; return false }
@@ -241,6 +252,7 @@ class ScreenShare(private val activity: Activity) {
     fun stopRecording(done: (String?) -> Unit = {}) {
         val r = recorder ?: return
         recorder = null
+        pairedRecording = false
         r.sink?.let { removeSink(it) }
         r.stop(done)
     }
@@ -249,10 +261,9 @@ class ScreenShare(private val activity: Activity) {
 
     /** "Gravando 0:12 · Transmitindo para 1 · Tela externa", or empty when nothing is shared. */
     val summary: String get() = buildList {
-            recorder?.let { add("Gravando ${it.elapsedText()}") }
+            recorder?.let { add((if (pairedRecording) "Gravando em 16:9 junto com a gravação de tela " else "Gravando ") + it.elapsedText()) }
             if (stream.clients > 0) add("Transmitindo para ${stream.clients}")
             if (displays.count > 0) add("Tela externa")
-            if (monoScreen) add("Gravação externa em 16:9")
         }.joinToString(" · ")
 
     fun release() {
