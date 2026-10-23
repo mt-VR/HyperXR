@@ -22,11 +22,13 @@ object HandSilhouette {
         fun px(j: Int) = image[j * 3] * aspect
         fun py(j: Int) = image[j * 3 + 1]
         val pl = dist(px(0), py(0), px(9), py(9)).coerceAtLeast(1e-3f)
-        val rFinger = 0.11f * pl; val rThumb = 0.13f * pl; val grow = 0.10f * pl; val soft = 0.05f * pl
+        // a little wider than the real hand: the AI mask decides the true edge inside this shape,
+        // and the shape must never cut off a finger the landmarks place slightly off
+        val rFinger = 0.12f * pl; val rThumb = 0.15f * pl; val grow = 0.14f * pl; val soft = 0.05f * pl
         // a short piece of the wrist, away from the middle knuckle
         val ax = px(0) - px(9); val ay = py(0) - py(9)
         val wx = px(0) + ax * 0.35f; val wy = py(0) + ay * 0.35f
-        val rWrist = 0.30f * pl
+        val rWrist = 0.34f * pl
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (j in 0 until HandJoint.COUNT) { minX = min(minX, px(j)); maxX = max(maxX, px(j)); minY = min(minY, py(j)); maxY = max(maxY, py(j)) }
         minX = min(minX, wx); maxX = max(maxX, wx); minY = min(minY, wy); maxY = max(maxY, wy)
@@ -44,7 +46,8 @@ object HandSilhouette {
                 for (k in 0 until c.size - 1) d = min(d, segment(qx, qy, px(c[k]), py(c[k]), px(c[k + 1]), py(c[k + 1])) - r)
             }
             if (d >= soft) continue
-            val v = (((soft - d) / (2 * soft)).coerceIn(0f, 1f) * 255f).toInt()
+            // full strength up to the shape's edge, fading out only beyond it
+            val v = (((soft - d) / soft).coerceIn(0f, 1f) * 255f).toInt()
             val i = y * size + x
             if (v > (out[i].toInt() and 0xff)) out[i] = v.toByte()
         }

@@ -25,7 +25,9 @@ class HandSilhouetteTest {
         fun at(x: Float, y: Float) = m[(y * n).toInt() * n + (x * n).toInt()].toInt() and 0xff
         assertEquals(255, at(0.49f, 0.62f))      // palm
         assertEquals(255, at(0.54f, 0.45f))      // a finger
-        assertTrue(at(0.515f, 0.40f) < 40)       // between two fingertips: at most the soft edge (drawn from 35%)
+        // between two spread fingertips: below what the cutout shader ever draws (0.45), whatever the AI says
+        assertTrue(at(0.515f, 0.40f) < (0.45f * 255).toInt())
+        assertEquals(255, at(0.54f, 0.38f))      // a fingertip itself is fully inside
         assertEquals(0, at(0.70f, 0.60f))        // background beside the hand
         assertEquals(0, at(0.5f, 0.95f))         // the arm further down
         assertTrue(at(0.5f, 0.80f) > 0)          // the wrist

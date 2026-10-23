@@ -70,7 +70,8 @@ class HandAura {
             val z = -planeZ
             GLES30.glUniform1f(uPx, 2f * z / (eye.proj[5] * outH))
             GLES30.glUniform2fv(uJoints, HandJoint.COUNT, plane, 0)
-            GLES30.glUniform1fv(uRadius, 5, RADII, 0)
+            for (i in 0 until 5) radii[i] = RADII[i] * scale
+            GLES30.glUniform1fv(uRadius, 5, radii, 0)
             // a hand briefly unseen is still the hand: only slightly dimmer, so it does not seem to vanish
             val fade = if (h.state == TrackingState.LOST_PREDICTING) 0.85f else 1f
             GLES30.glUniform1f(uAlpha, opacity.coerceIn(0f, 1f) * fade)
@@ -86,6 +87,8 @@ class HandAura {
     }
 
     private var planeZ = -0.4f
+    private var scale = 1f
+    private val radii = FloatArray(5)
 
     /**
      * Joints to view space, then onto the plane through the palm (z = planeZ) along the eye rays,
@@ -110,8 +113,11 @@ class HandAura {
             plane[i * 2] = x; plane[i * 2 + 1] = y
             minX = minOf(minX, x); maxX = maxOf(maxX, x); minY = minOf(minY, y); maxY = maxOf(maxY, y)
         }
-        // room for the finger thickness and the glow
-        val margin = 0.015f
+        // finger thickness follows the hand's size (a child's hand, a hand nearer than the plane)
+        val pw = kotlin.math.hypot(plane[HandJoint.INDEX_MCP * 2] - plane[HandJoint.PINKY_MCP * 2], plane[HandJoint.INDEX_MCP * 2 + 1] - plane[HandJoint.PINKY_MCP * 2 + 1])
+        scale = (pw / 0.062f).coerceIn(0.75f, 1.5f)
+        // room for the scaled finger thickness, the round fingertip and the outline
+        val margin = 0.022f * scale + 0.004f
         minX -= margin; minY -= margin; maxX += margin; maxY += margin
         // the forearm part of the outline runs below the wrist
         val wx = plane[HandJoint.WRIST * 2]; val wy = plane[HandJoint.WRIST * 2 + 1]
@@ -163,10 +169,13 @@ float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
 }
-// palm: wrist, thumb base, index, middle, ring and pinky knuckles
+// palm: wrist, thumb base, index, middle, ring and pinky knuckles; the landmarks sit on the
+// palm's bones, so the polygon is pushed out from its centre to reach the palm's real edge
 float palm(vec2 p) {
     vec2 v[6];
     v[0] = uJ[0]; v[1] = uJ[1]; v[2] = uJ[5]; v[3] = uJ[9]; v[4] = uJ[13]; v[5] = uJ[17];
+    vec2 ctr = (v[0] + v[1] + v[2] + v[3] + v[4] + v[5]) / 6.0;
+    for (int i = 0; i < 6; i++) v[i] = ctr + (v[i] - ctr) * (i == 3 ? 1.04 : 1.12);
     float d = dot(p - v[0], p - v[0]);
     float s = 1.0;
     for (int i = 0, j = 5; i < 6; j = i, i++) {
@@ -176,7 +185,7 @@ float palm(vec2 p) {
         bvec3 c = bvec3(p.y >= v[i].y, p.y < v[j].y, e.x * w.y > e.y * w.x);
         if (all(c) || all(not(c))) s = -s;
     }
-    return s * sqrt(d) - 0.009;
+    return s * sqrt(d) - 0.009 * (uR[2] / 0.0098);
 }
 float hand(vec2 p) {
     float d = palm(p);
@@ -186,12 +195,14 @@ float hand(vec2 p) {
     vec2 down = -ax / len;
     float wristR = 0.38 * length(uJ[5] - uJ[17]) + 0.006;
     d = smin(d, segRound(p, uJ[0] + down * 0.01, uJ[0] + down * 0.09, wristR), 0.012);
+    // the thumb's base runs from the wrist, filling the web between thumb and palm
+    d = smin(d, segRound(p, uJ[0], uJ[1], uR[0] * 1.25), 0.010);
     for (int f = 0; f < 5; f++) {
         int b = f == 0 ? 1 : 1 + f * 4;   // thumb 1-4, index 5-8, ... pinky 17-20
         float r = uR[f];
-        d = smin(d, segRound(p, uJ[b], uJ[b + 1], r), 0.004);
-        d = smin(d, segRound(p, uJ[b + 1], uJ[b + 2], r), 0.004);
-        d = smin(d, segRound(p, uJ[b + 2], uJ[b + 3], r * 0.95), 0.004);
+        d = smin(d, segRound(p, uJ[b], uJ[b + 1], r * 1.05), 0.008);
+        d = smin(d, segRound(p, uJ[b + 1], uJ[b + 2], r), 0.006);
+        d = smin(d, segRound(p, uJ[b + 2], uJ[b + 3], r * 0.95), 0.006);
     }
     return d;
 }

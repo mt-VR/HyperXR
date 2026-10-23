@@ -209,7 +209,7 @@ uniform samplerExternalOES uTex;
 uniform sampler2D uMask;
 out vec4 fragColor;
 void main() {
-    float a = smoothstep(0.45, 0.75, texture(uMask, vDepthUv).r);
+    float a = smoothstep(0.30, 0.60, texture(uMask, vDepthUv).r);
     if (a < 0.01) discard;
     fragColor = vec4(texture(uTex, vUv).rgb, a);
 }"""
