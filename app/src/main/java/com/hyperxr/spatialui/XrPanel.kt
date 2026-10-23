@@ -59,6 +59,7 @@ abstract class XrPanel(
 ) : InteractionSurface {
     override val surfaceId: String = javaClass.simpleName + "@" + System.identityHashCode(this)
     override val pose = Pose()
+    override val acceptsGrab: Boolean get() = true
     var visible = true
     var closable = true
     /** Panels and windows are above the launcher icons for pointing (see InteractionSurface). */
@@ -131,9 +132,15 @@ abstract class XrPanel(
             PointerPhase.HOVER -> if (hit?.id != hoverRegion?.id) { hoverRegion = hit; dirty = true } else hoverRegion = hit
             PointerPhase.EXIT -> { if (hoverRegion != null || pressRegion != null) dirty = true; hoverRegion = null; pressRegion = null }
             PointerPhase.DOWN -> {
-                pressRegion = hit; downTimeNs = event.timestampNs; longFired = false; dirty = true
-                // grab the title bar (or empty space) to move the window
-                if (hit == null || hit.id == TITLE_BAR) dragging = true
+                downTimeNs = event.timestampNs; longFired = false; dirty = true
+                when {
+                    // a fist grabs the window wherever it points (and never clicks)
+                    event.grab -> { pressRegion = null; dragging = true }
+                    // a hand's pinch only clicks: windows no longer move by accident
+                    event.source == com.hyperxr.input.PointerSource.HAND_RAY -> pressRegion = hit
+                    // controller / gaze: grab the title bar (or empty space) to move the window
+                    else -> { pressRegion = hit; if (hit == null || hit.id == TITLE_BAR) dragging = true }
+                }
             }
             PointerPhase.MOVE -> {
                 val pr = pressRegion
@@ -176,6 +183,12 @@ abstract class XrPanel(
     private var dragReach = 0f
 
     fun endDrag() { dragDistance = 0f }
+
+    /** Starts moving this panel as if it had been grabbed (a fist on the window it carries). */
+    fun beginGrab() { dragging = true }
+
+    /** Ends a grab started with [beginGrab]. */
+    fun endGrab() { dragging = false; dragDistance = 0f }
 
     fun faceUser(eye: Vec3) {
         val dx = pose.position.x - eye.x

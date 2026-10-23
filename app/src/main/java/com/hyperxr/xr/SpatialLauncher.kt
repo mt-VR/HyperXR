@@ -357,15 +357,19 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             }
             pinchBallVisible[i] = h.isUsable && !labBusy && (!pointMode || pointPush[i].pointing)
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
+            // a fist (no finger extended) grabs: it moves windows, pushing/pulling them in depth
+            val fist = h.isUsable && (h.gesture == com.hyperxr.handtracking.Gesture.FIST || h.gesture == com.hyperxr.handtracking.Gesture.GRAB)
+            if (!handRays[i].grabbing || handRays[i].captured == null) handRays[i].grabbing = fist
             // the click (push or pinch) is read from the held state so a lost frame does not release it
-            val pinch = if (pointMode) pushed || (raw == null && handRays[i].captured != null && handRay != null && pointPush[i].pressed)
+            val pinch = if (handRays[i].grabbing) fist || (raw == null && handRays[i].captured != null && handRay != null)
+                else if (pointMode) pushed || (raw == null && handRays[i].captured != null && handRay != null && pointPush[i].pressed)
                 else h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
             handRays[i].update(handRay, pinch, surfaces, now)
             if (handRay != null) recordPointer(5 + i, handRay, pinch) else pointerRays.remove(5 + i)
             handRayVisible[i] = handRay != null
             pinchStrength[i] = if (!h.isUsable) 0f else if (pointMode) pointPush[i].progress else h.pinchStrength
             pushPressed[i] = pointMode && pointPush[i].pressed
-            if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch, if (h.isUsable) pinchBall[i] else null) }
+            if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch, if (h.isUsable && handRays[i].grabbing) pinchBall[i] else null) }
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
             if (h.isUsable && !menuOpen && handRays[i].captured == null) {
                 when (val e = microGestures[i].update(h, now)) {
@@ -505,8 +509,21 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (!p.hitDistance.isNaN()) hitPoints += r.pointAt(p.hitDistance - 0.004f)
     }
 
+    private val grabbedBars = HashMap<Int, XrPanel>()
+
     private fun dragWindows(p: RayPointer, r: Ray, down: Boolean, hand: Vec3? = null) {
         (p.captured as? com.hyperxr.appworld.WorldHit)?.let { appWorld.drag(it, r, down); return }
+        // a fist on a window's content moves the window by its bar
+        val w = p.captured as? SpatialWindow
+        val bar = w?.let { windowControls[it] }
+        grabbedBars[p.pointerId]?.let { held -> if (held !== bar || !down || !p.grabbing) { held.endGrab(); grabbedBars.remove(p.pointerId) } }
+        if (w != null) {
+            if (bar != null && down && p.grabbing) {
+                if (grabbedBars[p.pointerId] == null) { bar.beginGrab(); grabbedBars[p.pointerId] = bar }
+                bar.drag(r.origin, r.direction, ctx.input.head, hand)
+            }
+            return
+        }
         val target = p.captured as? XrPanel ?: return
         if (down && target.isDragging) target.drag(r.origin, r.direction, ctx.input.head, hand)
         if (!down) target.endDrag()

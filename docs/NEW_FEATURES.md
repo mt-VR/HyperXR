@@ -339,3 +339,9 @@ App próprio do HyperXR para o YouTube, sem WebView, sem o site e sem o app do Y
 Licença: o NewPipe Extractor é GPL-3.0-or-later. O código do HyperXR continua MIT, mas um APK que
 inclui o extrator é uma obra combinada e deve ser distribuído sob a GPL-3.0 (com o código-fonte).
 O uso de clientes de terceiros pode contrariar os termos de serviço do YouTube.
+
+## Punho para mover janelas
+Com as mãos, só o **punho fechado** move janelas e painéis: aponte para a janela (o conteúdo ou a
+barra), feche a mão e mova; estender o braço afasta a janela, recolher aproxima. A pinça só clica:
+pinçar no espaço vazio ou na barra não arrasta mais nada. O punho nunca clica no conteúdo
+(páginas, apps). Com o Joy-Con e o olhar, a barra continua arrastando como antes.

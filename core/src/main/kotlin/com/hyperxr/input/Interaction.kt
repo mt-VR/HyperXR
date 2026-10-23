@@ -11,6 +11,8 @@ interface InteractionSurface {
     val widthMeters: Float
     val heightMeters: Float
     val interactive: Boolean get() = true
+    /** Whether a fist ([PointerEvent.grab]) may take hold of it (windows and panels); others ignore fists. */
+    val acceptsGrab: Boolean get() = false
     /**
      * 0 for flat surfaces. Otherwise the surface is a cylinder section curved towards the viewer:
      * its axis is vertical, [curvatureRadius] in front of the pose (local +Z), and [widthMeters]
@@ -41,6 +43,8 @@ data class PointerEvent(
     val distance: Float,
     val timestampNs: Long,
     val secondary: Boolean = false,
+    /** The hand is a fist: this press grabs and moves what it points at instead of clicking. */
+    val grab: Boolean = false,
 )
 
 /** Plane hit math shared by every pointer type. */
@@ -217,6 +221,8 @@ class DirectTouch(val pointerId: Int) {
  * when the ray leaves it) and edge detection so a held button never re-fires.
  */
 class RayPointer(val pointerId: Int, val source: PointerSource) {
+    /** Set by the caller while the hand is a fist (see [PointerEvent.grab]). */
+    var grabbing = false
     var hovered: InteractionSurface? = null
         private set
     var captured: InteractionSurface? = null
@@ -268,7 +274,8 @@ class RayPointer(val pointerId: Int, val source: PointerSource) {
         val target = best
         if (target != null) {
             secondaryDown = secondary
-            if (primaryDown && !wasDown) { captured = target; send(target, PointerPhase.DOWN, now) }
+            // a fist only takes hold of what can be grabbed; on anything else it does nothing
+            if (primaryDown && !wasDown && (!grabbing || target.acceptsGrab)) { captured = target; send(target, PointerPhase.DOWN, now) }
             else send(target, PointerPhase.HOVER, now)
         }
         wasDown = primaryDown
@@ -286,6 +293,6 @@ class RayPointer(val pointerId: Int, val source: PointerSource) {
     }
 
     private fun send(s: InteractionSurface, phase: PointerPhase, now: Long) {
-        s.onPointerEvent(PointerEvent(pointerId, source, phase, uv[0], uv[1], hitDistance, now, secondaryDown))
+        s.onPointerEvent(PointerEvent(pointerId, source, phase, uv[0], uv[1], hitDistance, now, secondaryDown, grabbing))
     }
 }

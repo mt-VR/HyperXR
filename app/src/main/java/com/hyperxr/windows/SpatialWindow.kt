@@ -136,7 +136,11 @@ abstract class SpatialWindow(val title: String, val screen: VirtualScreen, overr
         injectTouch(a, x, y, d, e)
     }
 
+    /** A fist on the window moves it (through its bar); the content never sees the fist. */
+    override val acceptsGrab: Boolean get() = true
+
     override fun onPointerEvent(event: PointerEvent) {
+        if (event.grab) return
         val now = android.os.SystemClock.uptimeMillis()
         val x = (event.u * screen.widthPx).coerceIn(0f, screen.widthPx - 1f)
         val y = (event.v * screen.heightPx).coerceIn(0f, screen.heightPx - 1f)
