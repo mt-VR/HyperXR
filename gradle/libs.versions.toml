@@ -13,6 +13,7 @@ arcore = "1.50.0"
 mediapipe = "1.0.0"
 mediapipeGenai = "0.10.35"
 litert = "1.4.2"
+onnxruntime = "1.22.0"
 shizuku = "13.1.5"
 openxrLoader = "1.1.49"
 webkit = "1.14.0"
@@ -39,6 +40,7 @@ shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
 shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 mediapipe-tasks-vision = { module = "com.google.mediapipe:tasks-vision", version.ref = "mediapipe" }
 litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 litert-gpu = { module = "com.google.ai.edge.litert:litert-gpu", version.ref = "litert" }
 litert-gpu-api = { module = "com.google.ai.edge.litert:litert-gpu-api", version.ref = "litert" }
 mediapipe-tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipeGenai" }

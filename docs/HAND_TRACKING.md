@@ -249,3 +249,30 @@ qualquer que seja a profundidade estimada. No ambiente virtual continua o contor
 
 **Otimização:** a máscara da mão reaproveita o mesmo bitmap 256x256. Antes era criado um novo a
 cada ~30 ms, cerca de 8 MB/s de lixo e pausas do coletor.
+
+## Mão real na frente da interface com EfficientViT-SAM
+
+O recorte da mão real (a câmera mostrada por cima dos painéis) não usa mais o segmentador de pele
+do MediaPipe. Agora é feito pelo **EfficientViT-SAM L0** (MIT Han Lab, Apache-2.0), uma versão
+eficiente do Segment Anything.
+
+**Prompts:** cada mão é recortada a partir de "prompts" tirados dos pontos da mão: a caixa da mão
+(com a largura de um dedo de folga) mais 6 pontos dentro dela (centro da palma, o meio de cada
+dedo e o polegar). O resultado é a mão inteira com a borda certa, sem pegar parede ou objeto da
+cor da pele.
+
+**Onde roda:**
+- O encoder (512x512, pesos fp16) vai para a NPU; se ela não aceitar, para a GPU; senão, para a
+  CPU.
+- O decoder roda no ONNX Runtime (CPU), uma vez por mão. Uma única passada do encoder serve as
+  duas mãos.
+
+**Ritmo:** a rede roda até ~9 vezes por segundo. Em cada quadro da câmera entre duas passadas, a
+última máscara de cada mão é movida e escalada para onde a mão está agora (`SamHands.compose`).
+Assim o recorte acompanha a câmera com a qualidade da rede.
+
+**Plano B:** se o SAM não iniciar no aparelho, o segmentador antigo volta como reserva. O
+segmentador antigo continua sendo usado para "pessoas atravessam o ambiente".
+
+**Mais:** a conversão e as conferências estão em `tools/hand_sam/README.md`. A linha de status das
+mãos mostra onde cada parte rodou e quanto tempo levou. Ainda não foi medido num celular.

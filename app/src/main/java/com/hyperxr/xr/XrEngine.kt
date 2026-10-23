@@ -234,7 +234,7 @@ class XrEngine(
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
-            else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats}"
+            else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats} · ${hands.maskStatus}"
         }
 
         // the computational gyroscope: chosen, or automatic on phones without a gyroscope

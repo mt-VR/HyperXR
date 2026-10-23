@@ -61,7 +61,7 @@ android {
     // Compressed native libs: GeckoView's libxul alone is ~150 MB uncompressed.
     packaging { jniLibs { useLegacyPackaging = true } }
     // MediaPipe memory-maps the model from the APK: it must be stored uncompressed.
-    androidResources { noCompress += listOf("task", "so", "tflite") }
+    androidResources { noCompress += listOf("task", "so", "tflite", "onnx") }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/hyperx-assets"))
     testOptions { unitTests.isReturnDefaultValues = true }
@@ -125,6 +125,8 @@ dependencies {
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.litert)
+    // the hand segmenter's prompt decoder (EfficientViT-SAM) runs from ONNX, exactly as exported
+    implementation(libs.onnxruntime.android)
     // GPU delegate: the hand mask runs on the GPU while the NPU does hands and depth
     implementation(libs.litert.gpu)
     implementation(libs.litert.gpu.api)

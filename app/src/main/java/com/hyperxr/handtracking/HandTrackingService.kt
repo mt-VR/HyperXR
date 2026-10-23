@@ -371,6 +371,53 @@ class HandTrackingService(private val context: Context) {
     @Volatile var handMaskSeq = 0; private set
     val handMaskDevice: String get() = maskEngine.device
 
+    // ------------------------------------------------------------------ hands cut out by SAM
+    private val sam by lazy { HandSamEngine(context) }
+    @Volatile private var samStarted: Boolean? = null
+    private val samBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val samThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-hand-sam").apply { priority = Thread.NORM_PRIORITY + 1 } }
+    @Volatile private var samMasks: List<SamHands.HandMask>? = null
+    @Volatile private var samSides: List<Handedness> = emptyList()
+    private var lastSamNs = 0L
+    private val samOut = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+
+    /** What runs the hand cut-out, for the hand status line. */
+    val maskStatus: String get() = when (samStarted) {
+        true -> "recorte: SAM (%s %.0f ms + decoder %.0f ms)".format(sam.device, sam.encoderMs, sam.decoderMs)
+        false -> "recorte: segmentador de pele (${maskEngine.device})"
+        null -> "recorte: iniciando"
+    }
+
+    /**
+     * Starts a SAM run on this frame now and then (the network is slower than the camera), and
+     * every frame turns the newest SAM masks into the frame's hand mask at where the hands are
+     * now. False when SAM is not available (the skin segmenter takes over).
+     */
+    private fun runSamHands(slot: Slot, src: Bitmap): Boolean {
+        val n = HandMaskEngine.SIZE
+        val w = src.width; val h = src.height
+        val sides = seen.toList()
+        val now = System.nanoTime()
+        if (now - lastSamNs > 110_000_000L && samBusy.compareAndSet(false, true)) {
+            lastSamNs = now
+            val copy = src.copy(Bitmap.Config.ARGB_8888, false)
+            val pts = sides.map { side -> val im = sideImage.getValue(side); FloatArray(HandJoint.COUNT * 2) { k -> im[(k / 2) * 3 + (k % 2)] } }
+            samThread.execute {
+                try {
+                    if (samStarted == null) samStarted = try { sam.start() } catch (t: Throwable) { Diagnostics.log("Hand SAM off: ${t.message}"); false }
+                    if (samStarted == true) sam.segment(copy, pts)?.let { m -> samMasks = m; samSides = sides }
+                } catch (t: Throwable) { Diagnostics.log("Hand SAM run failed: ${t.message}") } finally { copy.recycle(); samBusy.set(false) }
+            }
+        }
+        if (samStarted == false) return false
+        val masks = samMasks ?: return true
+        val anchors = samSides.map { side -> if (side in seen) { val im = sideImage.getValue(side); SamHands.anchor(FloatArray(HandJoint.COUNT * 2) { k -> im[(k / 2) * 3 + (k % 2)] }, w, h) } else null }
+        SamHands.compose(masks, anchors, w, h, n, samOut)
+        handMask = ByteArray(n * n).also { out -> if (slot.rotation180) for (i in 0 until n * n) out[n * n - 1 - i] = samOut[i] else System.arraycopy(samOut, 0, out, 0, n * n) }
+        handMaskSeq++
+        return true
+    }
+
     /** People walking into view while inside a virtual environment (see PersonBreakthrough). */
     @Volatile var personMaskEnabled = false
     @Volatile var personMask: ByteArray? = null; private set
@@ -401,6 +448,8 @@ class HandTrackingService(private val context: Context) {
         if (now - lastMaskNs < interval || !maskBusy.compareAndSet(false, true)) return
         lastMaskNs = now
         val src = slot.bitmap ?: run { maskBusy.set(false); return }
+        // hands: the promptable network (EfficientViT-SAM) when it runs on this phone
+        if (wantHands && samStarted != false && runSamHands(slot, src)) { if (!wantPeople) { maskBusy.set(false); return } }
         // one mask job at a time (maskBusy): the same small bitmap is reused, no garbage per frame
         val small = maskSmall
         maskCanvas.drawBitmap(src, null, maskRect, maskPaint)
@@ -413,10 +462,11 @@ class HandTrackingService(private val context: Context) {
                 if (maskStarted == null) maskStarted = maskEngine.start(preferGpu)
                 val n = HandMaskEngine.SIZE
                 // only inside the hands' shape (from the landmarks): no background, no arm, no legs
-                if (wantHands) { java.util.Arrays.fill(maskWhere, 0); for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere) }
-                if (maskStarted == true && maskEngine.run(small, if (wantHands) maskWhere else null, if (wantHands) maskWork else null, if (wantPeople) maskLabels else null)) {
+                val skinHands = wantHands && samStarted != true
+                if (skinHands) { java.util.Arrays.fill(maskWhere, 0); for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere) }
+                if (maskStarted == true && maskEngine.run(small, if (skinHands) maskWhere else null, if (skinHands) maskWork else null, if (wantPeople) maskLabels else null)) {
                     fun oriented(m: ByteArray) = ByteArray(n * n).also { out -> if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = m[i] else System.arraycopy(m, 0, out, 0, n * n) }
-                    if (wantHands) { handMask = oriented(maskWork); handMaskSeq++ }
+                    if (skinHands) { handMask = oriented(maskWork); handMaskSeq++ }
                     if (wantPeople) {
                         val m = breakthrough.update(maskLabels, System.nanoTime())
                         val was = personMask
