@@ -58,6 +58,15 @@ class TableKeyLayout(val pitch: Float = 0.032f, val rowPitch: Float = 0.034f, va
         keys = out
     }
 
+    /**
+     * Like [keyAt], but a fingertip that was over [previous] stays on it until it is [margin]
+     * past its edge: tracking noise at the border between two keys no longer flips between them.
+     */
+    fun keyAtSticky(x: Float, z: Float, previous: Key?, margin: Float = 0.006f): Key? {
+        if (previous != null && previous in keys && x in previous.x0 - margin..previous.x1 + margin && z in previous.z0 - margin..previous.z1 + margin) return previous
+        return keyAt(x, z)
+    }
+
     /** The key under (x, z), or the nearest key centre within half a pitch of its edge. */
     fun keyAt(x: Float, z: Float): Key? {
         keys.firstOrNull { it.contains(x, z) }?.let { return it }
@@ -173,7 +182,7 @@ class TableTyping(val layout: TableKeyLayout) {
     /** The fingers that type: thumb (space), index, middle, ring of each hand. */
     val fingers = intArrayOf(HandJoint.THUMB_TIP, HandJoint.INDEX_TIP, HandJoint.MIDDLE_TIP, HandJoint.RING_TIP)
 
-    private class Finger { var down = false; var peak = Float.NaN; var key: TableKeyLayout.Key? = null }
+    private class Finger { var down = false; var peak = Float.NaN; var key: TableKeyLayout.Key? = null; var over: TableKeyLayout.Key? = null }
     private val state = Array(2) { Array(4) { Finger() } }
     private var lastKey: TableKeyLayout.Key? = null
     private var lastKeyNs = Long.MIN_VALUE / 2
@@ -184,7 +193,7 @@ class TableTyping(val layout: TableKeyLayout) {
     val held = HashSet<String>()
 
     fun reset() {
-        for (h in state) for (f in h) { f.down = false; f.peak = Float.NaN; f.key = null }
+        for (h in state) for (f in h) { f.down = false; f.peak = Float.NaN; f.key = null; f.over = null }
         hovered.clear(); held.clear()
     }
 
@@ -206,7 +215,8 @@ class TableTyping(val layout: TableKeyLayout) {
                 val f = st[fi]
                 place.toLocal(joints[joint], local)
                 val h = local.y - tipRadius
-                val key = layout.keyAt(local.x, local.z)
+                val key = layout.keyAtSticky(local.x, local.z, f.over)
+                f.over = key
                 // the thumb only types the space bar (it rests near it while the fingers type)
                 val usable = key != null && (joint != HandJoint.THUMB_TIP || key.kind == TableKeyLayout.Kind.SPACE)
                 if (f.down) {

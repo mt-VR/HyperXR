@@ -61,6 +61,31 @@ class TableKeyboardView(
     private val stillTips = Array(2) { ArrayDeque<Pair<Long, Vec3>>() }
 
     private val flashes = HashMap<String, Long>()
+    private var lastFrameNs = 0L
+
+    // anchoring and height following
+    private var anchor: com.google.ar.core.Anchor? = null
+    private var pendingAnchor = false
+    private val anchorPose = Pose()
+    /** Height correction applied on top of the anchored placement (from depth readings or nudges). */
+    private var heightOffset = 0f
+    private var heightTarget = 0f
+    private val heights = ArrayDeque<Float>()
+
+    private fun followAnchor(ar: ArCoreSession) {
+        if (pendingAnchor) {
+            anchor?.detach()
+            heightOffset = 0f; heightTarget = 0f; heights.clear()
+            anchor = ar.anchorAt(placement.panelPose(Pose(), lift = 0f).also { Quat.fromAxisAngle(0f, 1f, 0f, placement.yaw, it.orientation) })
+            pendingAnchor = anchor == null && ar.trackingState == com.google.ar.core.TrackingState.TRACKING
+        }
+        val a = anchor ?: return
+        if (!ar.anchorPose(a, anchorPose)) return  // keep the last placement while ARCore is lost
+        placement.center.set(anchorPose.position.x, anchorPose.position.y + heightOffset, anchorPose.position.z)
+        placement.yaw = com.hyperxr.headtracking.TrackingRebase.yaw(anchorPose.orientation)
+    }
+
+    private fun reanchor() { pendingAnchor = true }
     private val surface = KeySurface()
     val controls = Controls()
 
@@ -86,20 +111,32 @@ class TableKeyboardView(
                 calibrateByFinger(hands, head, now)
             }
             State.PLACED -> {
-                // the keyboard follows the table if its height reading changes (small moves only)
-                if (usingDepth && now - lastDetectNs > 500_000_000L) {
+                // locked to the real table: an ARCore anchor carries the keyboard along as ARCore
+                // corrects its map (otherwise the keyboard slowly slides off the table)
+                if (ar != null) followAnchor(ar)
+                // the table's height: the median of recent depth readings, and only a real
+                // difference (over 6 mm) is followed, gently; single readings never move it
+                if (usingDepth && now - lastDetectNs > 400_000_000L) {
                     lastDetectNs = now
                     detectTable(ar!!, head)?.let { h ->
-                        val dy = h - placement.center.y
-                        if (kotlin.math.abs(dy) < 0.04f) placement.center.y += dy * 0.3f
+                        heights.addLast(h - placement.center.y + heightOffset)
+                        while (heights.size > 7) heights.removeFirst()
+                    }
+                    if (heights.size >= 5) {
+                        val median = heights.sorted()[heights.size / 2]
+                        heightTarget = if (kotlin.math.abs(median - heightOffset) in 0.006f..0.04f) median else heightTarget
                     }
                 }
+                val dt = if (lastFrameNs == 0L) 0f else ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.1f)
+                val step = (heightTarget - heightOffset) * (1f - kotlin.math.exp(-dt / 0.8f))
+                heightOffset += step; placement.center.y += step
                 val joints = arrayOf(hands[0].takeIf { it.isUsable }?.joints, hands[1].takeIf { it.isUsable }?.joints)
                 val uncertain = booleanArrayOf(hands[0].depthSource == DepthSource.HAND_SIZE_PRIOR, hands[1].depthSource == DepthSource.HAND_SIZE_PRIOR)
                 for (key in typing.update(joints, uncertain, placement, now)) press(key, now)
                 if (surface.signature() != surface.drawn) surface.dirty = true
             }
         }
+        lastFrameNs = now
         flashes.entries.removeAll { now - it.value > FLASH_NS }
         controls.place(head)
         controls.dirty = controls.dirty || controls.shownStatus != status
@@ -147,6 +184,7 @@ class TableKeyboardView(
 
     private fun placed(how: String) {
         state = State.PLACED; typing.reset(); status = "$how. Digite tocando as teclas com as pontas dos dedos"
+        reanchor()
         surface.dirty = true; controls.dirty = true
         click()
     }
@@ -154,13 +192,14 @@ class TableKeyboardView(
     /** Searches again (depth) or waits for a finger calibration. */
     fun recalibrate() {
         state = State.SEARCHING; placement.valid = false; candidate = Float.NaN; startNs = 0L; typing.reset()
+        anchor?.detach(); anchor = null; pendingAnchor = false
         stillTips.forEach { it.clear() }; controls.dirty = true
     }
 
-    fun nudge(dy: Float) { if (placement.valid) { placement.center.y += dy; controls.dirty = true } }
+    fun nudge(dy: Float) { if (placement.valid) { placement.center.y += dy; reanchor(); controls.dirty = true } }
 
     /** Moves the keyboard to where the user faces now, on the same table height. */
-    fun bringInFront(head: Pose) { if (placement.valid) { placement.placeInFront(head, placement.center.y); typing.reset() } }
+    fun bringInFront(head: Pose) { if (placement.valid) { placement.placeInFront(head, placement.center.y); typing.reset(); reanchor() } }
 
     private fun press(key: TableKeyLayout.Key, now: Long) {
         flashes[key.id] = now
@@ -193,7 +232,7 @@ class TableKeyboardView(
         surface.submit(scene)
     }
 
-    fun release() { surface.release(); controls.release() }
+    fun release() { anchor?.detach(); anchor = null; surface.release(); controls.release() }
 
     // ------------------------------------------------------------------ keys texture
     private inner class KeySurface : XrPanel(layout.width + 0.016f, layout.depth + 0.016f, title = "", ppm = 2200f) {

@@ -179,4 +179,13 @@ class TableKeyboardTest {
         repeat(6) { z += 0.005f; step(z) }
         assertFalse(pp.pressed)
     }
+
+    @Test fun aFingertipOnTheBorderStaysOnItsKey() {
+        val l = TableKeyLayout()
+        val f = l.keys.first { it.label == "f" }; val g = l.keys.first { it.label == "g" }
+        // just past the f/g border, on the g side, coming from f: still f
+        val x = f.x1 + 0.004f
+        assertEquals("f", l.keyAtSticky(x, f.cz, f)?.label)
+        assertEquals("g", l.keyAtSticky(g.cx, g.cz, f)?.label)
+    }
 }

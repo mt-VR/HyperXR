@@ -379,6 +379,30 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         } finally { img.close() }
     }
 
+    /**
+     * An ARCore anchor at [p] (tracking space): ARCore keeps it attached to the real place as its
+     * map of the room improves, so content placed on a real surface stays on it. Null when not
+     * tracking.
+     */
+    fun anchorAt(p: Pose): com.google.ar.core.Anchor? {
+        val s = session ?: return null
+        if (trackingState != TrackingState.TRACKING) return null
+        val w = origin.compose(p)
+        return try {
+            s.createAnchor(com.google.ar.core.Pose(floatArrayOf(w.position.x, w.position.y, w.position.z),
+                floatArrayOf(w.orientation.x, w.orientation.y, w.orientation.z, w.orientation.w)))
+        } catch (t: Throwable) { null }
+    }
+
+    /** Where [a] is now, in tracking space; false while ARCore is not tracking it. */
+    fun anchorPose(a: com.google.ar.core.Anchor, out: Pose): Boolean {
+        if (a.trackingState != TrackingState.TRACKING) return false
+        val ap = a.pose
+        val world = Pose(Vec3(ap.tx(), ap.ty(), ap.tz()), Quat(ap.qx(), ap.qy(), ap.qz(), ap.qw()))
+        origin.inverse().compose(world, out)
+        return true
+    }
+
     /** Camera pose in tracking space (needed to place hands detected in the camera image). */
     fun cameraPose(out: Pose): Boolean {
         val f = lastFrame ?: return false
