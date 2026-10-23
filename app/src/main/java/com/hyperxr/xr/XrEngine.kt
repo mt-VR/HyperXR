@@ -95,6 +95,14 @@ class XrContext(
     var camera: com.hyperxr.rendering.CameraImageSource? = null
     /** 16:9 screen sharing (recording, external displays, browser stream). */
     lateinit var share: com.hyperxr.share.ScreenShare
+    /** While set (an emulator window has focus), controller keys and sticks go to it first. */
+    @Volatile var gameInput: GameInput? = null
+}
+
+/** Takes raw controller/keyboard input (emulators); return false to let HyperXR handle the event. */
+interface GameInput {
+    fun onKey(e: KeyEvent): Boolean
+    fun onMotion(e: MotionEvent): Boolean
 }
 
 /**
@@ -628,6 +636,7 @@ class XrEngine(
     }
 
     fun onKey(e: KeyEvent): Boolean {
+        if (::ctx.isInitialized) ctx.gameInput?.let { if (it.onKey(e)) return true }
         if (joyCons.onKeyEvent(e)) return true
         // Viewer buttons / volume keys act as select so a plain VR Box remains usable.
         if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_ENTER || e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
@@ -637,7 +646,10 @@ class XrEngine(
         return false
     }
 
-    fun onGeneric(e: MotionEvent): Boolean = joyCons.onMotionEvent(e)
+    fun onGeneric(e: MotionEvent): Boolean {
+        if (::ctx.isInitialized) ctx.gameInput?.let { if (it.onMotion(e)) return true }
+        return joyCons.onMotionEvent(e)
+    }
 
     fun onResume() { tracker?.start(); gyro.start(); content.onResume() }
 

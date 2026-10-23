@@ -153,6 +153,8 @@ data class LauncherSettings(
     val environmentId: String = "builtin:studio",
     /** Reopen the windows (browser tabs, Android apps) that were open when XR was last closed. */
     val restoreWindows: Boolean = true,
+    /** The built-in 360 environments follow the clock (night street at night, sunset at dusk...). */
+    val autoEnvironmentByTime: Boolean = false,
 ) {
     companion object {
         val DEFAULT_PINNED = listOf(

@@ -42,3 +42,10 @@ add_library(hyperxr_image SHARED yuv_convert.cpp)
 target_compile_options(hyperxr_image PRIVATE -O3 -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(hyperxr_image PRIVATE -Wl,-z,max-page-size=16384)
 target_link_libraries(hyperxr_image jnigraphics)
+
+# libretro frontend for the embedded emulator cores (jniLibs/libcore_*.so, loaded with dlopen).
+add_library(hyperxr_retro SHARED retro_frontend.cpp)
+target_include_directories(hyperxr_retro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/libretro/include)
+target_compile_options(hyperxr_retro PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter -fno-exceptions -fno-rtti)
+target_link_options(hyperxr_retro PRIVATE -Wl,-z,max-page-size=16384)
+target_link_libraries(hyperxr_retro android log dl)

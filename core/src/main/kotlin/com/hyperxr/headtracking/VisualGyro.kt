@@ -21,6 +21,16 @@ class GrayImage(val w: Int, val h: Int, val px: ByteArray = ByteArray(w * h)) {
     }
 
     fun copy() = GrayImage(w, h, px.copyOf())
+
+    /** Bilinear sample; (x, y) must be at least one pixel inside the image. */
+    fun sample(x: Float, y: Float): Float {
+        val ix = x.toInt(); val iy = y.toInt()
+        val fx = x - ix; val fy = y - iy
+        val i = iy * w + ix
+        val a = (px[i].toInt() and 0xff); val b = (px[i + 1].toInt() and 0xff)
+        val c = (px[i + w].toInt() and 0xff); val d = (px[i + w + 1].toInt() and 0xff)
+        return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy
+    }
 }
 
 /**
@@ -33,7 +43,11 @@ class GrayImage(val w: Int, val h: Int, val px: ByteArray = ByteArray(w * h)) {
  *  - map: views are kept as keyframes with their orientation; when the head looks again where a
  *    keyframe was taken, matching against it gives an absolute orientation and the accumulated
  *    drift is pulled back (loop closure, as when looking around and coming back);
- *  - gravity (accelerometer, see [applyGravity]) keeps pitch and roll level.
+ *  - gravity (accelerometer, see [applyGravity]) keeps pitch and roll level, and the compass,
+ *    when the phone has one, keeps yaw from drifting over minutes (see [applyHeading]).
+ * Speed: features persist from frame to frame (corners are only searched for in grid cells that
+ * lost theirs), the patch search is one pass per candidate with a radius that shrinks while the
+ * motion guess is good, and the final position is refined to sub-pixel by Lucas-Kanade.
  * Pure rotation is assumed: head translation is small compared with the distance of the room.
  *
  * Frames: the camera (x right, y down, z forward) and the head (x right, y up, -z forward) differ
@@ -67,19 +81,30 @@ class VisualGyro(
 
     fun reset(start: Quat = Quat()) {
         orientation.set(start); prev = null; keyframes.clear(); keyframeCount = 0; lastM.identity(); angularVelocity.set(0f, 0f, 0f)
+        haveNorth = false; prevCount = 0; prevFeatures = FloatArray(0)
     }
+
+    /** Features carried into the next frame (tracked ones that survived plus new corners). */
+    val featureCount: Int get() = prevCount
+    /** Microseconds of the last [process] call. */
+    @Volatile var lastProcessUs = 0L; private set
 
     /**
      * One camera frame (grayscale, at the resolution the intrinsics refer to). Returns true when
      * the rotation was measured; false when the view has too little texture (dark, a blank wall).
      */
     fun process(img: GrayImage, timeNs: Long): Boolean {
-        val pyr = Pyramid(img.copy(), img.half())
+        val t0 = System.nanoTime()
+        // [img] is kept (as the previous frame and maybe a keyframe): callers pass a fresh image
+        val pyr = Pyramid(img, img.half())
         val p = prev
         var ok = false
+        tracked.clear()
         if (p != null && prevCount >= MIN_MATCHES) {
             val m = Quat()
-            val n = estimate(p, prevFeatures, prevCount, pyr, lastM, m)
+            // a good motion guess needs only a small search; on failure the full radius is tried
+            var n = if (tracking && inliers >= 20) estimate(p, prevFeatures, prevCount, pyr, lastM, m, R1_SMALL, tracked) else 0
+            if (n < MIN_MATCHES) { tracked.clear(); n = estimate(p, prevFeatures, prevCount, pyr, lastM, m, R1, tracked) }
             inliers = n
             if (n >= MIN_MATCHES) {
                 ok = true
@@ -99,13 +124,39 @@ class VisualGyro(
         }
         tracking = ok
         relocalize(pyr)
-        // new features for the next frame
-        prevFeatures = detect(pyr.l0)
+        // features for the next frame: the tracked inliers, plus new corners in empty cells
+        if (!ok) tracked.clear()
+        prevFeatures = detect(pyr.l0, tracked)
         prevCount = prevFeatures.size / 2
         prev = pyr
         prevTimeNs = timeNs
         maybeAddKeyframe(pyr)
+        lastProcessUs = (System.nanoTime() - t0) / 1000
         return ok
+    }
+
+    private val tracked = ArrayList<Float>(GRID_X * GRID_Y * 2)
+
+    private var haveNorth = false
+    private val worldNorth = Vec3()
+
+    /**
+     * Pulls yaw toward the compass: [northHead] is the magnetic field in the head frame (any
+     * length). The first call stores where north is in the world; later calls turn the head about
+     * the vertical by [alpha] of the difference. Callers skip it when the field strength is off
+     * (a speaker or metal nearby).
+     */
+    fun applyHeading(northHead: Vec3, alpha: Float) {
+        val n = orientation.rotate(Vec3(northHead.x, northHead.y, northHead.z))
+        n.y = 0f
+        if (n.length() < 1e-3f) return
+        n.normalize()
+        if (!haveNorth) { worldNorth.set(n.x, n.y, n.z); haveNorth = true; return }
+        // signed angle about +y from the measured north to the stored one
+        val ang = kotlin.math.atan2(n.z * worldNorth.x - n.x * worldNorth.z, n.x * worldNorth.x + n.z * worldNorth.z)
+        if (abs(ang) > 0.6f) return  // a jump this large is a disturbance, not drift
+        val corr = Quat.fromAxisAngle(0f, 1f, 0f, ang * alpha)
+        orientation.set(corr.mul(orientation, Quat())).normalize()
     }
 
     /**
@@ -130,11 +181,26 @@ class VisualGyro(
     }
 
     // ------------------------------------------------------------------ features
-    /** Best corner (Shi-Tomasi score on a 5x5 window) per grid cell, (x, y) pairs. */
-    private fun detect(img: GrayImage): FloatArray {
+    private val occupied = BooleanArray(GRID_X * GRID_Y)
+
+    /**
+     * The [kept] features (one per grid cell, the rest dropped) plus the best corner (Shi-Tomasi
+     * score on a 5x5 window) of every cell without one, (x, y) pairs.
+     */
+    private fun detect(img: GrayImage, kept: List<Float> = emptyList()): FloatArray {
         val out = ArrayList<Float>(GRID_X * GRID_Y * 2)
         val cw = img.w / GRID_X; val ch = img.h / GRID_Y
+        occupied.fill(false)
+        var k = 0
+        while (k + 1 < kept.size) {
+            val x = kept[k]; val y = kept[k + 1]; k += 2
+            if (x < MARGIN || y < MARGIN || x >= img.w - MARGIN || y >= img.h - MARGIN) continue
+            val c = minOf((y / ch).toInt(), GRID_Y - 1) * GRID_X + minOf((x / cw).toInt(), GRID_X - 1)
+            if (occupied[c]) continue
+            occupied[c] = true; out += x; out += y
+        }
         for (gy in 0 until GRID_Y) for (gx in 0 until GRID_X) {
+            if (occupied[gy * GRID_X + gx]) continue
             var best = 0f; var bx = -1; var by = -1
             val x0 = maxOf(gx * cw, MARGIN); val x1 = minOf((gx + 1) * cw, img.w - MARGIN)
             val y0 = maxOf(gy * ch, MARGIN); val y1 = minOf((gy + 1) * ch, img.h - MARGIN)
@@ -165,43 +231,104 @@ class VisualGyro(
         return (tr / 2 - sqrt(maxOf(0f, tr * tr / 4 - det))) / 25f
     }
 
-    /** SSD of 7x7 patches, a at (ax, ay) and b at (bx, by); large when off the image. */
-    private fun ssd(a: GrayImage, ax: Int, ay: Int, b: GrayImage, bx: Int, by: Int): Int {
-        if (bx < 3 || by < 3 || bx >= b.w - 3 || by >= b.h - 3 || ax < 3 || ay < 3 || ax >= a.w - 3 || ay >= a.h - 3) return Int.MAX_VALUE
-        var s = 0
-        // mean-removed: robust to the camera's exposure changing between frames
-        var ma = 0; var mb = 0
-        for (dy in -3..3) for (dx in -3..3) { ma += a[ax + dx, ay + dy]; mb += b[bx + dx, by + dy] }
-        val off = (ma - mb) / 49
-        for (dy in -3..3) for (dx in -3..3) { val d = a[ax + dx, ay + dy] - b[bx + dx, by + dy] - off; s += d * d }
-        return s
+    private val patch = IntArray(49)
+
+    /** Loads the 7x7 patch of [a] at (ax, ay) for [ssd]; false when off the image. */
+    private fun loadPatch(a: GrayImage, ax: Int, ay: Int): Boolean {
+        if (ax < 3 || ay < 3 || ax >= a.w - 3 || ay >= a.h - 3) return false
+        var k = 0
+        for (dy in -3..3) { val r = (ay + dy) * a.w + ax; for (dx in -3..3) patch[k++] = a.px[r + dx].toInt() and 0xff }
+        return true
     }
 
+    /**
+     * Mean-removed SSD (robust to the camera's exposure changing between frames) of the loaded
+     * patch against [b] at (bx, by), in one pass: Σ(d - mean d)² = Σd² - (Σd)²/49.
+     */
+    private fun ssd(b: GrayImage, bx: Int, by: Int): Int {
+        if (bx < 3 || by < 3 || bx >= b.w - 3 || by >= b.h - 3) return Int.MAX_VALUE
+        var sd = 0; var sd2 = 0; var k = 0
+        val px = b.px; val w = b.w
+        for (dy in -3..3) {
+            val r = (by + dy) * w + bx
+            for (dx in -3..3) { val d = patch[k++] - (px[r + dx].toInt() and 0xff); sd += d; sd2 += d * d }
+        }
+        return sd2 - sd * sd / 49
+    }
+
+    private val tpl = FloatArray(81)
+    private val tgx = FloatArray(49)
+    private val tgy = FloatArray(49)
+
+    /**
+     * Sub-pixel position by Lucas-Kanade (inverse compositional, translation, mean-removed): the
+     * patch of [a] at (x0, y0) is looked for in [b] starting at (sx, sy). False when it does not
+     * converge near the start.
+     */
+    private fun refine(a: GrayImage, x0: Float, y0: Float, b: GrayImage, sx: Float, sy: Float, out: FloatArray): Boolean {
+        if (x0 < 5 || y0 < 5 || x0 >= a.w - 6 || y0 >= a.h - 6) return false
+        for (j in 0 until 9) for (i in 0 until 9) tpl[j * 9 + i] = a.sample(x0 + i - 4, y0 + j - 4)
+        var hxx = 0f; var hxy = 0f; var hyy = 0f; var tm = 0f
+        for (j in 0 until 7) for (i in 0 until 7) {
+            val k = (j + 1) * 9 + i + 1
+            val gx = (tpl[k + 1] - tpl[k - 1]) / 2; val gy = (tpl[k + 9] - tpl[k - 9]) / 2
+            tgx[j * 7 + i] = gx; tgy[j * 7 + i] = gy
+            hxx += gx * gx; hxy += gx * gy; hyy += gy * gy; tm += tpl[k]
+        }
+        tm /= 49
+        val det = hxx * hyy - hxy * hxy
+        if (det < 1f) return false
+        var x = sx; var y = sy
+        for (it in 0 until 4) {
+            if (x < 4 || y < 4 || x >= b.w - 5 || y >= b.h - 5) return false
+            var im = 0f
+            for (j in 0 until 7) for (i in 0 until 7) { val v = b.sample(x + i - 3, y + j - 3); res[j * 7 + i] = v; im += v }
+            im /= 49
+            var ex = 0f; var ey = 0f
+            for (j in 0 until 7) for (i in 0 until 7) {
+                val k = j * 7 + i
+                val e = (res[k] - im) - (tpl[(j + 1) * 9 + i + 1] - tm)
+                ex += tgx[k] * e; ey += tgy[k] * e
+            }
+            val dx = (hyy * ex - hxy * ey) / det; val dy = (hxx * ey - hxy * ex) / det
+            x -= dx; y -= dy
+            if (abs(dx) < 0.02f && abs(dy) < 0.02f) break
+        }
+        if (abs(x - sx) > 1.5f || abs(y - sy) > 1.5f) return false
+        out[0] = x; out[1] = y
+        return true
+    }
+    private val res = FloatArray(49)
+
     /** Coarse-to-fine match of a feature: returns (x, y) in [to] or null. */
-    private fun track(from: Pyramid, fxp: Float, fyp: Float, to: Pyramid, gx: Float, gy: Float, out: FloatArray): Boolean {
-        // level 1 (half size): wide search around the guess
+    private fun track(from: Pyramid, fxp: Float, fyp: Float, to: Pyramid, gx: Float, gy: Float, radius: Int, out: FloatArray): Boolean {
+        // level 1 (half size): search around the guess
         val ax1 = (fxp / 2).toInt(); val ay1 = (fyp / 2).toInt()
+        if (!loadPatch(from.l1, ax1, ay1)) return false
         var bestS = Int.MAX_VALUE; var bx = 0; var by = 0
         val cx1 = (gx / 2).toInt(); val cy1 = (gy / 2).toInt()
-        for (dy in -R1..R1) for (dx in -R1..R1) {
-            val s = ssd(from.l1, ax1, ay1, to.l1, cx1 + dx, cy1 + dy)
+        for (dy in -radius..radius) for (dx in -radius..radius) {
+            val s = ssd(to.l1, cx1 + dx, cy1 + dy)
             if (s < bestS) { bestS = s; bx = cx1 + dx; by = cy1 + dy }
         }
         if (bestS == Int.MAX_VALUE) return false
-        // level 0: refine, then sub-pixel by a parabola through the neighbours
+        // level 0: integer refinement, then sub-pixel by Lucas-Kanade (a parabola if it fails)
         val ax0 = fxp.toInt(); val ay0 = fyp.toInt()
+        if (!loadPatch(from.l0, ax0, ay0)) return false
         bestS = Int.MAX_VALUE
         var rx = 0; var ry = 0
         for (dy in -2..2) for (dx in -2..2) {
-            val s = ssd(from.l0, ax0, ay0, to.l0, bx * 2 + dx, by * 2 + dy)
+            val s = ssd(to.l0, bx * 2 + dx, by * 2 + dy)
             if (s < bestS) { bestS = s; rx = bx * 2 + dx; ry = by * 2 + dy }
         }
         if (bestS == Int.MAX_VALUE || bestS > MAX_SSD) return false
+        val sx = rx + (fxp - ax0); val sy = ry + (fyp - ay0)
+        if (refine(from.l0, fxp, fyp, to.l0, sx, sy, out)) return true
         fun sub(m: Int, c: Int, p: Int): Float { val d = (m - 2 * c + p).toFloat(); return if (d <= 0f) 0f else ((m - p) / (2 * d)).coerceIn(-0.5f, 0.5f) }
-        val sl = ssd(from.l0, ax0, ay0, to.l0, rx - 1, ry); val sr = ssd(from.l0, ax0, ay0, to.l0, rx + 1, ry)
-        val su = ssd(from.l0, ax0, ay0, to.l0, rx, ry - 1); val sd = ssd(from.l0, ax0, ay0, to.l0, rx, ry + 1)
-        out[0] = rx + (if (sl != Int.MAX_VALUE && sr != Int.MAX_VALUE) sub(sl, bestS, sr) else 0f) + (fxp - ax0)
-        out[1] = ry + (if (su != Int.MAX_VALUE && sd != Int.MAX_VALUE) sub(su, bestS, sd) else 0f) + (fyp - ay0)
+        val sl = ssd(to.l0, rx - 1, ry); val sr = ssd(to.l0, rx + 1, ry)
+        val su = ssd(to.l0, rx, ry - 1); val sd = ssd(to.l0, rx, ry + 1)
+        out[0] = sx + (if (sl != Int.MAX_VALUE && sr != Int.MAX_VALUE) sub(sl, bestS, sr) else 0f)
+        out[1] = sy + (if (su != Int.MAX_VALUE && sd != Int.MAX_VALUE) sub(su, bestS, sd) else 0f)
         return true
     }
 
@@ -213,10 +340,12 @@ class VisualGyro(
 
     /**
      * Matches [features] of [from] into [to] starting from the motion [guess] (b2 = guess b1),
-     * then finds the rotation. Returns the inlier count and the rotation in [out].
+     * then finds the rotation. Returns the inlier count and the rotation in [out]; the inliers'
+     * positions in [to] go to [inlierPx] when given.
      */
-    private fun estimate(from: Pyramid, features: FloatArray, count: Int, to: Pyramid, guess: Quat, out: Quat): Int {
+    private fun estimate(from: Pyramid, features: FloatArray, count: Int, to: Pyramid, guess: Quat, out: Quat, radius: Int = R1, inlierPx: MutableList<Float>? = null): Int {
         val a = ArrayList<Vec3>(count); val b = ArrayList<Vec3>(count)
+        val px = ArrayList<Float>(count * 2)
         val g = FloatArray(2); val m = FloatArray(2)
         for (i in 0 until count) {
             val x = features[i * 2]; val y = features[i * 2 + 1]
@@ -224,11 +353,16 @@ class VisualGyro(
             val p = guess.rotate(b1)
             if (p.z < 0.2f) continue
             project(p, g)
-            if (!track(from, x, y, to, g[0], g[1], m)) continue
-            a += b1; b += bearing(m[0], m[1], Vec3())
+            if (!track(from, x, y, to, g[0], g[1], radius, m)) continue
+            a += b1; b += bearing(m[0], m[1], Vec3()); px += m[0]; px += m[1]
         }
         if (a.size < MIN_MATCHES) return 0
-        return ransac(a, b, out)
+        val n = ransac(a, b, out)
+        if (inlierPx != null && n >= MIN_MATCHES) {
+            val cosT = kotlin.math.cos(INLIER_RAD)
+            for (k in a.indices) if (out.rotate(a[k]).dot(b[k]) > cosT) { inlierPx += px[k * 2]; inlierPx += px[k * 2 + 1] }
+        }
+        return n
     }
 
     /** 2-point RANSAC on bearing pairs, then Horn's method on the inliers. */
@@ -325,6 +459,7 @@ class VisualGyro(
         const val MIN_MATCHES = 8
         const val RELOC_MIN = 12
         const val R1 = 7
+        const val R1_SMALL = 3
         const val MAX_SSD = 49 * 30 * 30
         const val RANSAC_ITERS = 40
         const val INLIER_RAD = 0.012f   // ~0.7 degree

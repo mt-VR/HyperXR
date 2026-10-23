@@ -90,6 +90,24 @@ também não tem ARCore, então o rastreamento fica em 3DoF.
 - **Gravidade:** o acelerômetro, só quando |a| está perto de 1 g, corrige pitch e roll aos poucos.
 - **Entre quadros da câmera:** a orientação é levada adiante pela velocidade angular medida, até
   o momento em que a imagem chega aos olhos.
+- **Bússola (opcional):** se o celular tem magnetômetro, o yaw é puxado bem devagar (0,3% por
+  quadro) para o norte medido no início. Isso segura o desvio de minutos. Leituras com campo fora
+  de 22–70 µT (caixa de som, mesa de metal) e saltos de mais de 34° são ignorados.
+
+Otimizações da segunda versão:
+
+- **Pontos persistentes:** os inliers do quadro anterior continuam sendo seguidos e só as células
+  da grade que perderam o seu ponto procuram cantos novos (a busca de cantos era o passo mais
+  caro).
+- **Patch em uma passada:** o patch de origem é lido uma vez e cada candidato custa uma passada
+  (Σd² − (Σd)²/49), em vez de duas.
+- **Raio adaptativo:** com a estimativa de movimento boa (≥ 20 inliers), a busca no nível grosso
+  usa raio 3 em vez de 7 (5x menos candidatos); se falhar, refaz com o raio cheio.
+- **Lucas-Kanade subpixel:** a posição final é refinada por Lucas-Kanade (composicional inverso,
+  com média removida). Se ele não convergir, volta para a parábola.
+
+Medido no `VisualGyroTest.featuresPersistAndFrameIsFast` (61 quadros, JVM do servidor, não é
+celular): **1880 µs → 805 µs por quadro (2,3x mais rápido)**, pior erro 0,31° → 0,29°.
 
 Medido em imagens sintéticas de rotação conhecida (`VisualGyroTest`):
 

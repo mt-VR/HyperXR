@@ -40,6 +40,7 @@ import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.environments.CatalogItem
 import com.hyperxr.environments.EnvironmentEntry
 import com.hyperxr.environments.EnvironmentKind
+import com.hyperxr.environments.EnvironmentRepository
 import com.hyperxr.gameruntime.GameActivity
 import com.hyperxr.launcher.AppKind
 import com.hyperxr.launcher.BuiltinApps
@@ -202,7 +203,7 @@ fun EnvironmentsSection(a: MainActivity) {
                     e.attribution?.let { Note("Atribuição: $it") }
                 }
                 OutlinedButton(onClick = { a.app.settings.update { it.copy(launcher = it.launcher.copy(environmentId = e.id)) } }) { Text("Usar") }
-                if (e.kind != EnvironmentKind.PROCEDURAL) OutlinedButton(onClick = { repo.delete(e); a.refresh++ }) { Text("Excluir") }
+                if (e.kind != EnvironmentKind.PROCEDURAL && !EnvironmentRepository.isBundled(e)) OutlinedButton(onClick = { repo.delete(e); a.refresh++ }) { Text("Excluir") }
             }
         }
     }

@@ -33,7 +33,7 @@ class EnvironmentRepository(private val context: Context) {
     private val root = File(context.filesDir, "environments").apply { mkdirs() }
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
 
-    fun installed(): List<EnvironmentEntry> = listOf(PolyHavenCatalog.STUDIO) + root.listFiles().orEmpty().mapNotNull { dir ->
+    fun installed(): List<EnvironmentEntry> = listOf(PolyHavenCatalog.STUDIO) + BUNDLED + root.listFiles().orEmpty().mapNotNull { dir ->
         val f = File(dir, "entry.json")
         if (!f.isFile || !File(dir, "complete").exists()) null else try { json.decodeFromString(EnvironmentEntry.serializer(), f.readText()) } catch (e: Exception) { null }
     }
@@ -140,7 +140,7 @@ class EnvironmentRepository(private val context: Context) {
         return entry
     }
 
-    fun delete(entry: EnvironmentEntry) { if (entry.kind != EnvironmentKind.PROCEDURAL) dirOf(entry.id).deleteRecursively() }
+    fun delete(entry: EnvironmentEntry) { if (entry.kind != EnvironmentKind.PROCEDURAL && !isBundled(entry)) dirOf(entry.id).deleteRecursively() }
 
     /** Loads an installed environment for the renderer (GL thread). */
     fun loadVisual(entry: EnvironmentEntry): SceneRenderer.EnvironmentVisual {
@@ -150,13 +150,18 @@ class EnvironmentRepository(private val context: Context) {
             when (entry.kind) {
                 EnvironmentKind.PANORAMA_360 -> {
                     // at most ~4k wide keeps memory reasonable (an 8k HDRI JPEG is halved)
-                    val path = File(dir, entry.mainFile).absolutePath
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(path, bounds)
-                    var sample = 1
-                    while (bounds.outWidth / sample > 4096) sample *= 2
-                    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-                    val bmp = BitmapFactory.decodeFile(File(dir, entry.mainFile).absolutePath, opts) ?: error("Cannot decode panorama")
+                    val bmp = if (isBundled(entry)) {
+                        context.assets.open(entry.mainFile).use { BitmapFactory.decodeStream(it) } ?: error("Cannot decode panorama")
+                    } else {
+                        val path = File(dir, entry.mainFile).absolutePath
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(path, bounds)
+                        var sample = 1
+                        while (bounds.outWidth / sample > 4096) sample *= 2
+                        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                        BitmapFactory.decodeFile(path, opts) ?: error("Cannot decode panorama")
+                    }
+                    if (!ambientColors.containsKey(entry.id)) ambientColors[entry.id] = averageColor(bmp)
                     val tex = Gl.uploadBitmap(bmp, mipmap = true)
                     bmp.recycle()
                     SceneRenderer.EnvironmentVisual.Panorama(tex)
@@ -185,6 +190,20 @@ class EnvironmentRepository(private val context: Context) {
         }
     }
 
+    /** Average colour (0..1 RGB) of each panorama loaded so far, for lighting that matches it. */
+    val ambientColors = java.util.concurrent.ConcurrentHashMap<String, FloatArray>(BUNDLED_AMBIENT)
+
+    private fun averageColor(bmp: android.graphics.Bitmap): FloatArray {
+        val small = android.graphics.Bitmap.createScaledBitmap(bmp, 32, 16, true)
+        var r = 0L; var g = 0L; var b = 0L
+        for (y in 0 until small.height) for (x in 0 until small.width) {
+            val c = small.getPixel(x, y); r += (c shr 16) and 0xff; g += (c shr 8) and 0xff; b += c and 0xff
+        }
+        if (small !== bmp) small.recycle()
+        val n = 32f * 16f * 255f
+        return floatArrayOf(r / n, g / n, b / n)
+    }
+
     private fun get(url: String): String = (URL(url).openConnection() as HttpURLConnection).run {
         setRequestProperty("User-Agent", USER_AGENT)
         connectTimeout = 15000; readTimeout = 30000
@@ -193,6 +212,30 @@ class EnvironmentRepository(private val context: Context) {
     }
 
     companion object {
+        /** 360 panoramas shipped in the APK (assets/environments), sent by the project owner. */
+        val BUNDLED: List<EnvironmentEntry> = listOf(
+            bundled("night_street", "Rua roxa à noite", 1774),
+            bundled("future_plaza", "Praça futurista", 1774),
+            bundled("vr_studio", "Estúdio de criação VR", 1774),
+            bundled("penthouse_sunset", "Cobertura ao pôr do sol", 2720),
+        )
+
+        /** Average colour of each bundled panorama (0..1 RGB), for ambient lighting. */
+        val BUNDLED_AMBIENT: Map<String, FloatArray> = mapOf(
+            "bundled:night_street" to floatArrayOf(30 / 255f, 8 / 255f, 62 / 255f),
+            "bundled:future_plaza" to floatArrayOf(138 / 255f, 149 / 255f, 164 / 255f),
+            "bundled:vr_studio" to floatArrayOf(105 / 255f, 112 / 255f, 143 / 255f),
+            "bundled:penthouse_sunset" to floatArrayOf(161 / 255f, 127 / 255f, 102 / 255f),
+        )
+
+        fun isBundled(entry: EnvironmentEntry) = entry.id.startsWith("bundled:")
+
+        private fun bundled(file: String, name: String, width: Int) = EnvironmentEntry(
+            id = "bundled:$file", name = name, kind = EnvironmentKind.PANORAMA_360, author = "Enviado pelo dono do projeto",
+            source = "Incluído no HyperXR", sourceUrl = "builtin", license = "Fornecido pelo usuário", licenseUrl = "",
+            format = "jpg", downloadBytes = 0, compatibility = "${width}x${width / 2}", mainFile = "environments/$file.jpg",
+        )
+
         const val USER_AGENT = "HyperXR/0.1 (Android; +https://github.com/mt-VR/HyperXR)"
     }
 }

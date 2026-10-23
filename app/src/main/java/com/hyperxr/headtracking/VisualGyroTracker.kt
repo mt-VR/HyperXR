@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicReference
  * rotation from the camera with a keyframe map) plus the accelerometer for pitch and roll.
  * Camera frames come from the passthrough camera (the one hand tracking uses); each is reduced to
  * a 160-px-wide grey image on the calling thread (a few hundred microseconds) and processed on
- * its own thread, newest frame first.
+ * its own thread, newest frame first. The compass, when the phone has one, keeps yaw from drifting
+ * over minutes; readings with an unusual field strength (a speaker, a metal desk) are ignored.
  */
 class VisualGyroTracker(context: Context, private val displayRotation: Int) : HeadTracker, SensorEventListener {
     override val description: String get() = "3DoF (giroscópio computacional: câmera + mapa${if (gyro?.tracking == false) ", sem textura" else ""})"
@@ -43,6 +44,8 @@ class VisualGyroTracker(context: Context, private val displayRotation: Int) : He
     private var pendingRecenter = true
     private val gravity = Vec3()
     private var haveGravity = false
+    private val magnetic = Vec3()
+    private var haveMagnetic = false
     private val neck = Vec3()
 
     /** Head frame from the phone's sensor frame (as for the rotation-vector tracker). */
@@ -53,11 +56,17 @@ class VisualGyroTracker(context: Context, private val displayRotation: Int) : He
 
     override fun start() {
         sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sm.registerListener(this, it, 5000, handler) }
+        sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let { sm.registerListener(this, it, 20000, handler) }
     }
 
     override fun stop() = sm.unregisterListener(this)
 
     override fun onSensorChanged(e: SensorEvent) {
+        if (e.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            if (!haveMagnetic) { magnetic.set(e.values[0], e.values[1], e.values[2]); haveMagnetic = true }
+            else magnetic.set(magnetic.x * 0.8f + e.values[0] * 0.2f, magnetic.y * 0.8f + e.values[1] * 0.2f, magnetic.z * 0.8f + e.values[2] * 0.2f)
+            return
+        }
         // low-passed specific force = "up" while the head is not accelerating
         if (!haveGravity) { gravity.set(e.values[0], e.values[1], e.values[2]); haveGravity = true }
         else gravity.set(gravity.x * 0.9f + e.values[0] * 0.1f, gravity.y * 0.9f + e.values[1] * 0.1f, gravity.z * 0.9f + e.values[2] * 0.1f)
@@ -102,6 +111,11 @@ class VisualGyroTracker(context: Context, private val displayRotation: Int) : He
             val len = up.length()
             // only when the phone is not being accelerated (|a| close to 1 g)
             if (len in 9.3f..10.3f) g.applyGravity(up, 0.02f)
+        }
+        if (haveMagnetic) {
+            val m = deviceFix.conjugate(Quat()).rotate(Vec3(magnetic.x, magnetic.y, magnetic.z))
+            // the Earth's field is 25-65 uT; outside that something nearby is bending it
+            if (m.length() in 22f..70f) g.applyHeading(m, 0.003f)
         }
         synchronized(lock) { orientation.set(g.orientation); angular.set(g.angularVelocity); sampleNs = ts }
     }

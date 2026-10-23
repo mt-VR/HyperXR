@@ -102,4 +102,35 @@ class VisualGyroTest {
         val up = g.orientation.conjugate(Quat()).rotate(Vec3(0f, 1f, 0f))
         assertTrue("up after correction $up", up.y > 0.999f)
     }
+
+    @Test fun compassStopsYawDrift() {
+        val g = VisualGyro(f, f, w / 2f, h / 2f)
+        val north = Vec3(0f, -0.5f, -1f)  // field in the head frame, dipping down
+        g.applyHeading(north, 0.05f)       // stores north
+        g.reset(Quat.fromAxisAngle(0f, 1f, 0f, 0.2f))  // ~11 degrees of yaw drift
+        g.applyHeading(north, 0.05f)       // reset forgets north: stores again
+        val drifted = g.orientation.copy()
+        g.reset(Quat())
+        g.applyHeading(north, 1f)
+        g.orientation.set(drifted)
+        repeat(200) { g.applyHeading(north, 0.05f) }
+        assertTrue("yaw left ${VisualGyro.angleDeg(g.orientation, Quat())}", VisualGyro.angleDeg(g.orientation, Quat()) < 0.5f)
+    }
+
+    @Test fun featuresPersistAndFrameIsFast() {
+        val path = (0..60).map { i -> yawPitch(i * 1.5f, kotlin.math.sin(i / 8f) * 6f) }
+        val g = VisualGyro(f, f, w / 2f, h / 2f)
+        val imgs = path.map { render(it) }
+        // warm-up (JIT), then timed run
+        for ((i, im) in imgs.withIndex()) g.process(im.copy(), i * 33_333_333L)
+        g.reset()
+        var total = 0L; var worst = 0f
+        for ((i, im) in imgs.withIndex()) {
+            g.process(im.copy(), i * 33_333_333L); total += g.lastProcessUs
+            worst = maxOf(worst, VisualGyro.angleDeg(g.orientation, expected(path[0], path[i])))
+        }
+        println("VisualGyro: ${total / imgs.size} us/frame, worst ${"%.2f".format(worst)} deg, features ${g.featureCount}")
+        assertTrue("worst error $worst deg", worst < 1.5f)
+        assertTrue(g.featureCount >= 20)
+    }
 }

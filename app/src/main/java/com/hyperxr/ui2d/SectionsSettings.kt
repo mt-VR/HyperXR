@@ -77,6 +77,12 @@ fun LauncherSection(a: MainActivity) {
         ToggleRow("Reabrir janelas ao entrar no XR", s.restoreWindows, "Abas do navegador e apps Android abertos voltam onde estavam") { v ->
             a.update { it.copy(launcher = it.launcher.copy(restoreWindows = v)) }
         }
+        ToggleRow("Ambiente pelo horário", s.autoEnvironmentByTime, "Os ambientes 360 embutidos seguem o relógio: rua roxa à noite, cobertura no pôr do sol, estúdio no horário de trabalho, praça de manhã e no começo da noite") { v ->
+            a.update { it.copy(launcher = it.launcher.copy(autoEnvironmentByTime = v)) }
+        }
+    }
+    SectionCard("Emuladores embutidos (créditos)", "Núcleos open source compilados a partir do código-fonte. Nenhum jogo incluído.") {
+        com.hyperxr.emulators.EmulatorCatalog.credits().forEach { Note(it) }
     }
     SectionCard("Apps fixados na dock", "Reordene ou remova. Para fixar novos apps use a Biblioteca no XR.") {
         model.dockApps(s).forEachIndexed { i, app ->

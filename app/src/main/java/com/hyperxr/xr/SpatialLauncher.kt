@@ -156,6 +156,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- per frame
     override fun onFrame(ctx: XrContext, dt: Float) {
         while (true) { val t = glTasks.poll() ?: break; t() }
+        followClock()
         processPendingCloses()
         val s = app.settings.current
         val head = ctx.input.head
@@ -570,6 +571,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "reality" -> RealityWindow(ctx)
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
+            "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
             else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
@@ -612,8 +614,36 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         windowControls[w] = c
     }
 
+    /** Starts [rom] on [core]; its screen and hand controller open once the game is loaded. */
+    private fun playRom(core: com.hyperxr.emulators.EmulatorCore, rom: File) {
+        val s = com.hyperxr.emulators.EmulatorSession(activity, core, rom)
+        s.start(
+            onReady = {
+                glTasks += {
+                    // one game at a time: the previous one's window and pad go away
+                    appWindows.filterIsInstance<com.hyperxr.emulators.EmulatorWindow>().forEach { closeWindow(it) }
+                    val w = com.hyperxr.emulators.EmulatorWindow(s) { focused -> glTasks += { focusGame(focused) } }
+                    openWindow(w)
+                    val pad = com.hyperxr.emulators.EmulatorPad(w)
+                    pad.placeInFront(ctx.input.head, 0.95f, yOffset = -0.48f)
+                    windows += pad
+                    focusGame(w)
+                }
+            },
+            onError = { msg -> glTasks += { val p = InfoPanel("Emuladores", msg); placeAboveDock(p, 0f); openWindow(p) } },
+        )
+    }
+
+    /** Gives the controller to an emulator window (or back to HyperXR with null). */
+    private fun focusGame(w: com.hyperxr.emulators.EmulatorWindow?) {
+        (ctx.gameInput as? com.hyperxr.emulators.EmulatorWindow)?.takeIf { it !== w }?.setCaptured(false)
+        ctx.gameInput = w
+        w?.setCaptured(true)
+    }
+
     override fun closeWindow(w: SpatialWindow) {
         if (!appWindows.contains(w)) return
+        if (w is com.hyperxr.emulators.EmulatorWindow) windows.removeAll { p -> (p is com.hyperxr.emulators.EmulatorPad && p.window === w).also { if (it) p.release() } }
         exitTheater(w)
         appWindows.remove(w)
         windowControls.remove(w)?.release()
@@ -966,13 +996,17 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             var x = c.pad
             val y = c.y
             fun b(id: String, label: String, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, bw, 70f, accent = accent) { act() }; x += bw + 10f }
-            b("back", "Voltar") { w.back() }
-            if (w.supportsReload) b("reload", "Recarregar") { w.reload() }
-            b("kbd", "Teclado") { openKeyboard(w) }
+            val game = w is com.hyperxr.emulators.EmulatorWindow
+            b("back", if (game) "Soltar controle" else "Voltar") { w.back() }
+            if (w.supportsReload) b("reload", if (game) "Reiniciar" else "Recarregar") { w.reload() }
+            if (w is com.hyperxr.emulators.EmulatorWindow) {
+                b("save", "Salvar estado") { w.session.saveState { ok -> w.status = if (ok) "Estado salvo" else "Este núcleo não salvou o estado" } }
+                b("load", "Carregar estado") { w.session.loadState { ok -> w.status = if (ok) "Estado carregado" else "Nenhum estado salvo" } }
+            } else b("kbd", "Teclado") { openKeyboard(w) }
             b("curve", if (w.curved) "Plano" else "Curvar") { w.curved = !w.curved; dirty = true }
             b("smaller", "Menor") { resize(w, 1f / 1.15f) }
             b("bigger", "Maior") { resize(w, 1.15f) }
-            b("ext", if (w is WebWindow) "Externo" else "Tela 2D") { w.openExternally() }
+            if (w !is com.hyperxr.emulators.EmulatorWindow) b("ext", if (w is WebWindow) "Externo" else "Tela 2D") { w.openExternally() }
             b("close", "Fechar", accent = true) { pendingClose += w }
         }
     }
@@ -981,7 +1015,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- home UI (library + taskbar)
     override fun backgroundOptions(): List<Pair<String, String>> = buildList {
         if (::ctx.isInitialized && ctx.passthroughAvailable) { add("camera" to "Câmera"); add("dim" to "Escurecer MR") }
-        app.environments.installed().take(3).forEach { add(it.id to it.name.take(14)) }
+        app.environments.installed().take(5).forEach { add(it.id to it.name.take(14)) }
     }
 
     override fun backgroundChoice(): String = background.ifEmpty { if (ctx.passthroughAvailable) "camera" else currentEnvId }
@@ -1096,6 +1130,26 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         currentEnvId = entry.id
         app.settings.update { it.copy(launcher = it.launcher.copy(environmentId = entry.id)) }
+        // light 3D objects with the colour of the place around them
+        val avg = if (entry.kind == com.hyperxr.environments.EnvironmentKind.PANORAMA_360) app.environments.ambientColors[entry.id] else null
+        val light = avg?.let { com.hyperxr.environments.AmbientMatch.lightFor(it[0], it[1], it[2]) } ?: com.hyperxr.environments.AmbientMatch.STUDIO
+        light.ambient.copyInto(ctx.scene.ambient)
+        light.lightColor.copyInto(ctx.scene.lightColor)
+    }
+
+    private var lastClockCheck = 0.0
+
+    /** With "ambiente pelo horário" on, switches the built-in 360 environment as the day goes by. */
+    private fun followClock() {
+        if (ctx.timeSeconds - lastClockCheck < 30.0) return
+        lastClockCheck = ctx.timeSeconds
+        if (!app.settings.current.launcher.autoEnvironmentByTime) return
+        val choice = backgroundChoice()
+        if (choice == "camera" || choice == "dim") return
+        val now = java.util.Calendar.getInstance()
+        val id = com.hyperxr.environments.AmbientMatch.forTime(now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE))
+        if (id == currentEnvId) return
+        app.environments.installed().firstOrNull { it.id == id }?.let { background = id; loadEnvironment(it) }
     }
 
     override fun capture() {

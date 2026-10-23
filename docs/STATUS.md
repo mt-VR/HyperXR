@@ -64,6 +64,7 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | SteamVR: driver do PC (display virtual, H.264 na GPU, Quest 3 Touch emulado), app HyperXR PC, cliente no celular com reprojeção — docs/STEAMVR.md | ✅ protocolo e mapeamento (testes) · ✅ compila para Windows · 🟡 nunca rodou com SteamVR |
 | Hand tracking próprio na NPU (LiteRT + NNAPI, rastreio por ROI, detector só quando falta mão) e verificador mão vs pé/cortina/outra pessoa (presença com histerese, tamanho, proporção, alcance) | ✅ decodificador e verificador (testes com landmarks reais) · 🟡 NPU no aparelho |
 | Giroscópio computacional para celulares sem giroscópio: rotação pela câmera (RANSAC + Horn), mapa de quadros-chave contra desvio, gravidade pelo acelerômetro | ✅ testes com imagens sintéticas (erro < 0,3°) · 🟡 aparelho |
+| Giroscópio computacional v2: pontos persistentes, Lucas-Kanade subpixel, raio adaptativo, bússola contra desvio de yaw | ✅ 2,3x mais rápido nos testes · 🟡 aparelho |
 | Ambientes 360 e fotos 360 apareciam pretos (teste de profundidade) | ✅ corrigido |
 | UI estilo Quest: vidro cinza grafite, cantos quadrados arredondados, azul só em ações principais (XR e 2D) | 🟡 |
 | Arquivos: locais, ordenar, páginas, copiar/recortar/colar, renomear (teclado XR), nova pasta, apagar com confirmação | 🟡 |
@@ -113,6 +114,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Launcher Cardboard/OpenXR (categorias de intent, sem QUERY_ALL_PACKAGES) | 🟡 |
 | HyperXR Environments (Poly Haven CC0, MD5, Wi-Fi, atribuição, cena 3D vs 360°) | ✅ parser · 🟡 download/render |
 | Ambiente procedural embutido | 🟡 |
+| Ambientes 360 embutidos (rua roxa à noite, praça futurista, estúdio de criação VR, cobertura ao pôr do sol) | ✅ build · 🟡 aparelho |
+| Luz que combina com o ambiente 360 (cor média do panorama) e ambiente pelo horário | ✅ testes · 🟡 aparelho |
+| Emuladores embutidos (QuickNES, Gambatte, mGBA; libretro compilado do código-fonte) com créditos, controle para as mãos, saves e save states | ✅ frontend testado no servidor com os 3 núcleos · 🟡 aparelho |
 | Apps web (TikTok, Twitch, YouTube, WhatsApp Web, Facebook, Instagram): 2D e painel espacial | 🟡 |
 
 ## SDK e jogos

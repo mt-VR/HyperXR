@@ -97,3 +97,34 @@ renderizada enquanto algo a usa, em até 30 fps.
   No Android 14 ou mais antigo o app não tem como saber que está sendo gravado: use *Gravar
   vídeo*.
 - **Limite:** o jogo Gato vs. Vovó tem um renderizador próprio e ainda não passa por isso.
+
+## Ambientes 360 embutidos
+Quatro panoramas vêm no APK e aparecem em Ambientes e no seletor de fundo:
+- Rua roxa à noite
+- Praça futurista
+- Estúdio de criação VR
+- Cobertura ao pôr do sol
+
+Ficam em `assets/environments` e não podem ser excluídos.
+
+## Luz que combina com o ambiente
+Ao trocar de panorama, a cor média dele vira a luz ambiente e tinge a luz principal dos objetos
+3D. Por exemplo: lilás na rua à noite, quente no pôr do sol. O cálculo está em
+`AmbientMatch.lightFor`, com testes. Panoramas baixados ou importados também entram, porque a cor
+média é medida ao carregar.
+
+## Ambiente pelo horário
+Em Ajustes > Launcher > **Ambiente pelo horário**, os panoramas embutidos seguem o relógio:
+
+| Horário | Ambiente |
+|---|---|
+| 20h30–5h30 | Rua roxa à noite |
+| 5h30–7h e 17h–19h | Cobertura ao pôr do sol |
+| 7h–9h e 19h–20h30 | Praça futurista |
+| 9h–17h | Estúdio de criação VR |
+
+O ambiente não troca enquanto o fundo é a câmera.
+
+## Emuladores
+Veja [EMULATORS.md](EMULATORS.md). Inclui o controle para as mãos, que deixa segurar dois botões
+ao mesmo tempo, um com cada mão.

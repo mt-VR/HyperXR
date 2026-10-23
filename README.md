@@ -112,6 +112,7 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - [Testes](docs/TESTING.md)
 - [Status das funcionalidades](docs/STATUS.md)
 - [SteamVR no HyperXR](docs/STEAMVR.md) e [HyperXR PC](pc/README.md)
+- [Emuladores embutidos](docs/EMULATORS.md)
 
 ## Licenças de terceiros
 
@@ -126,4 +127,8 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - MediaPipe Tasks GenAI — Apache-2.0; modelos Qwen 2.5 (baixados pelo usuário no app) — Apache-2.0
 - Modelo MediaPipe Hand Landmarker — Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Ambientes Poly Haven — CC0 (licença registrada por ambiente baixado, com `ATTRIBUTION.txt`)
+- Emuladores embutidos (libretro, compilados do código-fonte por `tools/build_libretro_cores.sh`):
+  QuickNES — GPL-2.0, Gambatte — GPL-2.0, mGBA — MPL-2.0; `libretro.h` — MIT. Fontes e commits em
+  `native/libretro/CORES` e [docs/EMULATORS.md](docs/EMULATORS.md). Nenhum jogo incluído.
+- Ambientes 360 embutidos (`app/src/main/assets/environments`) — imagens fornecidas pelo dono do projeto
 - Ícones dos apps — arte original do autor do HyperXR (não afiliada à Meta)
