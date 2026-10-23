@@ -196,8 +196,8 @@ fun HandsSection(a: MainActivity) {
             ", deixando a GPU livre para o VR. GPU: MediaPipe. Os dois passam pelo verificador que descarta pés, cortinas e outras pessoas.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
-        ChoiceRow("Visual das mãos", com.hyperxr.settings.HandVisual.values().toList(), h.handVisual, {
-            when (it) { com.hyperxr.settings.HandVisual.SKELETON -> "Esqueleto"; com.hyperxr.settings.HandVisual.AURA -> "Aura"; com.hyperxr.settings.HandVisual.BOTH -> "Ambos"; else -> "Ocultas" }
+        ChoiceRow("Visual das mãos", listOf(com.hyperxr.settings.HandVisual.AURA, com.hyperxr.settings.HandVisual.NONE), h.handVisual, {
+            if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Aura lilás"
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }
         ToggleRow("Apontar com a bolinha", h.ballPointer, "Ligado: clica no que está sob a bolinha, como você vê. Desligado: raio que sai do ombro") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(ballPointer = v)) }
@@ -206,7 +206,7 @@ fun HandsSection(a: MainActivity) {
         Note("Maior = alcança janelas altas com a mão mais baixa. Se o cursor ficar preso na dock, aumente.")
         SliderRow("Filtro de Kalman: resposta", h.kalmanProcessNoise, 0.3f..30f, { "%.1f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(kalmanProcessNoise = v)) } }
         Note("Kalman menor = mais suave; maior = segue movimentos rápidos. O One Euro abaixo remove o tremor restante.")
-        SliderRow("Opacidade da aura", h.auraOpacity, 0.1f..0.9f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
+        SliderRow("Intensidade da aura", h.auraOpacity, 0.2f..1f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
         SliderRow("Comprimento da sua mão (punho até a ponta do dedo médio)", h.handLengthCm, 14f..23f, { "%.1f cm".format(it) }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(handLengthCm = v)) }
         }

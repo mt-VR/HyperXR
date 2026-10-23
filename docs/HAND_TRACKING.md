@@ -163,8 +163,8 @@ A última rejeição aparece no status do teste de mãos, por exemplo "grande de
   - Junto entram o rótulo do modelo (motor NPU), um leve peso do lado da imagem e a continuidade
     entre quadros.
   - Duas mãos no mesmo quadro sempre recebem lados diferentes.
-- **Visual:** esqueleto fino (ossos de 2 mm, bolinhas de 5 mm), verde na mão direita e azul na
-  esquerda. Na pinça, as pontas do polegar e do indicador ficam brancas.
+- **Visual:** aura lilás em volta da mão, com as pontas dos dedos quadradas (veja "Aura lilás nas
+  mãos" em NEW_FEATURES.md). O esqueleto e a aura preta antiga foram removidos.
 
 ## Otimizações de latência (rodada 3)
 

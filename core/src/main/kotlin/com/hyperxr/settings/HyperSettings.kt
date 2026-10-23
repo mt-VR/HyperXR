@@ -69,8 +69,8 @@ data class HandTrackingSettings(
     val backend: InferenceBackend = InferenceBackend.GPU,
     val useArCoreDepth: Boolean = true,
     /** How tracked hands are drawn. */
-    val handVisual: HandVisual = HandVisual.SKELETON,
-    val auraOpacity: Float = 0.45f,
+    val handVisual: HandVisual = HandVisual.AURA,
+    val auraOpacity: Float = 0.8f,
     /** Point with the pinch ball (what is under it, seen from the eyes); false = shoulder ray. */
     val ballPointer: Boolean = true,
     /** Upward tilt of the hand ray (degrees) so a relaxed hand reaches eye-level windows. */
@@ -93,7 +93,8 @@ data class HandTrackingSettings(
 )
 
 @Serializable
-enum class HandVisual { SKELETON, AURA, BOTH, NONE }
+/** The hands are drawn as the lilac aura or not at all (SKELETON and BOTH are read from old settings files and become AURA). */
+enum class HandVisual { AURA, NONE, SKELETON, BOTH }
 
 @Serializable
 data class ControllerSettings(
@@ -179,6 +180,17 @@ data class HyperSettings(
     val runtime: RuntimeSettings = RuntimeSettings(),
 ) {
     companion object {
-        const val CURRENT_VERSION = 1
+        const val CURRENT_VERSION = 2
+
+        /** Settings saved by an older version, brought to the current defaults where they changed. */
+        fun migrate(s: HyperSettings): HyperSettings {
+            var m = s
+            // v2: the hands are only the lilac aura (the skeleton and the old black aura are gone)
+            val hv = m.handTracking.handVisual
+            if (hv == HandVisual.SKELETON || hv == HandVisual.BOTH)
+                m = m.copy(handTracking = m.handTracking.copy(handVisual = HandVisual.AURA))
+            if (m.version < 2) m = m.copy(handTracking = m.handTracking.copy(auraOpacity = 0.8f))
+            return if (m.version < CURRENT_VERSION) m.copy(version = CURRENT_VERSION) else m
+        }
     }
 }

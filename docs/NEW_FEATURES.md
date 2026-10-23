@@ -224,3 +224,20 @@ App **Jogos open source** (categoria jogos HyperXR):
   versão arm64. Converter código nativo ARM de 32 para 64 bits não é possível com segurança.
 - **Limite:** jogos Unity checam o Daydream pelo C#, com nomes montados em tempo de execução, e
   isso o patcher não alcança.
+
+
+## Aura lilás nas mãos
+As mãos agora aparecem só como uma aura lilás: um contorno neon em volta da mão inteira, com as
+pontas dos dedos quadradas, um brilho suave por fora e um preenchimento translúcido por dentro.
+O esqueleto e a aura preta antiga foram removidos; quem tinha um deles salvo passa para a aura
+lilás automaticamente.
+
+O desenho (`HandAura`) é uma passada por mão, sem textura intermediária:
+- as juntas são projetadas num plano na profundidade da mão;
+- um retângulo nesse plano é desenhado e o shader calcula a forma da mão como um campo de
+  distância: a palma é um polígono (punho, base do polegar e os quatro nós dos dedos), cada dedo
+  são segmentos de espessura constante e o último termina quadrado;
+- as partes se juntam com um "mínimo suave", então nós dos dedos e a pele entre polegar e
+  indicador fluem sem emendas.
+
+Em Ajustes > Mãos, "Intensidade da aura" regula a força.

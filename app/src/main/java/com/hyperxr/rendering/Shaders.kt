@@ -265,49 +265,10 @@ void main() {
     fragColor = vec4(texture(uTex, (uTexMatrix * vec4(uv, 0.0, 1.0)).xy).rgb, 1.0);
 }"""
 
-    /** Hand aura field: capsule SDF per bone, max-blended into a single-channel target. */
-    const val AURA_FIELD_VS = """#version 300 es
-layout(location=0) in vec3 aPos;      // view-space position on the bone billboard
-layout(location=1) in vec3 aNormal;   // packed: segment endpoint A (view space)
-layout(location=2) in vec2 aUv;       // radius, aura width
-layout(location=3) in vec3 aB;        // segment endpoint B (view space)
-uniform mat4 uProj;
-out vec3 vP; out vec3 vA; out vec3 vB; out vec2 vR;
-void main() { vP = aPos; vA = aNormal; vB = aB; vR = aUv; gl_Position = uProj * vec4(aPos, 1.0); }"""
-
-    const val AURA_FIELD_FS = """#version 300 es
-precision highp float;
-in vec3 vP; in vec3 vA; in vec3 vB; in vec2 vR;
-out vec4 fragColor;
-void main() {
-    vec3 ab = vB - vA;
-    float t = clamp(dot(vP - vA, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
-    // distance in the billboard plane approximates the capsule silhouette distance
-    vec3 c = vA + ab * t;
-    float d = length((vP - c).xy);
-    // 0.5 at the hand surface, 1 deep inside, 0 at the outer edge of the aura
-    float v = clamp(0.5 + (vR.x - d) / (2.0 * vR.y), 0.0, 1.0);
-    fragColor = vec4(v, 0.0, 0.0, 1.0);
-}"""
-
     const val FULLSCREEN_VS = """#version 300 es
 layout(location=0) in vec3 aPos;
 out vec2 vUv;
 void main() { vUv = aPos.xy * 0.5 + 0.5; gl_Position = vec4(aPos.xy, 0.0, 1.0); }"""
-
-    /** Black aura composite: soft dark rim, translucent black interior, nothing outside. */
-    const val AURA_COMPOSITE_FS = """#version 300 es
-precision mediump float;
-in vec2 vUv;
-uniform sampler2D uField;
-uniform float uOpacity;
-out vec4 fragColor;
-void main() {
-    float v = texture(uField, vUv).r;
-    float rim = smoothstep(0.0, 0.5, v);
-    float a = v <= 0.5 ? 0.9 * rim * rim : mix(0.9, 0.38, smoothstep(0.5, 0.72, v));
-    fragColor = vec4(0.0, 0.0, 0.0, a * uOpacity);
-}"""
 
     /** Lens distortion (Brown-Conrady radial) from an eye texture to one half of the screen. */
     const val DISTORT_FS = """#version 300 es

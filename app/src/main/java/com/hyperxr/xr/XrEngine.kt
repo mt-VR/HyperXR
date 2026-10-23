@@ -32,7 +32,6 @@ import com.hyperxr.rendering.Background
 import com.hyperxr.rendering.CameraImageSource
 import com.hyperxr.rendering.EyeView
 import com.hyperxr.rendering.FrameScene
-import com.hyperxr.rendering.HandAuraRenderer
 import com.hyperxr.rendering.IconFactory
 import com.hyperxr.rendering.ImageStore
 import com.hyperxr.rendering.RenderTarget
@@ -145,8 +144,7 @@ class XrEngine(
     val decision: XrModeDecision = XrModeResolver.resolve(app.capabilities.last.takeIf { it.androidSdk > 0 } ?: app.capabilities.probe(app.runtimeBroker), settings.xrMode)
 
     private val renderer = SceneRenderer()
-    private val aura = HandAuraRenderer()
-    private val skeleton = com.hyperxr.rendering.HandSkeletonRenderer()
+    private val aura = com.hyperxr.rendering.HandAura()
     private val compositor = StereoCompositor()
     private val images = ImageStore()
     private val icons = IconFactory(activity)
@@ -360,10 +358,6 @@ class XrEngine(
 
         updateBoundary(dt)
 
-        val visual = settings.handTracking.handVisual
-        if (visual == com.hyperxr.settings.HandVisual.SKELETON || visual == com.hyperxr.settings.HandVisual.BOTH) {
-            skeleton.submit(scene, renderer, input.hands)
-        }
 
         // 4. render
         val r0 = System.nanoTime()
@@ -452,7 +446,7 @@ class XrEngine(
         }
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
-        if (visual == com.hyperxr.settings.HandVisual.AURA || visual == com.hyperxr.settings.HandVisual.BOTH) {
+        if (visual != com.hyperxr.settings.HandVisual.NONE) {
             aura.render(handList, eye, target.fbo, target.width, target.height)
         }
         renderer.renderPanels(scene, eye, overlayPass = true)

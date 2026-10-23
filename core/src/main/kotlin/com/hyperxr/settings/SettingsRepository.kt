@@ -40,7 +40,7 @@ class SettingsRepository(private val storage: SettingsStorage) {
     private fun load(): HyperSettings {
         val raw = storage.read() ?: return HyperSettings()
         return try {
-            json.decodeFromString(HyperSettings.serializer(), raw)
+            HyperSettings.migrate(json.decodeFromString(HyperSettings.serializer(), raw))
         } catch (e: Exception) {
             lastLoadError = "Settings file unreadable, defaults restored: ${e.message}"
             HyperSettings()
