@@ -607,6 +607,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
             "opengames" -> com.hyperxr.files.OpenGamesPanel(this) { url -> openBrowser(url, false) }
+            "youtube" -> com.hyperxr.ytxr.YouTubePanel(this)
             "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }

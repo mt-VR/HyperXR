@@ -320,3 +320,22 @@ AI Hub, licença MIT), rodando na NPU pelo NNAPI (CPU como último recurso).
 - Comparada à do ARCore: nítida nas bordas de mãos e dedos, por quadro (sem a suavização no
   tempo do ARCore) e funciona em qualquer celular; em troca é mais pesada (34 ms num Snapdragon
   8 Gen 3, 72 ms num 8 Gen 1 pelos números da Qualcomm) e divide a NPU com o hand tracking.
+
+## YouTube XR (nativo, sem página web)
+App próprio do HyperXR para o YouTube, sem WebView, sem o site e sem o app do YouTube:
+- **Dados:** NewPipe Extractor (GPL-3.0), compilado do código-fonte (`third_party/NewPipeExtractor`,
+  módulo `:newpipe`), com um downloader próprio (HttpURLConnection) e a camada `XrYouTube`:
+  categorias do próprio YouTube (Música, Jogos, Ao vivo, Filmes e trailers, Podcasts), busca com
+  paginação, detalhes, vídeos relacionados e todas as qualidades (144p até 4K/8K, 60 fps).
+- **Player:** Media3 ExoPlayer. Vídeo e áudio separados (como o YouTube entrega as qualidades
+  altas) tocam juntos (MergingMediaSource); ao vivo por HLS. O vídeo vai direto do decodificador
+  para uma textura (sem passar pela CPU) e aparece numa tela de cinema; "Ver em 360" coloca o vídeo
+  ao seu redor (mono, 3D cima/baixo ou lado a lado).
+- **Interface XR:** abas por categoria, busca pelo teclado XR, grade de miniaturas, player com
+  barra de progresso, -10/+10 s, qualidade +/-, título, canal, visualizações, curtidas e uma coluna
+  "A seguir" com os relacionados.
+- **Sem conta:** sem login, então sem inscrições, histórico, comentários ou recomendações pessoais.
+
+Licença: o NewPipe Extractor é GPL-3.0-or-later. O código do HyperXR continua MIT, mas um APK que
+inclui o extrator é uma obra combinada e deve ser distribuído sob a GPL-3.0 (com o código-fonte).
+O uso de clientes de terceiros pode contrariar os termos de serviço do YouTube.

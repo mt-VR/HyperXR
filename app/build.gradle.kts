@@ -115,6 +115,11 @@ dependencies {
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.litert)
+    // native YouTube: NewPipe Extractor built from source, played with Media3 ExoPlayer
+    implementation(project(":newpipe"))
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.exoplayer.dash)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
     implementation(libs.openxr.loader)

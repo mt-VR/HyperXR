@@ -1,0 +1,1 @@
+Upstream: https://github.com/TeamNewPipe/NewPipeExtractor commit 711f13b15be314286a0e0a019302ad540c8f0ed7 (main sources only; tests and build files not vendored). License: GPL-3.0-or-later.

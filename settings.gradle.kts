@@ -16,7 +16,9 @@ dependencyResolutionManagement {
         mavenCentral()
         // GeckoView (Mozilla's Firefox engine, the engine Wolvic is built on).
         maven("https://maven.mozilla.org/maven2/") { content { includeGroup("org.mozilla.geckoview") } }
+        // nanojson (TeamNewPipe fork), built from source by JitPack, for the YouTube extractor.
+        maven("https://jitpack.io") { content { includeGroup("com.github.TeamNewPipe") } }
     }
 }
 rootProject.name = "HyperXR"
-include(":core", ":app", ":broker")
+include(":core", ":app", ":broker", ":newpipe")
