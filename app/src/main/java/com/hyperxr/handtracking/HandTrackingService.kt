@@ -36,7 +36,7 @@ class HandTrackingService(private val context: Context) {
 
     private var landmarker: HandLandmarker? = null
     /** HyperXR's own NPU engine (backend NNAPI), or null when MediaPipe runs. */
-    @Volatile private var npu: NpuHandEngine? = null
+    @Volatile private var npu: HandEngine? = null
     /** Rejects what is not the user's hand (feet, curtains, other people), for both engines. */
     val verifier = HandVerifier()
     /** Decides left/right itself (3D chirality + continuity), whatever the engine says. */
@@ -144,18 +144,29 @@ class HandTrackingService(private val context: Context) {
             landmarker?.close(); landmarker = null
             npu?.close(); npu = null
             verifier.reset(); handedness.reset()
+            // RTMPose (OpenMMLab) first on every backend: NPU, GPU or CPU as asked, falling back down
+            val rtm = RtmHandEngine(context)
+            if (runCatching { rtm.start(backend) }.onFailure { Diagnostics.log("Hand tracking: RTMPose failed: ${it.message}") }.getOrDefault(false)) {
+                npu = rtm
+                backendInUse = "RTMPose · ${rtm.device}"
+                status = "rodando"
+                synchronized(slotLock) { inflight = null; queued = null; restarting = false }
+                Diagnostics.log("Hand tracking: RTMPose on ${rtm.device}")
+                return@post
+            }
+            rtm.close()
             if (backend == InferenceBackend.NNAPI) {
                 val e = NpuHandEngine(context)
                 val ok = runCatching { e.start() }.getOrDefault(false)
                 if (ok) {
                     npu = e
-                    backendInUse = "HyperXR NPU · ${e.device}"
+                    backendInUse = "MediaPipe NPU · ${e.device} (RTMPose indisponível)"
                     status = "rodando"
                     synchronized(slotLock) { inflight = null; queued = null; restarting = false }
-                    Diagnostics.log("Hand tracking: HyperXR engine on ${e.device}")
+                    Diagnostics.log("Hand tracking: MediaPipe models on ${e.device}")
                     return@post
                 }
-                Diagnostics.log("Hand tracking: HyperXR NPU engine unavailable, using MediaPipe")
+                Diagnostics.log("Hand tracking: NPU engine unavailable, using MediaPipe")
             }
             val order = if (backend == InferenceBackend.CPU) listOf(Delegate.CPU) else listOf(Delegate.GPU, Delegate.CPU)
             val failures = mutableListOf<String>()
@@ -353,75 +364,19 @@ class HandTrackingService(private val context: Context) {
     private val fusedImage = Array(2) { FloatArray(HandJoint.COUNT * 3) }
     private val sideImage = mapOf(Handedness.LEFT to FloatArray(HandJoint.COUNT * 3), Handedness.RIGHT to FloatArray(HandJoint.COUNT * 3))
 
-    // ------------------------------------------------------------------ hand occlusion mask
-    /** On while real hands should be drawn over the UI (mixed reality); the NPU segmenter runs then. */
-    @Volatile var handMaskEnabled = false
-    private val maskEngine by lazy { HandMaskEngine(context) }
-    private val maskThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-hand-mask") }
-    private val maskBusy = java.util.concurrent.atomic.AtomicBoolean(false)
-    @Volatile private var maskStarted: Boolean? = null
-    private var lastMaskNs = 0L
-    private val maskWork = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
-    private val maskWhere = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+    // ------------------------------------------------------------------ people in view
     /**
-     * The latest hand mask: HandMaskEngine.SIZE squared bytes (0 = not hand, 255 = hand), in the
-     * camera's raw CPU-image orientation, and a counter that changes with each new mask.
+     * People walking into view while inside a virtual environment (see PersonBreakthrough): the
+     * multiclass segmenter runs ~8 times a second on the frame while this is on.
      */
-    @Volatile var handMask: ByteArray? = null; private set
-    @Volatile var handMaskSeq = 0; private set
-    val handMaskDevice: String get() = maskEngine.device
-
-    // ------------------------------------------------------------------ hands cut out by SAM
-    private val sam by lazy { HandSamEngine(context) }
-    @Volatile private var samStarted: Boolean? = null
-    private val samBusy = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val samThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-hand-sam").apply { priority = Thread.NORM_PRIORITY + 1 } }
-    @Volatile private var samMasks: List<SamHands.HandMask>? = null
-    @Volatile private var samSides: List<Handedness> = emptyList()
-    private var lastSamNs = 0L
-    private val samOut = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
-
-    /** What runs the hand cut-out, for the hand status line. */
-    val maskStatus: String get() = when (samStarted) {
-        true -> "recorte: SAM (%s %.0f ms + decoder %.0f ms)".format(sam.device, sam.encoderMs, sam.decoderMs)
-        false -> "recorte: segmentador de pele (${maskEngine.device})"
-        null -> "recorte: iniciando"
-    }
-
-    /**
-     * Starts a SAM run on this frame now and then (the network is slower than the camera), and
-     * every frame turns the newest SAM masks into the frame's hand mask at where the hands are
-     * now. False when SAM is not available (the skin segmenter takes over).
-     */
-    private fun runSamHands(slot: Slot, src: Bitmap): Boolean {
-        val n = HandMaskEngine.SIZE
-        val w = src.width; val h = src.height
-        val sides = seen.toList()
-        val now = System.nanoTime()
-        if (now - lastSamNs > 110_000_000L && samBusy.compareAndSet(false, true)) {
-            lastSamNs = now
-            val copy = src.copy(Bitmap.Config.ARGB_8888, false)
-            val pts = sides.map { side -> val im = sideImage.getValue(side); FloatArray(HandJoint.COUNT * 2) { k -> im[(k / 2) * 3 + (k % 2)] } }
-            samThread.execute {
-                try {
-                    if (samStarted == null) samStarted = try { sam.start() } catch (t: Throwable) { Diagnostics.log("Hand SAM off: ${t.message}"); false }
-                    if (samStarted == true) sam.segment(copy, pts)?.let { m -> samMasks = m; samSides = sides }
-                } catch (t: Throwable) { Diagnostics.log("Hand SAM run failed: ${t.message}") } finally { copy.recycle(); samBusy.set(false) }
-            }
-        }
-        if (samStarted == false) return false
-        val masks = samMasks ?: return true
-        val anchors = samSides.map { side -> if (side in seen) { val im = sideImage.getValue(side); SamHands.anchor(FloatArray(HandJoint.COUNT * 2) { k -> im[(k / 2) * 3 + (k % 2)] }, w, h) } else null }
-        SamHands.compose(masks, anchors, w, h, n, samOut)
-        handMask = ByteArray(n * n).also { out -> if (slot.rotation180) for (i in 0 until n * n) out[n * n - 1 - i] = samOut[i] else System.arraycopy(samOut, 0, out, 0, n * n) }
-        handMaskSeq++
-        return true
-    }
-
-    /** People walking into view while inside a virtual environment (see PersonBreakthrough). */
     @Volatile var personMaskEnabled = false
     @Volatile var personMask: ByteArray? = null; private set
     @Volatile var personMaskSeq = 0; private set
+    private val maskEngine by lazy { HandMaskEngine(context) }
+    private val maskThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-people") }
+    private val maskBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var maskStarted: Boolean? = null
+    private var lastMaskNs = 0L
     private val breakthrough = PersonBreakthrough(HandMaskEngine.SIZE)
     private val maskLabels = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
     private val maskSmall: Bitmap = Bitmap.createBitmap(HandMaskEngine.SIZE, HandMaskEngine.SIZE, Bitmap.Config.ARGB_8888)
@@ -435,47 +390,27 @@ class HandTrackingService(private val context: Context) {
      */
     @Volatile var frameTap: ((Bitmap, CameraIntrinsics, Pose) -> Unit)? = null
 
-    private fun maybeRunHandMask(slot: Slot) {
+    private fun afterFrame(slot: Slot) {
         frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p) } }
-        val wantHands = handMaskEnabled && seen.isNotEmpty()
-        val wantPeople = personMaskEnabled
-        if (!wantHands && handMask != null) { handMask = null; handMaskSeq++ }
-        if (!wantPeople && personMask != null) { personMask = null; personMaskSeq++ }
-        if (!wantHands && !wantPeople) return
+        if (!personMaskEnabled) { if (personMask != null) { personMask = null; personMaskSeq++ }; return }
         val now = System.nanoTime()
-        // hands follow every frame they can; looking for people alone, ~8 times a second is plenty
-        val interval = if (wantHands) 30_000_000L else 120_000_000L
-        if (now - lastMaskNs < interval || !maskBusy.compareAndSet(false, true)) return
+        if (now - lastMaskNs < 120_000_000L || !maskBusy.compareAndSet(false, true)) return
         lastMaskNs = now
         val src = slot.bitmap ?: run { maskBusy.set(false); return }
-        // hands: the promptable network (EfficientViT-SAM) when it runs on this phone
-        if (wantHands && samStarted != false && runSamHands(slot, src)) { if (!wantPeople) { maskBusy.set(false); return } }
-        // one mask job at a time (maskBusy): the same small bitmap is reused, no garbage per frame
-        val small = maskSmall
-        maskCanvas.drawBitmap(src, null, maskRect, maskPaint)
-        val hands = if (wantHands) seen.map { sideImage.getValue(it).copyOf() } else emptyList()
-        val aspect = src.width.toFloat() / src.height
+        maskCanvas.drawBitmap(src, null, maskRect, maskPaint)   // one job at a time: the small bitmap is reused
         val flip = slot.rotation180
-        val preferGpu = npu != null  // the NPU is busy with the hands: the mask goes to the GPU
         maskThread.execute {
             try {
-                if (maskStarted == null) maskStarted = maskEngine.start(preferGpu)
+                if (maskStarted == null) maskStarted = maskEngine.start(preferGpu = true)
                 val n = HandMaskEngine.SIZE
-                // only inside the hands' shape (from the landmarks): no background, no arm, no legs
-                val skinHands = wantHands && samStarted != true
-                if (skinHands) { java.util.Arrays.fill(maskWhere, 0); for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere) }
-                if (maskStarted == true && maskEngine.run(small, if (skinHands) maskWhere else null, if (skinHands) maskWork else null, if (wantPeople) maskLabels else null)) {
-                    fun oriented(m: ByteArray) = ByteArray(n * n).also { out -> if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = m[i] else System.arraycopy(m, 0, out, 0, n * n) }
-                    if (skinHands) { handMask = oriented(maskWork); handMaskSeq++ }
-                    if (wantPeople) {
-                        val m = breakthrough.update(maskLabels, System.nanoTime())
-                        val was = personMask
-                        personMask = m?.let(::oriented)
-                        if (m != null || was != null) personMaskSeq++
-                        if ((m != null) != (was != null)) Diagnostics.log(if (m != null) "Pessoa por perto: aparecendo no ambiente" else "Pessoa saiu de vista")
-                    }
+                if (maskStarted == true && maskEngine.run(maskSmall, null, null, maskLabels)) {
+                    val m = breakthrough.update(maskLabels, System.nanoTime())
+                    val was = personMask
+                    personMask = m?.let { src -> ByteArray(n * n).also { out -> if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = src[i] else System.arraycopy(src, 0, out, 0, n * n) } }
+                    if (m != null || was != null) personMaskSeq++
+                    if ((m != null) != (was != null)) Diagnostics.log(if (m != null) "Pessoa por perto: aparecendo no ambiente" else "Pessoa saiu de vista")
                 }
-            } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { maskBusy.set(false) }
+            } catch (t: Throwable) { Diagnostics.log("People mask failed: ${t.message}") } finally { maskBusy.set(false) }
         }
     }
 
@@ -615,7 +550,7 @@ class HandTrackingService(private val context: Context) {
         val debugLms = if (debug != null) ArrayList<FloatArray>(2) else null
         // size and proportions first: a foot or a fold of cloth never reaches the trackers
         val real = hands.filter { h -> h.world == null || verifier.shape(h.world) == null }.take(2)
-        val sides = handedness.resolve(real.map { h -> HandednessResolver.Input(h.world, h.image[0], h.image[1], h.rightScore) })
+        val sides = handedness.resolve(real.map { h -> HandednessResolver.Input(if (h.worldEstimated) null else h.world, h.image[0], h.image[1], h.rightScore) })
         for ((idx, h) in real.withIndex()) {
             if (n == 2) break
             val label = sides[idx]
@@ -676,7 +611,7 @@ class HandTrackingService(private val context: Context) {
             }
         }
         maybeRunAiDepth(slot, intr)
-        maybeRunHandMask(slot)
+        afterFrame(slot)
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
         // the trackers predict across the measured age of the image (exposure -> result), so a
@@ -744,7 +679,7 @@ class HandTrackingService(private val context: Context) {
         if (span >= 1_000_000_000L) {
             val fps = statFrames * 1e9f / span
             val f = statFrames.coerceAtLeast(1)
-            val engine = npu?.let { "palma %.1f ms · landmarks %.1f ms".format(it.detectorMs, it.landmarkMs) } ?: "inferência %.0f ms".format(statInferNs / 1e6f / f)
+            val engine = npu?.let { "detector %.1f ms · landmarks %.1f ms".format(it.detectorMs, it.landmarkMs) } ?: "inferência %.0f ms".format(statInferNs / 1e6f / f)
             stats = "%.0f quadros/s · mão em %d%% · %s · câmera→pose %.0f ms · %s · %dx%d".format(
                 fps, statWithHands * 100 / f, engine, statLatencyNs / 1e6f / f,
                 backendInUse, lastAnalysed?.bitmap?.width ?: 0, lastAnalysed?.bitmap?.height ?: 0,
@@ -811,12 +746,28 @@ class HandTrackingService(private val context: Context) {
                 out += "${d.name}: indisponível (${t.message})"
             }
         }
-        // HyperXR's own engine on the NPU (same synthetic frame: palm detector every frame)
+        // RTMDet + RTMPose (same synthetic frame: no hand, so the detector runs every frame)
+        for (b in listOf(InferenceBackend.NNAPI, InferenceBackend.GPU, InferenceBackend.CPU)) {
+            val e = RtmHandEngine(context)
+            try {
+                if (e.start(b)) {
+                    val stats = LatencyStats("RTMPose (${e.device}, detector)", iterations)
+                    repeat(5) { e.process(bmp) }
+                    repeat(iterations) {
+                        val t0 = System.nanoTime()
+                        e.process(bmp)
+                        stats.record(System.nanoTime() - t0)
+                    }
+                    out += stats.snapshot().format()
+                } else out += "RTMPose ${b.name}: indisponível"
+            } catch (t: Throwable) { out += "RTMPose ${b.name}: indisponível (${t.message})" } finally { e.close() }
+        }
+        // MediaPipe models on the NPU (palm detector every frame)
         try {
             val e = NpuHandEngine(context)
             if (e.start()) {
                 try {
-                    val stats = LatencyStats("HyperXR NPU (${e.device}, detector de palma)", iterations)
+                    val stats = LatencyStats("MediaPipe NPU (${e.device}, detector de palma)", iterations)
                     repeat(5) { e.process(bmp) }
                     repeat(iterations) {
                         val t0 = System.nanoTime()

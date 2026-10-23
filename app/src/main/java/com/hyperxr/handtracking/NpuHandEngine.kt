@@ -29,6 +29,8 @@ class RawHand(
     val world: FloatArray?,
     /** Model probability of a right hand in the (non-mirrored) image, NaN when not exposed. */
     val rightScore: Float = Float.NaN,
+    /** True when [world] is inferred from the 2D joints rather than measured by the model. */
+    val worldEstimated: Boolean = false,
 )
 
 /**
@@ -46,10 +48,10 @@ class RawHand(
  *    background; HandVerifier then judges size, shape and reach.
  * Falls back to NNAPI's own device choice, then to the CPU (XNNPACK), and says which one runs.
  */
-class NpuHandEngine(private val context: Context) {
-    @Volatile var device = "-"; private set
-    @Volatile var detectorMs = 0f; private set
-    @Volatile var landmarkMs = 0f; private set
+class NpuHandEngine(private val context: Context) : HandEngine {
+    @Volatile override var device = "-"; private set
+    @Volatile override var detectorMs = 0f; private set
+    @Volatile override var landmarkMs = 0f; private set
 
     private var detector: Interpreter? = null
     private var landmarks: Interpreter? = null
@@ -186,14 +188,14 @@ class NpuHandEngine(private val context: Context) {
         } finally { cpu.close() }
     }
 
-    fun close() {
+    override fun close() {
         detector?.close(); landmarks?.close(); detector = null; landmarks = null
         delegates.forEach { runCatching { it.close() } }; delegates.clear()
         tracked.clear()
     }
 
     /** Finds up to two hands in [bmp] (the inference thread). */
-    fun process(bmp: Bitmap): List<RawHand> {
+    override fun process(bmp: Bitmap): List<RawHand> {
         val det = detector ?: return emptyList()
         val lm = landmarks ?: return emptyList()
         frame++

@@ -250,29 +250,52 @@ qualquer que seja a profundidade estimada. No ambiente virtual continua o contor
 **Otimização:** a máscara da mão reaproveita o mesmo bitmap 256x256. Antes era criado um novo a
 cada ~30 ms, cerca de 8 MB/s de lixo e pausas do coletor.
 
-## Mão real na frente da interface com EfficientViT-SAM
+## Motor de mãos: RTMDet + RTMPose (OpenMMLab)
 
-O recorte da mão real (a câmera mostrada por cima dos painéis) não usa mais o segmentador de pele
-do MediaPipe. Agora é feito pelo **EfficientViT-SAM L0** (MIT Han Lab, Apache-2.0), uma versão
-eficiente do Segment Anything.
+O motor principal agora usa dois modelos da OpenMMLab (Apache-2.0, exports ONNX oficiais), no
+lugar dos modelos do MediaPipe:
 
-**Prompts:** cada mão é recortada a partir de "prompts" tirados dos pontos da mão: a caixa da mão
-(com a largura de um dedo de folga) mais 6 pontos dentro dela (centro da palma, o meio de cada
-dedo e o polegar). O resultado é a mão inteira com a borda certa, sem pegar parede ou objeto da
-cor da pele.
+- **RTMDet-nano** acha as mãos. São 4 MB, rodam no ONNX Runtime (CPU) com entrada 320x320 em
+  letterbox e NMS embutido.
+- **RTMPose-m** coloca os 21 pontos. A entrada é um recorte 256x256 e a saída é SimCC (512
+  posições por eixo, meio pixel de resolução). O modelo foi convertido para TFLite com pesos fp16
+  (onnx2tf). Ele roda na NPU (NNAPI); se ela não aceitar, na GPU; senão, na CPU.
 
-**Onde roda:**
-- O encoder (512x512, pesos fp16) vai para a NPU; se ela não aceitar, para a GPU; senão, para a
-  CPU.
-- O decoder roda no ONNX Runtime (CPU), uma vez por mão. Uma única passada do encoder serve as
-  duas mãos.
+**Conversão conferida:** fp32 bate com o ONNX original (diferença 5e-6). Em fp16, a posição
+escolhida de cada ponto é a mesma em 95-100% dos pontos numa foto real.
 
-**Ritmo:** a rede roda até ~9 vezes por segundo. Em cada quadro da câmera entre duas passadas, a
-última máscara de cada mão é movida e escalada para onde a mão está agora (`SamHands.compose`).
-Assim o recorte acompanha a câmera com a qualidade da rede.
+**Ritmo:**
+- O detector só roda enquanto falta mão: em todo quadro sem nenhuma, a cada 3 quadros com uma.
+- Uma mão já rastreada custa uma inferência de pose por quadro, recortada de onde os pontos
+  estavam no quadro anterior.
+- Se uma mão rápida sai do recorte, há uma segunda olhada 1,5x mais larga antes de desistir.
+- O recorte nunca fica menor que 2,6 palmas, então um punho fechado não se perde.
 
-**Plano B:** se o SAM não iniciar no aparelho, o segmentador antigo volta como reserva. O
-segmentador antigo continua sendo usado para "pessoas atravessam o ambiente".
+**Presença:** vem da média de confiança dos 21 pontos. Calibrada em fotos, uma mão dá 0,64-0,72;
+fundo, objetos e pessoas dão 0,2-0,5. Uma mão nova precisa de presença 0,5; uma já rastreada se
+mantém com 0,25 (desfoque de movimento).
 
-**Mais:** a conversão e as conferências estão em `tools/hand_sam/README.md`. A linha de status das
-mãos mostra onde cada parte rodou e quanto tempo levou. Ainda não foi medido num celular.
+**Profundidade e lado:** o RTMPose é um modelo 2D, então essas duas coisas são estimadas
+(`RtmHand`):
+- A profundidade relativa de cada ponto sai das proporções dos ossos: um osso que parece mais
+  curto que seu tamanho real aponta para longe da câmera pela diferença. Com o óculos, as costas
+  da mão ficam para a câmera e os dedos dobram para a palma.
+- A escala métrica parte de uma palma de 9 cm. Depois a fusão com a câmera e o tamanho
+  medido/informado da mão corrigem a escala, como antes.
+- O lado (esquerda/direita) sai do sentido de giro pulso → indicador → mindinho na imagem. O
+  `HandednessResolver` não usa a profundidade estimada para decidir o lado.
+
+**Plano B:** se o RTMPose não iniciar, o motor com os modelos do MediaPipe (NPU) e depois o
+MediaPipe (GPU/CPU) assumem. A linha de status mostra "RTMPose · NPU/GPU/CPU" e os tempos do
+detector e dos pontos. O benchmark mede os três.
+
+**Limite honesto:** é o melhor modelo aberto de pose de mão em tempo real que coube no celular.
+Mas uma câmera só e um modelo 2D não são o rastreio de um Quest (várias câmeras infravermelho,
+modelo 3D treinado para isso). A profundidade dos dedos é estimada. Ainda não foi medido num
+celular.
+
+## Mão real por cima da interface: removida
+
+A mão da câmera desenhada por cima dos painéis (recorte com IA) foi removida. A mão rastreada
+continua sendo desenhada normalmente. O segmentador do MediaPipe continua só para "pessoas
+atravessam o ambiente".

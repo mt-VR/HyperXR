@@ -234,7 +234,7 @@ class XrEngine(
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
-            else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats} · ${hands.maskStatus}"
+            else "Mãos: ${hands.status} (${hands.backendInUse}) · ${hands.stats}"
         }
 
         // the computational gyroscope: chosen, or automatic on phones without a gyroscope
@@ -508,9 +508,6 @@ class XrEngine(
             val ar = arCore!!
             renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)
         }
-        // real hands in front of the UI (mixed reality): camera pixels where the NPU mask sees a hand
-        if (camera != null && scene.background == Background.PASSTHROUGH && maskTex != 0 && hands.handMask != null)
-            renderer.drawHandCutout(eye, camera, maskTex)
         // someone walked up while you are in a virtual environment: they show through it
         if (camera != null && scene.background != Background.PASSTHROUGH && personTex != 0 && hands.personMask != null)
             renderer.drawHandCutout(eye, camera, personTex)
@@ -566,27 +563,14 @@ class XrEngine(
     private val handList by lazy { drawnHands.toList() }
 
     // ---------------------------------------------------------------- hand occlusion
-    private var maskTex = 0
-    private var maskSeq = -1
     private val maskBuf = java.nio.ByteBuffer.allocateDirect(com.hyperxr.handtracking.HandMaskEngine.SIZE * com.hyperxr.handtracking.HandMaskEngine.SIZE)
-
     private var personTex = 0
     private var personSeq = -1
 
-    /**
-     * Turns the NPU hand mask on in mixed reality (and the people mask inside virtual
-     * environments) and uploads each new mask (R8 texture).
-     */
+    /** Inside a virtual environment, the people mask is on and each new one is uploaded (R8 texture). */
     private fun updateHandMask() {
-        val want = settings.handTracking.handOcclusion && input.handsAvailable &&
-            scene.background == Background.PASSTHROUGH && ctx.passthroughAvailable
-        hands.handMaskEnabled = want
         hands.personMaskEnabled = settings.graphics.peopleBreakthrough && input.handsAvailable &&
             scene.background != Background.PASSTHROUGH && ctx.passthroughAvailable
-        if (want && hands.handMaskSeq != maskSeq) {
-            maskSeq = hands.handMaskSeq
-            hands.handMask?.let { maskTex = uploadMask(maskTex, it) }
-        }
         if (hands.personMaskSeq != personSeq) {
             personSeq = hands.personMaskSeq
             hands.personMask?.let { personTex = uploadMask(personTex, it) }

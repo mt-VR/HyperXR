@@ -88,7 +88,6 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Info("Mãos") { a.handStatus },
             Item.Toggle("Mostrar as mãos", "Contorno das mãos rastreadas", { it.handTracking.handVisual != HandVisual.NONE }) { s, v ->
                 s.copy(handTracking = s.handTracking.copy(handVisual = if (v) HandVisual.AURA else HandVisual.NONE)) },
-            Item.Toggle("Mãos reais na frente da interface", "Recorte da mão pela IA (NPU/GPU)", { it.handTracking.handOcclusion }) { s, v -> s.copy(handTracking = s.handTracking.copy(handOcclusion = v)) },
             Item.Toggle("Direct Touch", "Tocar botões com o dedo indicador", { it.handTracking.directTouch }) { s, v -> s.copy(handTracking = s.handTracking.copy(directTouch = v)) },
             Item.Toggle("Clicar apontando e empurrando", "Em vez da pinça", { it.handTracking.clickGesture == ClickGesture.POINT_PUSH }) { s, v ->
                 s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.POINT_PUSH else ClickGesture.PINCH)) },

@@ -203,10 +203,6 @@ fun HandsSection(a: MainActivity) {
                     if (next.isEmpty()) s else s.copy(handTracking = s.handTracking.copy(tableFingers = next)) }
             }
         }
-        ToggleRow("Mãos reais na frente da interface", h.handOcclusion,
-            "Na realidade mista, a NPU recorta as suas mãos da câmera e elas aparecem na frente dos painéis") { v ->
-            a.update { it.copy(handTracking = it.handTracking.copy(handOcclusion = v)) }
-        }
         ToggleRow("Profundidade por IA no teclado de mesa", h.aiDepth,
             "Depth Anything V2 na NPU confirma cada toque na mesa (o modelo, ~92 MB, é baixado uma vez)") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(aiDepth = v)) }

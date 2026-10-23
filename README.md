@@ -126,6 +126,7 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - LiteRT (TensorFlow Lite) — Apache-2.0
 - MediaPipe Tasks GenAI — Apache-2.0; modelos Qwen 2.5 (baixados pelo usuário no app) — Apache-2.0
 - Modelo MediaPipe Hand Landmarker — Apache-2.0 (`app/src/main/assets/models/README.md`)
+- Modelos de mão RTMDet-nano e RTMPose-m (OpenMMLab) — Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Ambientes Poly Haven — CC0 (licença registrada por ambiente baixado, com `ATTRIBUTION.txt`)
 - Emuladores embutidos (libretro, compilados do código-fonte por `tools/build_libretro_cores.sh`):
   QuickNES — GPL-2.0, Gambatte — GPL-2.0, mGBA — MPL-2.0; `libretro.h` — MIT. Fontes e commits em
