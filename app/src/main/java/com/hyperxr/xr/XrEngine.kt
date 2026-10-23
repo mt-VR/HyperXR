@@ -363,7 +363,14 @@ class XrEngine(
         val r0 = System.nanoTime()
         // late latching: the head is sampled again right before drawing, so the content's own
         // work (UI, physics, hands) does not add to what the eyes see as rotation latency
-        if (openXrSession == 0L) synchronized(input) { tracker?.pose(predictionNs(), input.head) }
+        if (openXrSession == 0L) synchronized(input) {
+            photonNs = System.nanoTime() + predictionNs()
+            tracker?.pose(predictionNs(), input.head)
+            renderedOrientation.set(input.head.orientation)
+        }
+        // the hands drawn this frame are moved forward again, to the same photon time as the head
+        // (interaction keeps the copy taken before the content ran)
+        if (input.handsAvailable) hands.snapshot(drawnHands[0], drawnHands[1], predictionNs() / 1e9f)
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
         // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only
@@ -402,6 +409,7 @@ class XrEngine(
             val direct = (content as? ScreenOverride)?.drawScreen(eyes, width, height, activity.resources.displayMetrics.xdpi, settings.graphics) == true
             if (!direct) {
                 for (eye in 0..1) renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
+                timewarp()
                 compositor.composite(settings.graphics)
             }
             }
@@ -415,6 +423,23 @@ class XrEngine(
         Diagnostics.record(Stage.INPUT_TO_PHOTON, System.nanoTime() - frameStart)
         frameFence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
         reportFrameWork(System.nanoTime() - frameStart)
+    }
+
+    private var photonNs = 0L
+    private val renderedOrientation = com.hyperxr.math.Quat()
+    private val warpPose = Pose()
+
+    /**
+     * Rotational timewarp: the gyroscope is read once more after all eyes are drawn, predicted to
+     * the same photon time, and the composite re-aims the image by the turn since rendering. What
+     * the eyes see as rotation latency is then only the composite pass plus scan-out.
+     */
+    private fun timewarp() {
+        val t = tracker
+        if (t == null || !settings.graphics.timewarp) { com.hyperxr.math.Timewarp.identity(compositor.warp); return }
+        val left = (photonNs - System.nanoTime()).coerceAtLeast(0L)
+        synchronized(input) { t.pose(left, warpPose) }
+        com.hyperxr.math.Timewarp.matrix(renderedOrientation, warpPose.orientation, compositor.warp)
     }
 
     /** Reads the left half of the composited screen (what the left eye sees) into a bitmap. */
@@ -454,7 +479,8 @@ class XrEngine(
         GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
     }
 
-    private val handList by lazy { input.hands.toList() }
+    private val drawnHands = arrayOf(HandState(Handedness.LEFT), HandState(Handedness.RIGHT))
+    private val handList by lazy { drawnHands.toList() }
     private val headMatrix = FloatArray(16)
     private val eyeOffset = Vec3()
     private fun setupEye(eye: EyeView, offsetX: Float) {

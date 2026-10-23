@@ -118,6 +118,9 @@ class CameraPassthrough(private val context: Context) : CameraImageSource {
                             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
                             set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                             set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                            // the camera's own image clean-up in its quickest form: no frame of delay inside the ISP
+                            set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
+                            set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
                         }
                         s.setRepeatingRequest(req.build(), null, handler)
                     }

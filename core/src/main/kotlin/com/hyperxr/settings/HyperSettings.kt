@@ -26,6 +26,8 @@ data class GraphicsSettings(
     val targetFps: Int = 60,
     val msaaSamples: Int = 2,
     val lensDistortion: Boolean = true,
+    /** Rotational timewarp: re-aim the finished image with the gyroscope right before it is shown. */
+    val timewarp: Boolean = true,
     /** Brown-Conrady radial coefficients for the VR Box lenses. */
     val distortionK1: Float = 0.22f,
     val distortionK2: Float = 0.24f,

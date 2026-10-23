@@ -134,6 +134,7 @@ fun GraphicsSection(a: MainActivity) {
     }
     SectionCard("Lentes do visor (VR Box)") {
         ToggleRow("Correção de distorção da lente", g.lensDistortion) { v -> a.update { it.copy(graphics = it.graphics.copy(lensDistortion = v)) } }
+        ToggleRow("Timewarp (reajusta a imagem com o giroscópio antes de mostrar)", g.timewarp) { v -> a.update { it.copy(graphics = it.graphics.copy(timewarp = v)) } }
         SliderRow("Coeficiente k1", g.distortionK1, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK1 = v)) } }
         SliderRow("Coeficiente k2", g.distortionK2, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK2 = v)) } }
         SliderRow("Distância interpupilar (IPD)", g.ipdMm, 54f..74f, { "%.1f mm".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(ipdMm = v)) } }

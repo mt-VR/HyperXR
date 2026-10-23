@@ -6,13 +6,13 @@ import com.hyperxr.handtracking.HandState
 import com.hyperxr.handtracking.TrackingState
 
 /**
- * The hands as a lilac aura: a neon outline around the whole hand with square fingertips, a soft
- * glow outside and a translucent fill inside.
+ * The hands as a lilac outline: a thin bright line along the hand's silhouette with a short lilac
+ * glow, nothing inside, open at the bottom where it runs down past the wrist.
  *
  * One pass per hand, no intermediate texture: the joints are projected onto a plane at the hand's
  * depth, a quad covering them is drawn on that plane, and its fragment shader evaluates the hand
  * shape as a signed distance field: the palm as a polygon (wrist, thumb base and the four
- * knuckles) and each finger as segments of constant thickness, the last one ending square. The
+ * knuckles), each finger as rounded segments and the forearm as a capsule below the wrist. The
  * parts are joined with a smooth minimum, so knuckles and the thumb web flow into each other.
  */
 class HandAura {
@@ -109,8 +109,14 @@ class HandAura {
             minX = minOf(minX, x); maxX = maxOf(maxX, x); minY = minOf(minY, y); maxY = maxOf(maxY, y)
         }
         // room for the finger thickness and the glow
-        val margin = 0.06f
+        val margin = 0.03f
         minX -= margin; minY -= margin; maxX += margin; maxY += margin
+        // the forearm part of the outline runs below the wrist
+        val wx = plane[HandJoint.WRIST * 2]; val wy = plane[HandJoint.WRIST * 2 + 1]
+        val ax = plane[HandJoint.MIDDLE_MCP * 2] - wx; val ay = plane[HandJoint.MIDDLE_MCP * 2 + 1] - wy
+        val al = kotlin.math.sqrt(ax * ax + ay * ay).coerceAtLeast(1e-4f)
+        val fx = wx - ax / al * 0.1f; val fy = wy - ay / al * 0.1f
+        minX = minOf(minX, fx - 0.06f); maxX = maxOf(maxX, fx + 0.06f); minY = minOf(minY, fy - 0.06f); maxY = maxOf(maxY, fy + 0.06f)
         quad.clear()
         quad.put(minX).put(minY).put(planeZ)
         quad.put(maxX).put(minY).put(planeZ)
@@ -151,18 +157,6 @@ float segRound(vec2 p, vec2 a, vec2 b, float r) {
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-10), 0.0, 1.0);
     return length(pa - ba * h) - r;
 }
-// rounded where it joins the previous segment, square at b (the fingertip)
-float segSquare(vec2 p, vec2 a, vec2 b, float r) {
-    vec2 ba = b - a;
-    float len = length(ba);
-    vec2 d = len > 1e-6 ? ba / len : vec2(0.0, 1.0);
-    vec2 pa = p - a;
-    float s = dot(pa, d);
-    float q = abs(d.x * pa.y - d.y * pa.x);
-    if (s < 0.0) return length(pa) - r;
-    vec2 e = vec2(s - len, q - r);
-    return length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
-}
 float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
@@ -184,29 +178,37 @@ float palm(vec2 p) {
 }
 float hand(vec2 p) {
     float d = palm(p);
+    // the wrist carries on into the forearm, so the outline runs down off the hand like a sleeve
+    vec2 ax = uJ[9] - uJ[0];
+    float len = max(length(ax), 1e-4);
+    vec2 down = -ax / len;
+    float wristR = 0.38 * length(uJ[5] - uJ[17]) + 0.006;
+    d = smin(d, segRound(p, uJ[0] + down * 0.01, uJ[0] + down * 0.09, wristR), 0.012);
     for (int f = 0; f < 5; f++) {
         int b = f == 0 ? 1 : 1 + f * 4;   // thumb 1-4, index 5-8, ... pinky 17-20
         float r = uR[f];
-        d = smin(d, segRound(p, uJ[b], uJ[b + 1], r), 0.006);
-        d = smin(d, segRound(p, uJ[b + 1], uJ[b + 2], r), 0.006);
-        d = smin(d, segSquare(p, uJ[b + 2], uJ[b + 3], r), 0.006);
+        d = smin(d, segRound(p, uJ[b], uJ[b + 1], r), 0.004);
+        d = smin(d, segRound(p, uJ[b + 1], uJ[b + 2], r), 0.004);
+        d = smin(d, segRound(p, uJ[b + 2], uJ[b + 3], r * 0.95), 0.004);
     }
     return d;
 }
 void main() {
     float d = hand(vP);
     float aa = max(uPx, 1e-4);
-    vec3 lilac = vec3(0.74, 0.55, 1.0);
-    vec3 pale = vec3(0.93, 0.86, 1.0);
-    float inside = clamp(0.5 - d / aa, 0.0, 1.0);
-    // neon line just inside the edge, at least about two pixels wide
-    float lineW = max(0.0026, 2.0 * aa);
-    float rim = clamp(1.0 - abs(d + 0.0012) / lineW, 0.0, 1.0);
-    float glow = exp(-max(d, 0.0) / 0.009) * (1.0 - inside);
-    float fill = inside * 0.22;
-    float a = clamp(fill + rim * 0.95 + glow * 0.6, 0.0, 1.0) * uAlpha;
-    vec3 c = pale * rim * 0.95 + lilac * (glow * 0.6 + fill);
-    fragColor = vec4(c * uAlpha, a);
+    // only the outline: a thin bright core with a short lilac glow on both sides, nothing inside
+    float lineW = max(0.0009, 1.2 * aa);
+    float core = 1.0 - smoothstep(lineW * 0.5, lineW * 0.5 + aa, abs(d));
+    float glow = exp(-abs(d) / 0.0032);
+    // open at the bottom: the lines fade out a few centimetres below the wrist
+    vec2 ax = uJ[9] - uJ[0];
+    float below = -dot(vP - uJ[0], ax / max(length(ax), 1e-4));
+    float keep = 1.0 - smoothstep(0.015, 0.06, below);
+    vec3 white = vec3(0.93, 0.85, 1.0);
+    vec3 lilac = vec3(0.72, 0.48, 1.0);
+    float a = clamp(core + glow * 0.55, 0.0, 1.0) * keep * uAlpha;
+    vec3 c = (white * core + lilac * glow * 0.95) * keep * uAlpha;
+    fragColor = vec4(c, a);
 }"""
     }
 }

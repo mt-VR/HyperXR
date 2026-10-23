@@ -445,15 +445,15 @@ class HandTrackingService(private val context: Context) {
      * moving as a whole with its smoothed velocity (a still hand stays exactly still, so noise is
      * never turned into shaking), and each new result blends in over ~20 ms instead of jumping.
      */
-    fun snapshot(left: HandState, right: HandState) {
+    fun snapshot(left: HandState, right: HandState, aheadS: Float = DISPLAY_AHEAD_S) {
         val now = System.nanoTime()
         synchronized(lock) {
             for ((side, out) in listOf(Handedness.LEFT to left, Handedness.RIGHT to right)) {
                 val src = published.getValue(side)
                 copy(src, out)
                 if (src.state != TrackingState.TRACKING || src.timestampNs == 0L) continue
-                // forward to now, plus one display frame (when the frame drawn now reaches the eyes)
-                val dt = ((now - src.timestampNs) / 1e9f + DISPLAY_AHEAD_S).coerceIn(0f, 0.06f)
+                // forward to now, plus the time until the frame drawn now reaches the eyes
+                val dt = ((now - src.timestampNs) / 1e9f + aheadS).coerceIn(0f, 0.06f)
                 motions.getValue(side).extrapolate(src, dt, out.joints)
             }
         }

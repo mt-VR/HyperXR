@@ -270,7 +270,12 @@ layout(location=0) in vec3 aPos;
 out vec2 vUv;
 void main() { vUv = aPos.xy * 0.5 + 0.5; gl_Position = vec4(aPos.xy, 0.0, 1.0); }"""
 
-    /** Lens distortion (Brown-Conrady radial) from an eye texture to one half of the screen. */
+    /**
+     * Lens distortion (Brown-Conrady radial) from an eye texture to one half of the screen, with
+     * rotational timewarp: [uWarp] turns a view direction of the head as it is now into the
+     * frame the eye texture was rendered with, so the image follows a head turn that happened
+     * after rendering (sampled from the gyroscope right before this pass).
+     */
     const val DISTORT_FS = """#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -280,17 +285,25 @@ uniform vec2 uScale;        // output UV -> lens tangent units
 uniform vec2 uScaleIn;      // tangent units -> eye texture UV
 uniform vec2 uK;            // k1, k2
 uniform float uChroma;
+uniform mat3 uWarp;
 out vec4 fragColor;
 vec2 warp(vec2 t, float scale) {
     float r2 = dot(t, t);
     return t * (1.0 + uK.x * r2 + uK.y * r2 * r2) * scale;
 }
+vec2 toTex(vec2 tan) {
+    vec3 r = uWarp * vec3(tan, -1.0);
+    return (r.xy / max(-r.z, 1e-3)) * uScaleIn + 0.5;
+}
 void main() {
     vec2 t = (vUv - uLensCenter) * uScale;
-    vec2 g = warp(t, 1.0) * uScaleIn + 0.5;
-    if (any(lessThan(g, vec2(0.0))) || any(greaterThan(g, vec2(1.0)))) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-    vec2 rUv = warp(t, 1.0 - uChroma) * uScaleIn + 0.5;
-    vec2 bUv = warp(t, 1.0 + uChroma) * uScaleIn + 0.5;
+    vec2 w = warp(t, 1.0);
+    // the lens edge stays fixed on the screen; the image inside it is what moves
+    vec2 edge = w * uScaleIn + 0.5;
+    if (any(lessThan(edge, vec2(0.0))) || any(greaterThan(edge, vec2(1.0)))) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    vec2 g = toTex(w);
+    vec2 rUv = toTex(warp(t, 1.0 - uChroma));
+    vec2 bUv = toTex(warp(t, 1.0 + uChroma));
     fragColor = vec4(texture(uTex, rUv).r, texture(uTex, g).g, texture(uTex, bUv).b, 1.0);
 }"""
 
@@ -300,4 +313,18 @@ in vec2 vUv;
 uniform sampler2D uTex;
 out vec4 fragColor;
 void main() { fragColor = vec4(texture(uTex, vUv).rgb, 1.0); }"""
+
+    /** Copy without lens distortion, with the same rotational timewarp as [DISTORT_FS]. */
+    const val COPY_WARP_FS = """#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTan;          // tangent half-extent of the eye texture
+uniform mat3 uWarp;
+out vec4 fragColor;
+void main() {
+    vec3 r = uWarp * vec3((vUv * 2.0 - 1.0) * uTan, -1.0);
+    vec2 uv = (r.xy / max(-r.z, 1e-3)) / uTan * 0.5 + 0.5;
+    fragColor = vec4(texture(uTex, uv).rgb, 1.0);
+}"""
 }

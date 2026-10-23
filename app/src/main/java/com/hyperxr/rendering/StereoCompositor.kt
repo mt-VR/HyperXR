@@ -24,13 +24,14 @@ class StereoCompositor {
 
     fun init() {
         distortProg = Gl.compile(Shaders.FULLSCREEN_VS, Shaders.DISTORT_FS, "distort")
-        copyProg = Gl.compile(Shaders.FULLSCREEN_VS, Shaders.COPY_FS, "copy")
+        copyProg = Gl.compile(Shaders.FULLSCREEN_VS, Shaders.COPY_WARP_FS, "copy-warp")
         val ids = IntArray(1)
         GLES30.glGenVertexArrays(1, ids, 0); vao = ids[0]
         GLES30.glBindVertexArray(vao)
         FullscreenTriangle.bind()
         GLES30.glBindVertexArray(0)
-        for (n in listOf("uTex", "uLensCenter", "uScale", "uScaleIn", "uK", "uChroma")) u[n] = GLES30.glGetUniformLocation(distortProg, n)
+        for (n in listOf("uTex", "uLensCenter", "uScale", "uScaleIn", "uK", "uChroma", "uWarp")) u[n] = GLES30.glGetUniformLocation(distortProg, n)
+        for (n in listOf("uTex", "uTan", "uWarp")) u["copy.$n"] = GLES30.glGetUniformLocation(copyProg, n)
     }
 
     fun resize(width: Int, height: Int, xdpi: Float, g: GraphicsSettings) {
@@ -56,6 +57,12 @@ class StereoCompositor {
     /** Tangents the eye textures were rendered with this frame (set by the engine). */
     var eyeTanH = 1f
     var eyeTanV = 1f
+
+    /**
+     * Rotational timewarp for this composite (column-major 3x3): view direction now -> view
+     * direction the eye textures were rendered with. Identity = no correction.
+     */
+    val warp = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
 
     fun composite(g: GraphicsSettings) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
@@ -86,8 +93,12 @@ class StereoCompositor {
                 GLES30.glUniform2f(u.getValue("uK"), g.distortionK1, g.distortionK2)
                 GLES30.glUniform1f(u.getValue("uChroma"), 0.006f)
                 GLES30.glUniform1i(u.getValue("uTex"), 0)
+                GLES30.glUniformMatrix3fv(u.getValue("uWarp"), 1, false, warp, 0)
             } else {
                 GLES30.glUseProgram(copyProg)
+                GLES30.glUniform1i(u.getValue("copy.uTex"), 0)
+                GLES30.glUniform2f(u.getValue("copy.uTan"), tanH, tanV)
+                GLES30.glUniformMatrix3fv(u.getValue("copy.uWarp"), 1, false, warp, 0)
             }
             GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         }

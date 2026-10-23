@@ -227,8 +227,9 @@ App **Jogos open source** (categoria jogos HyperXR):
 
 
 ## Aura lilás nas mãos
-As mãos agora aparecem só como uma aura lilás: um contorno neon em volta da mão inteira, com as
-pontas dos dedos quadradas, um brilho suave por fora e um preenchimento translúcido por dentro.
+As mãos agora aparecem só como um contorno lilás: uma linha fina e clara seguindo a silhueta da
+mão, com um brilho lilás curto dos dois lados, nada por dentro, e aberta embaixo: a linha desce
+um pouco além do punho e some.
 O esqueleto e a aura preta antiga foram removidos; quem tinha um deles salvo passa para a aura
 lilás automaticamente.
 
@@ -236,8 +237,25 @@ O desenho (`HandAura`) é uma passada por mão, sem textura intermediária:
 - as juntas são projetadas num plano na profundidade da mão;
 - um retângulo nesse plano é desenhado e o shader calcula a forma da mão como um campo de
   distância: a palma é um polígono (punho, base do polegar e os quatro nós dos dedos), cada dedo
-  são segmentos de espessura constante e o último termina quadrado;
+  são segmentos arredondados e o antebraço é uma cápsula abaixo do punho;
 - as partes se juntam com um "mínimo suave", então nós dos dedos e a pele entre polegar e
   indicador fluem sem emendas.
 
 Em Ajustes > Mãos, "Intensidade da aura" regula a força.
+
+## Timewarp e mãos no último instante
+- **Timewarp rotacional:** depois que os dois olhos são desenhados, o giroscópio é lido de novo
+  e previsto para o mesmo instante em que a luz sai da tela; a composição final (com a distorção
+  da lente) re-aponta a imagem pela rotação desde o desenho. A latência de rotação que os olhos
+  sentem passa a ser só a composição mais a varredura da tela, não o quadro inteiro. Giros
+  grandes demais (recentralizar, salto de rastreamento) não são corrigidos. Desligável em
+  Gráficos.
+- **Mãos no último instante:** as mãos desenhadas são extrapoladas de novo logo antes do desenho,
+  até o mesmo instante de fóton da cabeça (a interação continua usando a cópia do começo do
+  quadro).
+- **Câmera:** redução de ruído e nitidez no modo rápido do ISP (sem quadro extra de atraso).
+
+Limites físicos: a latência nunca chega a 1 ms. A tela mostra um quadro novo a cada 8–16 ms
+(120–60 Hz) e leva esse tempo para varrer de cima a baixo; a câmera expõe e lê cada imagem em
+10–30 ms antes do hand tracking começar. A previsão esconde parte disso (o movimento parece em
+dia enquanto é suave), mas não remove.
