@@ -18,7 +18,7 @@ class RuntimeConfigProvider : ContentProvider() {
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
         val g = HyperXRApp.instance.settings.current.graphics
         val c = MatrixCursor(COLUMNS)
-        c.addRow(arrayOf<Any>(g.ipdMm, g.fovDegrees, g.distortionK1, g.distortionK2, if (g.lensDistortion) 1 else 0))
+        c.addRow(arrayOf<Any>(g.ipdMm, g.fovDegrees, g.distortionK1, g.distortionK2, if (g.lensDistortion) 1 else 0, g.lensSeparationMm))
         return c
     }
 
@@ -29,6 +29,6 @@ class RuntimeConfigProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "com.hyperxr.runtime"
-        val COLUMNS = arrayOf("ipd_mm", "fov_deg", "k1", "k2", "lens_distortion")
+        val COLUMNS = arrayOf("ipd_mm", "fov_deg", "k1", "k2", "lens_distortion", "lens_separation_mm")
     }
 }

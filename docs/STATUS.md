@@ -38,7 +38,9 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Jogos VrApi (Gear VR / Quest antigo) | 🚫 fora do escopo: o HyperXR roda só OpenXR |
 | Camada Daydream: detecção (categoria, libgvr, controle Daydream), patch só-Daydream → Cardboard (tabela de strings do manifesto reescrita) | ✅ testes · 🟡 aparelho |
 | Calibração do VR Box para apps Cardboard/Daydream (`/sdcard/Cardboard/current_device_params`, gravado antes de abrir) | ✅ formato (testes) · 🟡 aparelho |
-| Controle Daydream emulado | 🚫 o serviço do controle é do Google VR Services (fechado) |
+| HyperXR Daydream (APK companheiro `com.google.vr.vrcore`, instalado pelos Ajustes): serviço do controle Daydream com o protocolo do GVR SDK (IControllerService / ControllerEventPacket2), Joy-Con/gamepad lido de /dev/input via Shizuku, giroscópio do Joy-Con quando o kernel expõe (hid-nintendo), senão segue a cabeça; HOME segurado recentraliza — docs/DAYDREAM.md | ✅ protocolo/evdev/modelo (testes) + build · 🟡 aparelho |
+| Calibração do VR Box para apps GVR pelo provedor `com.google.vr.vrcore.settings` (sem arquivo em /sdcard, que o Android 11+ esconde) | ✅ build · 🟡 aparelho |
+| Vibração do controle Daydream no Joy-Con | 🚫 o Joy-Con lido por /dev/input não recebe vibração por esse caminho |
 | Jogos Quest com VrApi, loader da Meta, só Vulkan ou extensões Meta obrigatórias | 🚫 não rodam (o importador avisa) |
 | Oclusão por profundidade na renderização | ⏳ (Depth é usado para as mãos e o alerta de limite) |
 | Alerta de limite em VR: câmera aparece aos poucos perto de obstáculos (ARCore Depth) | ✅ cálculo · 🟡 aparelho · 🚫 sem Depth |

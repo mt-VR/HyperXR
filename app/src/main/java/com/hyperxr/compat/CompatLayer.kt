@@ -107,6 +107,50 @@ object CompatLayer {
 
     fun installed(ctx: Context, pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (_: Throwable) { false }
 
+    // ------------------------------------------------------------ HyperXR Daydream (vrcore module)
+
+    const val DAYDREAM_PACKAGE = "com.google.vr.vrcore"
+    enum class DaydreamState { NOT_INSTALLED, HYPERXR, GOOGLE }
+
+    /** Our companion APK carries "-hyperxr" in its version name; anything else is Google VR Services. */
+    fun daydreamState(ctx: Context): DaydreamState = try {
+        val v = ctx.packageManager.getPackageInfo(DAYDREAM_PACKAGE, 0).versionName ?: ""
+        if (v.endsWith("-hyperxr")) DaydreamState.HYPERXR else DaydreamState.GOOGLE
+    } catch (_: Throwable) { DaydreamState.NOT_INSTALLED }
+
+    fun daydreamStatus(ctx: Context): String = when (daydreamState(ctx)) {
+        DaydreamState.HYPERXR -> "HyperXR Daydream instalado: controle Daydream pelo Joy-Con e calibração do VR Box nos apps GVR"
+        DaydreamState.GOOGLE -> "O Google VR Services ocupa o lugar: desinstale-o para usar o HyperXR Daydream"
+        DaydreamState.NOT_INSTALLED -> "Não instalado: apps Daydream ficam sem controle"
+    }
+
+    /** Installs (or updates) HyperXR Daydream from the APK inside HyperXR: Shizuku when ready, else the system installer. */
+    fun installDaydream(ctx: Context, done: (String) -> Unit) {
+        if (daydreamState(ctx) == DaydreamState.GOOGLE) { done("Desinstale o Google VR Services primeiro"); return }
+        val apk = File(ctx.cacheDir, "hyperxr-daydream.apk")
+        try { ctx.assets.open("compat/hyperxr-daydream.apk").use { i -> apk.outputStream().use { i.copyTo(it) } } }
+        catch (t: Throwable) { done("APK do HyperXR Daydream ausente: ${t.message}"); return }
+        if (com.hyperxr.shell.ShellBridge.state(ctx) == com.hyperxr.shell.ShizukuState.READY) {
+            com.hyperxr.shell.ShellBridge.withService(ctx) { svc ->
+                Thread {
+                    val err = svc?.let { s -> android.os.ParcelFileDescriptor.open(apk, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { s.installApk(it, apk.length()) } } ?: "Shizuku não respondeu"
+                    done(if (err.isEmpty()) "HyperXR Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else "Falha: $err")
+                }.start()
+            }
+            return
+        }
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", apk)
+            ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            done("Confirme a instalação na tela do celular")
+        } catch (t: Throwable) { done("Instalador do sistema indisponível: ${t.message}") }
+    }
+
+    /** Opens HyperXR Daydream's own screen (Shizuku permission, gyro axes, live test). */
+    fun openDaydream(ctx: Context): Boolean = ctx.packageManager.getLaunchIntentForPackage(DAYDREAM_PACKAGE)
+        ?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } ?: false
+
     /**
      * Starts an XR game so that it can see what it needs: a game made for Android 11+ only sees
      * packages it declared, unless they granted it a content URI. HyperXR grants URIs of its
@@ -116,6 +160,8 @@ object CompatLayer {
         val uris = buildList {
             add(Uri.parse("content://com.hyperxr.runtime/visibility/$pkg"))
             if (installed(ctx, BROKER_PACKAGE)) add(Uri.parse("content://org.khronos.openxr.runtime_broker/visibility/$pkg"))
+            // GVR apps made for Android 11+ must see HyperXR Daydream to find its controller service
+            if (daydreamState(ctx) == DaydreamState.HYPERXR) add(Uri.parse("content://com.google.vr.vrcore.settings/visibility/$pkg"))
         }
         val clip = ClipData.newRawUri("HyperXR", uris[0])
         for (u in uris.drop(1)) clip.addItem(ClipData.Item(u))

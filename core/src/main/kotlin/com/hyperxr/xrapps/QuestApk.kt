@@ -35,7 +35,7 @@ data class ApkReport(
     val graphics: Set<String>,
     val extensions: Set<String>,
     val launchActivity: String?,
-    /** Uses the Daydream controller API (Google VR Services only). */
+    /** Uses the Daydream controller API (served by Google VR Services, or by HyperXR Daydream). */
     val daydreamController: Boolean = false,
     /** Daydream app (also when it supports Cardboard too). */
     val daydream: Boolean = false,
@@ -166,7 +166,7 @@ object QuestApk {
         if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperXR não as implementa, o jogo funciona só se forem opcionais"
         val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
         if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
-        if (ddController) reasons += "Usa o controle Daydream: no modo \"runtime HyperXR\" o Joy-Con faz o papel dele; no modo Cardboard as telas que exigem o controle não avançam"
+        if (ddController) reasons += "Usa o controle Daydream: instale o HyperXR Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
         if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
 
