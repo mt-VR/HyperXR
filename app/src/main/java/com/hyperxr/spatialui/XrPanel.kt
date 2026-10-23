@@ -153,14 +153,27 @@ abstract class XrPanel(
 
     val isDragging: Boolean get() = dragging
 
-    /** Moves the window along the pointer ray while dragged, keeping it facing the user. */
-    fun drag(rayOrigin: Vec3, rayDir: Vec3, head: Pose) {
+    /**
+     * Moves the window along the pointer ray while dragged, keeping it facing the user. With a
+     * hand (or controller) ray the window also follows the hand in depth: reaching out pushes it
+     * away, pulling the hand in brings it closer, so it can be put anywhere in the real room.
+     * [hand] is where the hand is (the pinch point) when the ray itself starts at the eyes; a gaze
+     * ray has no hand and keeps its distance.
+     */
+    fun drag(rayOrigin: Vec3, rayDir: Vec3, head: Pose, hand: Vec3? = null) {
         if (!dragging) return
-        if (dragDistance == 0f) dragDistance = rayOrigin.distanceTo(pose.position).coerceIn(0.5f, 3f)
-        val target = Vec3(rayOrigin.x + rayDir.x * dragDistance, rayOrigin.y + rayDir.y * dragDistance, rayOrigin.z + rayDir.z * dragDistance)
+        val reach = (hand ?: rayOrigin).distanceTo(head.position)
+        if (dragDistance == 0f) {
+            dragDistance = rayOrigin.distanceTo(pose.position).coerceIn(0.3f, 4f)
+            dragReach = reach
+        }
+        val distance = (dragDistance + (reach - dragReach) * PUSH_GAIN).coerceIn(0.3f, 5f)
+        val target = Vec3(rayOrigin.x + rayDir.x * distance, rayOrigin.y + rayDir.y * distance, rayOrigin.z + rayDir.z * distance)
         pose.position.lerp(target, 0.5f)
         faceUser(head.position)
     }
+
+    private var dragReach = 0f
 
     fun endDrag() { dragDistance = 0f }
 
@@ -179,7 +192,11 @@ abstract class XrPanel(
         Quat.fromAxisAngle(0f, 1f, 0f, yaw, pose.orientation)
     }
 
-    companion object { const val TITLE_BAR = "__title" }
+    companion object {
+        const val TITLE_BAR = "__title"
+        /** Window depth change per metre of hand reach while dragging. */
+        const val PUSH_GAIN = 4f
+    }
 }
 
 /** Immediate-mode drawing helpers bound to one panel render. */

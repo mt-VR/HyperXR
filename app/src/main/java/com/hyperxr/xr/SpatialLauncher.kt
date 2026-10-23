@@ -347,7 +347,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             if (handRay != null) recordPointer(5 + i, handRay, pinch) else pointerRays.remove(5 + i)
             handRayVisible[i] = handRay != null
             pinchStrength[i] = if (h.isUsable) h.pinchStrength else 0f
-            if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch) }
+            if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch, if (h.isUsable) pinchBall[i] else null) }
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
             if (h.isUsable && !menuOpen && handRays[i].captured == null) {
                 when (val e = microGestures[i].update(h, now)) {
@@ -487,10 +487,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (!p.hitDistance.isNaN()) hitPoints += r.pointAt(p.hitDistance - 0.004f)
     }
 
-    private fun dragWindows(p: RayPointer, r: Ray, down: Boolean) {
+    private fun dragWindows(p: RayPointer, r: Ray, down: Boolean, hand: Vec3? = null) {
         (p.captured as? com.hyperxr.appworld.WorldHit)?.let { appWorld.drag(it, r, down); return }
         val target = p.captured as? XrPanel ?: return
-        if (down && target.isDragging) target.drag(r.origin, r.direction, ctx.input.head)
+        if (down && target.isDragging) target.drag(r.origin, r.direction, ctx.input.head, hand)
         if (!down) target.endDrag()
     }
 

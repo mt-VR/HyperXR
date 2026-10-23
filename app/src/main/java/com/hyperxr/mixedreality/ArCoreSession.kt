@@ -123,7 +123,9 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         texMatrixValid = false
     }
 
-    override fun start() { try { session?.resume() } catch (t: Throwable) { error = t.message; Diagnostics.log("ARCore resume failed: ${t.message}") } }
+    // A resumed session starts from where the user is now, not from the room as it was left:
+    // the tracking origin is placed at the head again (content keeps its layout around the user).
+    override fun start() { recenterPending = true; lost = false; translation.reset(); prevTs = 0L; try { session?.resume() } catch (t: Throwable) { error = t.message; Diagnostics.log("ARCore resume failed: ${t.message}") } }
     override fun stop() { session?.pause() }
     fun close() { session?.close(); session = null }
 
@@ -160,16 +162,37 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         }
         if (trackingState == TrackingState.TRACKING) {
             val p = frame.camera.displayOrientedPose
+            // what was being shown while tracking was lost (last position, gyro-turned orientation)
+            if (lost) origin.inverse().compose(headPose, shownWhileLost)
             headPose.position.set(p.tx(), p.ty(), p.tz())
             headPose.orientation.set(p.qx(), p.qy(), p.qz(), p.qw())
-            onArPose(frame.timestamp)
             if (recenterPending) {
                 // origin so that the current head yaw faces -Z and the floor estimate is 1.6 m below the eyes
                 val yaw = com.hyperxr.input.ControllerPoseFusion.yawOnly(headPose.orientation, Quat())
                 origin.orientation.set(yaw)
                 origin.position.set(headPose.position.x, headPose.position.y - 1.6f, headPose.position.z)
                 recenterPending = false
+            } else if (lost && com.hyperxr.headtracking.TrackingRebase.jumped(shownWhileLost, origin.inverse().compose(headPose))) {
+                // ARCore came back with its world moved: keep the head (and so every window) where it was
+                com.hyperxr.headtracking.TrackingRebase.origin(headPose, shownWhileLost, origin)
+                Diagnostics.log("6DoF: tracking came back shifted; kept the room in place")
             }
+            if (lost) { lost = false; translation.reset(); prevTs = 0L }
+            onArPose(frame.timestamp)
+        } else {
+            // tracking lost (covered camera, fast motion, a blank wall): position holds, rotation
+            // keeps following the gyroscope instead of freezing
+            val now = SystemClock.elapsedRealtimeNanos()
+            if (!lost) { lost = true; lostPropNs = now; translation.reset() }
+            else {
+                val g = gyro
+                if (g != null && g.delta(lostPropNs, now, dDev)) {
+                    toHead(dDev, fix, dHead)
+                    headPose.orientation.mul(dHead, headPose.orientation).normalize()
+                }
+                lostPropNs = now
+            }
+            frameTs = now
         }
         Diagnostics.record(Stage.SENSOR_FUSION, System.nanoTime() - t0)
         Diagnostics.record(Stage.CAMERA_CAPTURE, kotlin.math.max(0L, System.nanoTime() - frame.timestamp))
@@ -199,6 +222,9 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     }
 
     private val translation = com.hyperxr.headtracking.HeadTranslationPredictor()
+    private var lost = false
+    private var lostPropNs = 0L
+    private val shownWhileLost = Pose()
     private val qAtPose = Quat()
     private val posAtPose = Vec3()
 
