@@ -345,3 +345,20 @@ Com as mãos, só o **punho fechado** move janelas e painéis: aponte para a jan
 barra), feche a mão e mova; estender o braço afasta a janela, recolher aproxima. A pinça só clica:
 pinçar no espaço vazio ou na barra não arrasta mais nada. O punho nunca clica no conteúdo
 (páginas, apps). Com o Joy-Con e o olhar, a barra continua arrastando como antes.
+
+### Visual do YouTube VR
+As telas do YouTube XR seguem o layout do YouTube VR: tema escuro do YouTube (#0F0F0F), logo no
+canto, barra de navegação lateral com ícones (Início, Buscar e as categorias), barra de pesquisa
+no topo, chips de categoria em pílula, cartões grandes (miniatura arredondada com a duração, avatar
+redondo do canal, título em duas linhas, "canal • visualizações • há X"). No player: tela grande,
+barra de progresso vermelha com o marcador vermelho, botões redondos de ícone (reproduzir/pausar,
+-10/+10 s, 360, 3D, engrenagem de qualidade com a lista de qualidades em chips), título grande,
+avatar e inscritos do canal, curtidas e a coluna "A seguir". Ícones: Material Symbols (Apache-2.0)
+e o logo pelo Simple Icons (CC0), gerados por `tools/make_yt_icons.py`.
+
+## Mãos reais na frente da interface
+Na realidade mista, o segmentador multiclasse do MediaPipe (256x256, Apache-2.0, no APK) roda na
+NPU sobre os quadros que o hand tracking analisa; a classe "pele do corpo", limitada à região das
+mãos rastreadas (com o antebraço), vira uma máscara. Depois que a interface é desenhada, a imagem
+da câmera é desenhada de novo através dessa máscara: as suas mãos de verdade aparecem na frente dos
+painéis e janelas. A máscara tem até um quadro de atraso em movimentos rápidos (borda fantasma).

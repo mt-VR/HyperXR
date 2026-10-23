@@ -42,11 +42,13 @@ public final class XrYouTube {
 
     /** A video in a list (category, search, related). */
     public static final class Video {
-        public final String url, title, channel, thumbnail;
+        public final String url, title, channel, thumbnail, avatar, ago;
         public final long durationS, views;
         public final boolean live;
-        Video(final String url, final String title, final String channel, final String thumbnail, final long durationS, final long views, final boolean live) {
-            this.url = url; this.title = title; this.channel = channel; this.thumbnail = thumbnail; this.durationS = durationS; this.views = views; this.live = live;
+        Video(final String url, final String title, final String channel, final String thumbnail, final String avatar, final String ago,
+              final long durationS, final long views, final boolean live) {
+            this.url = url; this.title = title; this.channel = channel; this.thumbnail = thumbnail; this.avatar = avatar; this.ago = ago;
+            this.durationS = durationS; this.views = views; this.live = live;
         }
     }
 
@@ -68,7 +70,8 @@ public final class XrYouTube {
     }
 
     public static final class Details {
-        public String title = "", channel = "", description = "", hlsUrl = "", dashUrl = "";
+        public String title = "", channel = "", description = "", hlsUrl = "", dashUrl = "", avatar = "", ago = "";
+        public long subscribers = -1;
         public long views, likes, durationS;
         public boolean live, spherical;
         public final List<Quality> qualities = new ArrayList<>();
@@ -122,6 +125,7 @@ public final class XrYouTube {
             final StreamInfoItem s = (StreamInfoItem) i;
             final boolean live = s.getStreamType() == StreamType.LIVE_STREAM;
             out.add(new Video(s.getUrl(), s.getName(), s.getUploaderName() == null ? "" : s.getUploaderName(), best(s.getThumbnails(), 360),
+                    best(s.getUploaderAvatars(), 68), s.getTextualUploadDate() == null ? "" : s.getTextualUploadDate(),
                     Math.max(0, s.getDuration()), s.getViewCount(), live));
         }
         return out;
@@ -147,6 +151,9 @@ public final class XrYouTube {
         d.channel = info.getUploaderName() == null ? "" : info.getUploaderName();
         d.description = info.getDescription() == null ? "" : info.getDescription().content();
         d.views = info.getViewCount(); d.likes = info.getLikeCount(); d.durationS = info.getDuration();
+        d.avatar = best(info.getUploaderAvatars(), 88);
+        d.subscribers = info.getUploaderSubscriberCount();
+        d.ago = info.getTextualUploadDate() == null ? "" : info.getTextualUploadDate();
         d.live = info.getStreamType() == StreamType.LIVE_STREAM;
         d.hlsUrl = info.getHlsUrl() == null ? "" : info.getHlsUrl();
         d.dashUrl = info.getDashMpdUrl() == null ? "" : info.getDashMpdUrl();

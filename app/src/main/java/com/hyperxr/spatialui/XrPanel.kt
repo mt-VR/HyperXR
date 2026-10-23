@@ -84,6 +84,9 @@ abstract class XrPanel(
 
     protected abstract fun draw(c: PanelCanvas)
 
+    /** The panel's backdrop; apps with their own look (YouTube XR) paint their own. */
+    protected open fun paintBackground(c: PanelCanvas) = c.background()
+
     /** Called every frame; override for animated content (then set dirty = true when it changes). */
     open fun update(dt: Float) {}
 
@@ -100,7 +103,7 @@ abstract class XrPanel(
             s.begin()
             regions.clear()
             val pc = PanelCanvas(s.canvas, pxW.toFloat(), pxH.toFloat(), this, ppm)
-            pc.background()
+            paintBackground(pc)
             if (title.isNotEmpty() || closable) pc.titleBar(title, closable)
             draw(pc)
             s.upload()
@@ -253,10 +256,12 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
     }
 
     /** Draws single or multi-line text; returns its height. */
-    fun label(s: String, x: Float, top: Float, size: Float, color: Int = XrTheme.text, bold: Boolean = false, maxWidth: Float = w - x - pad): Float {
+    fun label(s: String, x: Float, top: Float, size: Float, color: Int = XrTheme.text, bold: Boolean = false, maxWidth: Float = w - x - pad,
+              maxLines: Int = Int.MAX_VALUE): Float {
         text.textSize = size; text.color = color; text.typeface = if (bold) XrTheme.medium else XrTheme.regular
         val layout = StaticLayout.Builder.obtain(s, 0, s.length, text, maxWidth.toInt().coerceAtLeast(10))
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build()
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)
+            .setMaxLines(maxLines).setEllipsize(if (maxLines == Int.MAX_VALUE) null else android.text.TextUtils.TruncateAt.END).build()
         canvas.save(); canvas.translate(x, top); layout.draw(canvas); canvas.restore()
         return layout.height.toFloat()
     }
