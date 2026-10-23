@@ -261,7 +261,7 @@ Limites físicos: a latência nunca chega a 1 ms. A tela mostra um quadro novo a
 dia enquanto é suave), mas não remove.
 
 ## Clique apontando e empurrando
-O clique com a mão agora é apontar e empurrar (padrão; a pinça continua nas configurações):
+Opção nas configurações ("Clicar apontando e empurrando"; o padrão é a pinça):
 - aponte com o indicador (os outros dedos dobrados, o polegar livre, como uma "arminha");
 - a ponta do dedo mira no que está embaixo dela, vista dos olhos (a bolinha aparece na ponta);
 - um empurrão curto do dedo para a frente (~2 cm, ~3 cm sem Depth API) clica; a bolinha enche

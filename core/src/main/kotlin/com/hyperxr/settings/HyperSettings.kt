@@ -80,8 +80,8 @@ data class HandTrackingSettings(
     /** Kalman process noise (m/s²)²: higher follows fast motion, lower smooths more. */
     val kalmanProcessNoise: Float = 3f,
     val directTouch: Boolean = true,
-    /** How a hand clicks from a distance: point with the index finger and push, or pinch. */
-    val clickGesture: ClickGesture = ClickGesture.POINT_PUSH,
+    /** How a hand clicks from a distance: pinch (default), or point with the index finger and push. */
+    val clickGesture: ClickGesture = ClickGesture.PINCH,
     /** Thumb-index distance as a fraction of the palm length that counts as a pinch. */
     /** Pinch closes below this thumb–index distance / palm length (model landmarks). Renamed so old 0.25 values reset. */
     val pinchClose: Float = 0.38f,
@@ -186,7 +186,7 @@ data class HyperSettings(
     val runtime: RuntimeSettings = RuntimeSettings(),
 ) {
     companion object {
-        const val CURRENT_VERSION = 4
+        const val CURRENT_VERSION = 5
 
         /** Settings saved by an older version, brought to the current defaults where they changed. */
         fun migrate(s: HyperSettings): HyperSettings {
@@ -198,8 +198,8 @@ data class HyperSettings(
             if (m.version < 2) m = m.copy(handTracking = m.handTracking.copy(auraOpacity = 0.8f))
             // v3: no automatic click by pointing (it was on by default and clicked by accident)
             if (m.version < 3) m = m.copy(controllers = m.controllers.copy(dwellClick = false))
-            // v4: the hand clicks by pointing and pushing (pinch stays available)
-            if (m.version < 4) m = m.copy(handTracking = m.handTracking.copy(clickGesture = ClickGesture.POINT_PUSH))
+            // v5: back to the pinch click (point-and-push stays available as an option)
+            if (m.version < 5) m = m.copy(handTracking = m.handTracking.copy(clickGesture = ClickGesture.PINCH))
             return if (m.version < CURRENT_VERSION) m.copy(version = CURRENT_VERSION) else m
         }
     }
