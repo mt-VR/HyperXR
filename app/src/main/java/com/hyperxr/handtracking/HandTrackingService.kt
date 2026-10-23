@@ -16,6 +16,7 @@ import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.diagnostics.LatencyStats
 import com.hyperxr.diagnostics.Stage
 import com.hyperxr.math.Pose
+import com.hyperxr.math.Vec3
 import com.hyperxr.settings.HandTrackingSettings
 import com.hyperxr.settings.InferenceBackend
 import java.nio.ByteBuffer
@@ -347,6 +348,32 @@ class HandTrackingService(private val context: Context) {
 
     private val presenceOf = FloatArray(2)
     private val nearEdge = BooleanArray(2)
+    private val fusedImage = Array(2) { FloatArray(HandJoint.COUNT * 3) }
+    private val tipCam = Vec3()
+
+    /**
+     * The fingertips of this camera result, raw (as the model placed them) and measured by the
+     * depth map: sampled a little behind the tip along the finger (the tip pixel itself is often
+     * the table just past the finger) and lifted into the tracking space with the camera pose.
+     * A depth reading far from the model's fingertip hit something else and is not used.
+     */
+    private fun measureTips(dst: HandState, r: DepthFusion.Result, image: FloatArray, intr: CameraIntrinsics, depth: DepthSampler?, slot: Slot) {
+        dst.resultNs = slot.captureNs
+        for (f in 0 until 5) {
+            val tip = 4 + f * 4
+            dst.rawTips[f].set(r.cameraSpace[tip])
+            dst.measuredTipValid[f] = false
+            if (depth == null) continue
+            val u = (image[tip * 3] * 0.75f + image[(tip - 1) * 3] * 0.25f) * intr.width
+            val v = (image[tip * 3 + 1] * 0.75f + image[(tip - 1) * 3 + 1] * 0.25f) * intr.height
+            val d = depth.depthAt(u, v)
+            if (d.isNaN() || d < 0.08f) continue
+            tipCam.set((u - intr.cx) * d / intr.fx, -(v - intr.cy) * d / intr.fy, -d)
+            val m = dst.measuredTips[f]
+            slot.pose?.transformPoint(tipCam, m) ?: m.set(tipCam)
+            dst.measuredTipValid[f] = m.distanceTo(r.cameraSpace[tip]) < 0.06f
+        }
+    }
 
     private fun processHands(hands: List<RawHand>, slot: Slot, t0: Long) {
         Diagnostics.record(Stage.HAND_INFERENCE, t0 - slot.submitNs)
@@ -374,7 +401,7 @@ class HandTrackingService(private val context: Context) {
                 val c = slot.pose?.position
                 if (verifier.reach(w.x - (c?.x ?: 0f), w.y - (c?.y ?: 0f), w.z - (c?.z ?: 0f)) != null) continue
                 fusedLabel[n] = label; fusedScore[n] = obs.score; fusedPinch[n] = pinchRatioFromWorld(obs); presenceOf[n] = h.presence
-                nearEdge[n] = HandHold.nearEdge(obs.image); n++
+                nearEdge[n] = HandHold.nearEdge(obs.image); obs.image.copyInto(fusedImage[n]); n++
             }
         }
         val assign = HandAssignment.assign(n, { k -> fused[k].cameraSpace[HandJoint.WRIST] }, { k -> fusedLabel[k]!! }, trackers)
@@ -397,6 +424,7 @@ class HandTrackingService(private val context: Context) {
             // one lost at the edge has left the view and goes quickly
             trackers.getValue(side).lostTimeoutNs = HandHold.timeoutNs(nearEdge[k])
             trackers.getValue(side).update(r.cameraSpace, fusedScore[k], r.depthSource, t0, fusedPinch[k], slot.pose?.position ?: ORIGIN)
+            measureTips(trackers.getValue(side).state, r, fusedImage[k], intr, depth, slot)
             seen += side
         }
         verifier.endFrame()
@@ -470,6 +498,8 @@ class HandTrackingService(private val context: Context) {
         for (i in 0 until HandJoint.COUNT) dst.joints[i].set(src.joints[i])
         dst.state = src.state; dst.confidence = src.confidence; dst.depthSource = src.depthSource
         dst.pinchStrength = src.pinchStrength; dst.pinchRatio = src.pinchRatio; dst.gesture = src.gesture; dst.timestampNs = src.timestampNs
+        for (f in 0 until 5) { dst.rawTips[f].set(src.rawTips[f]); dst.measuredTips[f].set(src.measuredTips[f]); dst.measuredTipValid[f] = src.measuredTipValid[f] }
+        dst.resultNs = src.resultNs
     }
 
     /**

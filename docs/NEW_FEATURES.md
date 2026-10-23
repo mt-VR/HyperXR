@@ -281,10 +281,18 @@ No teclado flutuante, o botão **Mesa** deita o teclado sobre uma mesa de verdad
 - **Sem Depth API (ou sem mesa encontrada):** toque a mesa com a ponta do indicador e segure
   parado por 1 segundo; o teclado é centrado onde o dedo tocou. "Mais alto"/"Mais baixo" ajustam
   a altura em 5 mm e "Recalibrar" procura de novo.
-- **Digitação:** pontas do indicador, médio e anelar (e o polegar só para o espaço). Cada dedo
-  digita uma vez por toque e precisa levantar ~2,4 cm antes da próxima tecla; a mesma tecla não
-  é aceita duas vezes em 140 ms; quando dois dedos da mesma mão encostam juntos, só o mais baixo
-  conta. Teclas de 3,2 cm (maiores que as reais) por causa da precisão do hand tracking.
+- **Detecção de toque (própria do HyperXR):** uma tecla só é digitada quando o dedo bate na
+  mesa de verdade, não quando chega perto. A cada resultado da câmera são exigidos dois sinais
+  físicos ao mesmo tempo: **contato** (com a Depth API, a profundidade medida na própria ponta do
+  dedo está na mesa; sem ela, a ponta do dedo do modelo da mão, com margem menor e confirmação no
+  quadro seguinte) e **impacto** (o dedo vinha descendo rápido e parou de repente, como acontece
+  ao bater numa superfície dura; abaixar devagar ou pairar nunca faz isso). Além disso o dedo
+  precisa ter descido pelo menos 1,2 cm e levantar de novo antes da próxima tecla, a mesma tecla
+  não vale duas vezes em 140 ms e, se dois dedos da mesma mão encostam juntos, só o mais baixo
+  conta. Em simulação com ruído: 0 teclas falsas em 10 s pairando a 2-3 cm, 20/20 batidas com
+  Depth API e 18/20 sem.
+- **Dedos:** escolha quais digitam no painel do teclado ou nas configurações (padrão: indicador e
+  médio). O polegar, se ligado, digita só o espaço.
 - **Retorno:** a tecla sob a ponta do dedo acende em lilás, a tecla digitada pisca, um clique
   curto toca, e o painel atrás do teclado mostra o texto digitado.
 - **Integração:** digita no mesmo alvo do teclado flutuante (campos da web, apps Android, barra

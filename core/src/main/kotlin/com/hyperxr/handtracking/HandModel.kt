@@ -66,6 +66,17 @@ class HandState(val handedness: Handedness) {
     var gesture: Gesture = Gesture.NONE
     var timestampNs: Long = 0L
 
+    /**
+     * Per camera result, before any smoothing or prediction (for contact detection, which needs
+     * the real motion, stops included): the fingertips (thumb..pinky) as the model placed them,
+     * and the same fingertips measured by the depth map (Depth API) where it had a reading.
+     * [resultNs] changes with every new camera result.
+     */
+    val rawTips: Array<Vec3> = Array(5) { Vec3() }
+    val measuredTips: Array<Vec3> = Array(5) { Vec3() }
+    val measuredTipValid = BooleanArray(5)
+    var resultNs: Long = 0L
+
     /** Includes the short coasting phase after a missed detection (gesture and position are held). */
     val isUsable: Boolean get() = state != TrackingState.NOT_TRACKED
 }

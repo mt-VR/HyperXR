@@ -1,6 +1,9 @@
 package com.hyperxr
 
 import com.hyperxr.handtracking.HandJoint
+import com.hyperxr.handtracking.TrackingState
+import com.hyperxr.handtracking.Handedness
+import com.hyperxr.handtracking.HandState
 import com.hyperxr.input.PointPush
 import com.hyperxr.input.TableDetector
 import com.hyperxr.input.TableKeyLayout
@@ -69,56 +72,102 @@ class TableKeyboardTest {
     private val layout = TableKeyLayout()
     private val place = TablePlacement().apply { center.set(0f, 0.74f, -0.4f); yaw = 0f; valid = true }
 
-    /** A hand whose fingertips hover 4 cm above the table, with the index tip at the given key. */
-    private fun hand(key: String, indexH: Float, middleH: Float = 0.04f): Array<Vec3> {
+    /**
+     * One camera result per call at 30 Hz: the index fingertip at height [indexH] over [key], the
+     * middle finger at [middleH] one key to the right; drawn joints, raw and measured tips agree.
+     */
+    private var resultNs = 0L
+    private fun hand(key: String, indexH: Float, middleH: Float = 0.04f, measured: Boolean = true): HandState {
         val k = layout.keys.first { it.label == key }
-        val j = Array(HandJoint.COUNT) { Vec3(0f, 0.9f, -0.2f) }
-        val t = place.toWorld(k.cx, indexH + 0.007f, k.cz, Vec3())
-        j[HandJoint.INDEX_TIP].set(t)
-        j[HandJoint.MIDDLE_TIP].set(place.toWorld(k.cx + 0.032f, middleH + 0.007f, k.cz, Vec3()))
-        j[HandJoint.RING_TIP].set(place.toWorld(k.cx + 0.064f, 0.05f, k.cz, Vec3()))
-        j[HandJoint.THUMB_TIP].set(place.toWorld(k.cx - 0.03f, 0.05f, k.cz + 0.1f, Vec3()))
-        return j
+        val h = HandState(Handedness.RIGHT)
+        h.state = TrackingState.TRACKING
+        for (j in h.joints) j.set(0f, 0.9f, -0.2f)
+        fun put(f: Int, x: Float, z: Float, height: Float) {
+            val tip = 4 + f * 4
+            place.toWorld(x, height + 0.007f, z, h.joints[tip])
+            h.rawTips[f].set(h.joints[tip])
+            place.toWorld(x, height + 0.012f, z, h.measuredTips[f])
+            h.measuredTipValid[f] = measured
+        }
+        put(1, k.cx, k.cz, indexH)
+        put(2, k.cx + 0.032f, k.cz, middleH)
+        put(3, k.cx + 0.064f, k.cz, 0.05f)
+        put(0, k.cx - 0.03f, k.cz + 0.1f, 0.05f)
+        put(4, k.cx + 0.09f, k.cz, 0.05f)
+        resultNs += 33_000_000L
+        h.resultNs = resultNs
+        return h
     }
 
-    private fun typeSequence(t: TableTyping, frames: List<Array<Vec3>>, startNs: Long = 0L): List<String> {
+    private fun type(t: TableTyping, heights: List<Float>, key: String = "g", measured: Boolean = true): List<String> {
         val typed = ArrayList<String>()
-        frames.forEachIndexed { i, h -> t.update(arrayOf(null, h), booleanArrayOf(false, false), place, startNs + i * 16_000_000L).forEach { typed += it.label } }
+        for (hgt in heights) t.update(arrayOf(null, hand(key, hgt, measured = measured)), place, resultNs).forEach { typed += it.label }
         return typed
     }
 
-    @Test fun aTapTypesOneKeyEvenWhileTheFingerRestsOnTheTable() {
-        val t = TableTyping(layout)
-        val frames = listOf(0.04f, 0.03f, 0.015f, 0.004f, 0.002f, 0.003f, 0.002f, 0.004f, 0.003f, 0.02f, 0.04f).map { hand("g", it) }
-        assertEquals(listOf("g"), typeSequence(t, frames))
+    @Test fun aRealTapTypesOnce() {
+        // comes down fast, hits the table, rests there, lifts
+        assertEquals(listOf("g"), type(TableTyping(layout), listOf(0.05f, 0.045f, 0.03f, 0.015f, 0.002f, 0.002f, 0.002f, 0.003f, 0.002f, 0.03f, 0.05f)))
     }
 
-    @Test fun twoTapsTypeTwiceButJitterAtTheSurfaceDoesNot() {
-        val t = TableTyping(layout)
-        // down, wobble around the press height (not lifted enough), up, down again
-        val hs = listOf(0.04f, 0.005f, 0.016f, 0.008f, 0.018f, 0.006f, 0.04f, 0.045f, 0.045f, 0.045f, 0.005f, 0.04f)
-        val typed = typeSequence(t, hs.map { hand("e", it) }, startNs = 0L)
-        assertEquals(listOf("e", "e"), typed)
+    @Test fun comingCloseWithoutTappingTypesNothing() {
+        // hovers just above the keys, even dipping to 1 cm, but never comes down and stops
+        assertEquals(emptyList<String>(), type(TableTyping(layout), listOf(0.05f, 0.04f, 0.03f, 0.025f, 0.02f, 0.016f, 0.013f, 0.011f, 0.010f, 0.011f, 0.012f, 0.03f)))
     }
 
-    @Test fun sameKeyBouncingWithinTheLockoutIsDropped() {
-        val t = TableTyping(layout)
-        t.releaseH = 0.014f; t.minDrop = 0.002f
-        // an unrealistically fast bounce (lift and land within 60 ms) on the same key
-        val hs = listOf(0.04f, 0.005f, 0.02f, 0.005f)
-        assertEquals(listOf("r"), typeSequence(t, hs.map { hand("r", it) }))
+    @Test fun loweringTheFingerSlowlyOntoTheTableIsNotATap() {
+        val slow = (0..30).map { 0.04f - it * 0.0013f }  // 4 cm in a second
+        assertEquals(emptyList<String>(), type(TableTyping(layout), slow + listOf(0.001f, 0.001f)))
     }
 
-    @Test fun neighbourFingerBrushingTheTableIsNotAKey() {
+    @Test fun twoTapsTypeTwice() {
+        val tap = listOf(0.045f, 0.03f, 0.015f, 0.002f, 0.002f)
+        val lift = listOf(0.02f, 0.035f, 0.05f, 0.05f)
+        assertEquals(listOf("e", "e"), type(TableTyping(layout), listOf(0.05f) + tap + lift + tap, key = "e"))
+    }
+
+    @Test fun withoutDepthAModelTapIsConfirmedOnTheNextResult() {
+        assertEquals(listOf("g"), type(TableTyping(layout), listOf(0.05f, 0.045f, 0.03f, 0.018f, 0.006f, 0.006f, 0.006f, 0.03f), measured = false))
+        // the finger bounced straight back up: not confirmed
+        assertEquals(emptyList<String>(), type(TableTyping(layout), listOf(0.05f, 0.045f, 0.03f, 0.018f, 0.006f, 0.006f, 0.03f, 0.05f), measured = false))
+    }
+
+    @Test fun onlyEnabledFingersType() {
+        val t = TableTyping(layout).apply { enabled = setOf(2) }  // middle only
+        assertEquals(emptyList<String>(), type(t, listOf(0.05f, 0.045f, 0.03f, 0.015f, 0.002f, 0.002f)))
+    }
+
+    @Test fun neighbourFingerOnTheTableDoesNotTypeFromTheSameTouch() {
         val t = TableTyping(layout)
-        // index and middle land together; the index is lower and wins, the middle is suppressed
-        val frames = listOf(hand("t", 0.04f, 0.04f), hand("t", 0.003f, 0.008f), hand("t", 0.002f, 0.006f), hand("t", 0.04f, 0.04f))
-        assertEquals(listOf("t"), typeSequence(t, frames))
+        val typed = ArrayList<String>()
+        for ((i, m) in listOf(0.05f, 0.045f, 0.03f, 0.015f, 0.002f, 0.002f, 0.002f).zip(listOf(0.05f, 0.045f, 0.03f, 0.016f, 0.004f, 0.004f, 0.004f)))
+            t.update(arrayOf(null, hand("t", i, middleH = m)), place, resultNs).forEach { typed += it.label }
+        assertEquals(listOf("t"), typed)
+    }
+
+    @Test fun withMeasurementNoiseHoveringDoesNotTypeAndTapsStillDo() {
+        val rnd = java.util.Random(5)
+        fun noisy(h: Float, sd: Float) = h + (rnd.nextGaussian() * sd).toFloat()
+        for ((sd, measured) in listOf(0.002f to true, 0.004f to false)) {
+            // 10 s hovering 2-3 cm above the keys
+            val hover = (0 until 300).map { noisy(0.025f + 0.005f * kotlin.math.sin(it * 0.2f), sd) }
+            val falseKeys = type(TableTyping(layout), hover, measured = measured).size
+            // 20 taps
+            var taps = 0
+            val t = TableTyping(layout)
+            repeat(20) {
+                val seq = listOf(0.05f, 0.045f, 0.03f, 0.015f, 0.003f, 0.003f, 0.003f, 0.02f, 0.04f, 0.05f, 0.05f).map { noisy(it, sd) }
+                taps += type(t, seq, measured = measured).size
+            }
+            println("noise ${sd * 1000} mm (${if (measured) "Depth API" else "model"}): $falseKeys false keys in 10 s hovering, $taps/20 taps typed")
+            assertTrue("false keys $falseKeys", falseKeys == 0)
+            assertTrue("taps $taps", taps >= 18)
+        }
     }
 
     @Test fun hoverHighlightsTheKeyUnderTheFingertip() {
         val t = TableTyping(layout)
-        t.update(arrayOf(null, hand("k", 0.03f)), booleanArrayOf(false, false), place, 0L)
+        t.update(arrayOf(null, hand("k", 0.03f)), place, 0L)
         assertTrue(t.hovered.contains(layout.keys.first { it.label == "k" }.id))
     }
 

@@ -130,9 +130,8 @@ class TableKeyboardView(
                 val dt = if (lastFrameNs == 0L) 0f else ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.1f)
                 val step = (heightTarget - heightOffset) * (1f - kotlin.math.exp(-dt / 0.8f))
                 heightOffset += step; placement.center.y += step
-                val joints = arrayOf(hands[0].takeIf { it.isUsable }?.joints, hands[1].takeIf { it.isUsable }?.joints)
-                val uncertain = booleanArrayOf(hands[0].depthSource == DepthSource.HAND_SIZE_PRIOR, hands[1].depthSource == DepthSource.HAND_SIZE_PRIOR)
-                for (key in typing.update(joints, uncertain, placement, now)) press(key, now)
+                typing.enabled = com.hyperxr.HyperXRApp.instance.settings.current.handTracking.tableFingers
+                for (key in typing.update(arrayOf(hands[0], hands[1]), placement, now)) press(key, now)
                 if (surface.signature() != surface.drawn) surface.dirty = true
             }
         }
@@ -272,7 +271,7 @@ class TableKeyboardView(
     }
 
     // ------------------------------------------------------------------ controls
-    inner class Controls : XrPanel(0.46f, 0.26f, title = "Teclado na mesa") {
+    inner class Controls : XrPanel(0.5f, 0.34f, title = "Teclado na mesa") {
         var shownStatus = ""
         init { priority = 2 }
 
@@ -292,6 +291,17 @@ class TableKeyboardView(
                 val preview = typed.toString().takeLast(34)
                 c.paragraph(if (preview.isEmpty()) "(o texto digitado aparece aqui)" else preview, 28f, XrTheme.text)
             }
+            // which fingers type (saved in the settings)
+            val settings = com.hyperxr.HyperXRApp.instance.settings
+            val fingers = settings.current.handTracking.tableFingers
+            val fw = (c.w - 2 * c.pad - 4 * 10f) / 5
+            FINGER_NAMES.forEachIndexed { f, name ->
+                c.button("finger$f", name, c.pad + f * (fw + 10f), c.h - 196f, fw, 80f, accent = f in fingers) {
+                    val next = if (f in fingers) fingers - f else fingers + f
+                    if (next.isNotEmpty()) settings.update { it.copy(handTracking = it.handTracking.copy(tableFingers = next)) }
+                    typing.reset(); dirty = true
+                }
+            }
             val bw = (c.w - 2 * c.pad - 3 * 10f) / 4
             val y = c.h - 96f
             var x = c.pad
@@ -307,6 +317,7 @@ class TableKeyboardView(
         private const val HOLD_NS = 1_000_000_000L
         private const val FLASH_NS = 160_000_000L
         private val HOVER = Color.rgb(122, 92, 190)
+        val FINGER_NAMES = listOf("Polegar", "Indicador", "Médio", "Anelar", "Mínimo")
         private val PRESSED = Color.rgb(196, 160, 255)
     }
 }

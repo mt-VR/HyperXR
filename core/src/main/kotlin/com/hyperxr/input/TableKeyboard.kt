@@ -1,6 +1,7 @@
 package com.hyperxr.input
 
 import com.hyperxr.handtracking.HandJoint
+import com.hyperxr.handtracking.HandState
 import com.hyperxr.math.Pose
 import com.hyperxr.math.Quat
 import com.hyperxr.math.Vec3
@@ -158,32 +159,58 @@ object TableDetector {
 }
 
 /**
- * Typing on the table with the fingertips. Each finger has its own state: it presses when its tip
- * comes down to the table (after being lifted) and must lift again before it can press another
- * key. Duplicate keys are prevented three ways: a finger types once per touch, the same key is not
- * accepted twice within [sameKeyNs] whichever finger touched it, and when two fingers of one hand
- * land in the same frame only the lower one counts (the neighbour that brushed the table is not a
- * key press).
+ * Typing on the table: HyperXR's own contact detector. A key is typed only when a fingertip really
+ * taps the table, not when it merely comes close. Each new camera result is checked for the two
+ * physical signs of a tap, both required:
+ *  1. contact: the fingertip is at the table. With the ARCore Depth API this is measured, the
+ *     depth map read on the fingertip itself (HandState.measuredTips); without it, the hand
+ *     model's fingertip is used with wider margins;
+ *  2. impact: the fingertip was coming down and stopped abruptly. A finger hitting a hard surface
+ *     decelerates within one camera frame; a finger lowered slowly or hovering never does.
+ * Plus: the finger must have come down from higher up (and lift again before its next key), the
+ * same key is never accepted twice within [sameKeyNs], and when two fingers of one hand land in the
+ * same result only the lower one counts. Only the fingers in [enabled] type (0 thumb .. 4 pinky);
+ * the thumb only ever types the space bar.
+ *
+ * The hand landmarks themselves come from the hand tracking engine (on the NPU with the NPU
+ * engine). The motion is read on the raw per-result fingertips: smoothing would blur the stop.
  */
 class TableTyping(val layout: TableKeyLayout) {
-    /** Height of the fingertip centre above the table (metres) that counts as touching, and lifted. */
-    var pressH = 0.012f
-    var releaseH = 0.024f
-    /** With depth from the hand-size prior the heights are wider by this factor. */
-    var uncertainScale = 1.6f
-    /** The finger must have come down at least this much (from its height after lifting). */
+    /** Fingertip height above the table that counts as contact (measured / model-only). */
+    var contactMeasuredM = 0.014f
+    var contactModelM = 0.013f
+    /** Height to lift above before the same finger can type again. */
+    var releaseM = 0.022f
+    /** It must have come down at least this much since it was last lifted. */
     var minDrop = 0.012f
+    /** Downward speed before the stop, and how much of it must be gone after (the impact). */
+    var descentSpeed = 0.10f
+    var stopFraction = 0.4f
+    /** A model-only tap is not confirmed when the finger is already rising faster than this. */
+    var confirmRiseSpeed = 0.25f
     var sameKeyNs = 140_000_000L
     /** How far above a key a fingertip highlights it. */
     var hoverH = 0.05f
-    /** Fingertip radius: the joint is at the centre of the fingertip, the pad touches the table. */
+    /** The fingertip joint is at the centre of the fingertip; the pad is this far below it. */
     var tipRadius = 0.007f
+    /** The depth map sees the top of the finger: about this far above the pad. */
+    var fingerThickness = 0.012f
+    /** Fingers that type (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */
+    var enabled: Set<Int> = setOf(1, 2)
 
-    /** The fingers that type: thumb (space), index, middle, ring of each hand. */
-    val fingers = intArrayOf(HandJoint.THUMB_TIP, HandJoint.INDEX_TIP, HandJoint.MIDDLE_TIP, HandJoint.RING_TIP)
-
-    private class Finger { var down = false; var peak = Float.NaN; var key: TableKeyLayout.Key? = null; var over: TableKeyLayout.Key? = null }
-    private val state = Array(2) { Array(4) { Finger() } }
+    private class Finger {
+        val t = LongArray(4); val h = FloatArray(4); var n = 0
+        var down = false; var peak = Float.NaN; var key: TableKeyLayout.Key? = null; var over: TableKeyLayout.Key? = null
+        /** Model-only taps wait for the next result to confirm the finger stays on the table. */
+        var pending = false
+        fun push(ts: Long, height: Float) {
+            for (i in 3 downTo 1) { t[i] = t[i - 1]; h[i] = h[i - 1] }
+            t[0] = ts; h[0] = height; if (n < 4) n++
+        }
+        fun clear() { n = 0; down = false; peak = Float.NaN; key = null; over = null; pending = false }
+    }
+    private val state = Array(2) { Array(5) { Finger() } }
+    private val lastResult = LongArray(2)
     private var lastKey: TableKeyLayout.Key? = null
     private var lastKeyNs = Long.MIN_VALUE / 2
     private val local = Vec3()
@@ -192,54 +219,83 @@ class TableTyping(val layout: TableKeyLayout) {
     val hovered = HashSet<String>()
     val held = HashSet<String>()
 
-    fun reset() {
-        for (h in state) for (f in h) { f.down = false; f.peak = Float.NaN; f.key = null; f.over = null }
-        hovered.clear(); held.clear()
-    }
+    fun reset() { for (h in state) for (f in h) f.clear(); lastResult.fill(0L); hovered.clear(); held.clear() }
 
-    /**
-     * One frame. [hands] holds each hand's joints (null = not tracked). Returns the keys pressed
-     * this frame (normally zero or one).
-     */
-    fun update(hands: Array<Array<Vec3>?>, uncertain: BooleanArray, place: TablePlacement, now: Long): List<TableKeyLayout.Key> {
+    private fun tip(f: Int) = 4 + f * 4
+
+    /** Height of finger [f]'s pad above the table in this camera result, and whether it was measured. */
+    private fun resultHeight(hand: HandState, f: Int, place: TablePlacement): Pair<Float, Boolean> =
+        if (hand.measuredTipValid[f]) {
+            place.toLocal(hand.measuredTips[f], local); (local.y - fingerThickness) to true
+        } else {
+            place.toLocal(hand.rawTips[f], local); (local.y - tipRadius) to false
+        }
+
+    /** One display frame; returns the keys typed (normally none or one). */
+    fun update(hands: Array<HandState?>, place: TablePlacement, now: Long): List<TableKeyLayout.Key> {
         hovered.clear(); held.clear()
         if (!place.valid) return emptyList()
         val out = ArrayList<TableKeyLayout.Key>(1)
         for (hi in 0..1) {
-            val joints = hands[hi]
+            val hand = hands[hi]
             val st = state[hi]
-            if (joints == null) { st.forEach { it.down = false; it.peak = Float.NaN; it.key = null }; continue }
-            val k = if (uncertain[hi]) uncertainScale else 1f
-            var cand = -1; var candH = Float.MAX_VALUE; var candKey: TableKeyLayout.Key? = null
-            for ((fi, joint) in fingers.withIndex()) {
-                val f = st[fi]
-                place.toLocal(joints[joint], local)
-                val h = local.y - tipRadius
-                val key = layout.keyAtSticky(local.x, local.z, f.over)
-                f.over = key
-                // the thumb only types the space bar (it rests near it while the fingers type)
-                val usable = key != null && (joint != HandJoint.THUMB_TIP || key.kind == TableKeyLayout.Kind.SPACE)
-                if (f.down) {
-                    f.key?.let { held += it.id }
-                    if (h > releaseH * k) { f.down = false; f.peak = h; f.key = null }
+            if (hand == null || !hand.isUsable) { st.forEach { it.clear() }; lastResult[hi] = 0L; continue }
+            // where each fingertip is over the keyboard: the smoothed hand drawn on screen
+            for (f in 0 until 5) {
+                val fs = st[f]
+                if (f !in enabled) { fs.clear(); continue }
+                place.toLocal(hand.joints[tip(f)], local)
+                val key = layout.keyAtSticky(local.x, local.z, fs.over)
+                fs.over = if (key != null && (f != 0 || key.kind == TableKeyLayout.Kind.SPACE)) key else null
+                if (fs.down) fs.key?.let { held += it.id }
+                else if (fs.over != null && local.y - tipRadius < hoverH) hovered += fs.over!!.id
+            }
+            // contact and impact are judged once per camera result
+            if (hand.resultNs == 0L || hand.resultNs == lastResult[hi]) continue
+            lastResult[hi] = hand.resultNs
+            var cand = -1; var candH = Float.MAX_VALUE
+            for (f in 0 until 5) {
+                if (f !in enabled) continue
+                val fs = st[f]
+                val (h, measured) = resultHeight(hand, f, place)
+                fs.push(hand.resultNs, h)
+                if (fs.down) {
+                    if (h > releaseM) { fs.down = false; fs.key = null; fs.peak = h }
                     continue
                 }
-                f.peak = if (f.peak.isNaN()) h else maxOf(f.peak, h)
-                if (usable && h < hoverH) hovered += key!!.id
-                if (usable && h < pressH * k && f.peak - h >= minDrop && h < candH) { cand = fi; candH = h; candKey = key }
+                fs.peak = if (fs.peak.isNaN()) h else maxOf(fs.peak, h)
+                if (fs.over == null || fs.n < 3) { fs.pending = false; continue }
+                val contact = h < if (measured) contactMeasuredM else contactModelM
+                if (fs.pending) {
+                    // confirmation of a model-only tap: still on the table and not moving away
+                    fs.pending = false
+                    val v = (fs.h[0] - fs.h[1]) / ((fs.t[0] - fs.t[1]) / 1e9f).coerceAtLeast(1e-3f)
+                    if (contact && v < confirmRiseSpeed && h < candH) { cand = f; candH = h }
+                    continue
+                }
+                val dropped = fs.peak - h >= minDrop
+                val dt1 = ((fs.t[1] - fs.t[2]) / 1e9f).coerceAtLeast(1e-3f)
+                val dt0 = ((fs.t[0] - fs.t[1]) / 1e9f).coerceAtLeast(1e-3f)
+                val vBefore = (fs.h[1] - fs.h[2]) / dt1   // negative = coming down
+                val vNow = (fs.h[0] - fs.h[1]) / dt0
+                // coming down fast one result earlier, (nearly) stopped now
+                val impact = vBefore < -descentSpeed && vNow > vBefore * stopFraction
+                if (contact && dropped && impact) {
+                    // measured by the Depth API: typed now; estimated by the hand model (noisier):
+                    // one more camera result must show the finger staying on the table
+                    if (measured) { if (h < candH) { cand = f; candH = h } } else fs.pending = true
+                }
             }
             if (cand >= 0) {
-                val f = st[cand]
-                f.down = true; f.key = candKey; f.peak = Float.NaN
-                val key = candKey!!
-                if (!(key === lastKey && now - lastKeyNs < sameKeyNs)) {
-                    out += key; lastKey = key; lastKeyNs = now
-                }
+                val fs = st[cand]
+                val key = fs.over!!
+                fs.down = true; fs.key = key; fs.peak = Float.NaN
+                if (!(key === lastKey && now - lastKeyNs < sameKeyNs)) { out += key; lastKey = key; lastKeyNs = now }
                 held += key.id
-                // the other fingers of this hand that are also on the table now cannot fire from this touch
-                for ((fi, other) in st.withIndex()) if (fi != cand) {
-                    place.toLocal(joints[fingers[fi]], local)
-                    if (local.y - tipRadius < pressH * k) { other.down = true; other.key = null; other.peak = Float.NaN }
+                // the other fingers of this hand that are on the table too do not type from this touch
+                for (f in 0 until 5) if (f != cand && f in enabled) {
+                    val o = st[f]
+                    if (!o.down && o.n > 0 && o.h[0] < contactModelM) { o.down = true; o.key = null; o.peak = Float.NaN }
                 }
             }
         }
