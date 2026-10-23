@@ -362,3 +362,17 @@ NPU sobre os quadros que o hand tracking analisa; a classe "pele do corpo", limi
 mãos rastreadas (com o antebraço), vira uma máscara. Depois que a interface é desenhada, a imagem
 da câmera é desenhada de novo através dessa máscara: as suas mãos de verdade aparecem na frente dos
 painéis e janelas. A máscara tem até um quadro de atraso em movimentos rápidos (borda fantasma).
+
+## Mãos no estilo de headset, recorte só da mão, GPU+NPU+CPU, configurações estilo Quest
+- **Mãos:** contorno fino claro e preenchimento escuro translúcido, o antebraço sumindo; sem
+  brilho e descartando tudo fora da mão (mais leve de desenhar).
+- **Recorte da mão:** a máscara da IA vale só dentro do formato da mão tirado dos 21 pontos
+  rastreados (dedos como cápsulas, palma, um pedaço do pulso) e com limite mais alto: o fundo em
+  volta (mesmo da cor da pele), o braço e as pernas não aparecem mais por cima da interface.
+- **Processadores juntos:** com o motor de mãos na NPU, o recorte roda na GPU (delegate de GPU do
+  LiteRT); com o MediaPipe na GPU, o recorte vai para a NPU; a profundidade por IA fica na NPU; o
+  formato da mão e o pós-processamento rodam na CPU. A CPU continua como último recurso de cada um.
+- **Configurações:** busca no topo, grade de blocos (Sistema, Wi-Fi, Limite, Personalização,
+  Armazenamento, Apps, Notificações, Mãos e controles, Acessibilidade, Privacidade, Experimental)
+  com ícone, nome e resumo; cada um abre sua página de chaves e ações; faixa de baixo com fechar,
+  minimizar e o nome. Todas as chaves são configurações reais do HyperXR.

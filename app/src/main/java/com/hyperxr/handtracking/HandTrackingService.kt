@@ -362,6 +362,7 @@ class HandTrackingService(private val context: Context) {
     @Volatile private var maskStarted: Boolean? = null
     private var lastMaskNs = 0L
     private val maskWork = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+    private val maskWhere = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
     /**
      * The latest hand mask: HandMaskEngine.SIZE squared bytes (0 = not hand, 255 = hand), in the
      * camera's raw CPU-image orientation, and a counter that changes with each new mask.
@@ -378,30 +379,20 @@ class HandTrackingService(private val context: Context) {
         lastMaskNs = now
         val src = slot.bitmap ?: run { maskBusy.set(false); return }
         val small = Bitmap.createScaledBitmap(src, HandMaskEngine.SIZE, HandMaskEngine.SIZE, true)
-        // each hand's box, grown by 45% (fingers spread, the forearm)
-        val boxes = seen.map { side ->
-            val img = sideImage.getValue(side)
-            var minX = 1f; var minY = 1f; var maxX = 0f; var maxY = 0f
-            for (j in 0 until HandJoint.COUNT) {
-                minX = minOf(minX, img[j * 3]); maxX = maxOf(maxX, img[j * 3]); minY = minOf(minY, img[j * 3 + 1]); maxY = maxOf(maxY, img[j * 3 + 1])
-            }
-            val gw = (maxX - minX) * 0.45f; val gh = (maxY - minY) * 0.45f
-            floatArrayOf(minX - gw, minY - gh, maxX + gw, maxY + gh)
-        }
+        val hands = seen.map { sideImage.getValue(it).copyOf() }
+        val aspect = src.width.toFloat() / src.height
         val flip = slot.rotation180
+        val preferGpu = npu != null  // the NPU is busy with the hands: the mask goes to the GPU
         maskThread.execute {
             try {
-                if (maskStarted == null) maskStarted = maskEngine.start()
-                if (maskStarted == true && maskEngine.run(small, maskWork)) {
-                    val n = HandMaskEngine.SIZE
+                if (maskStarted == null) maskStarted = maskEngine.start(preferGpu)
+                val n = HandMaskEngine.SIZE
+                // only inside the hands' shape (from the landmarks): no background, no arm, no legs
+                java.util.Arrays.fill(maskWhere, 0)
+                for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere)
+                if (maskStarted == true && maskEngine.run(small, maskWhere, maskWork)) {
                     val out = ByteArray(n * n)
-                    // only around the tracked hands (with the forearm): skin elsewhere (legs, face) stays behind the UI
-                    for (y in 0 until n) for (x in 0 until n) {
-                        val nx = (x + 0.5f) / n; val ny = (y + 0.5f) / n
-                        if (boxes.none { b -> nx > b[0] && nx < b[2] && ny > b[1] && ny < b[3] }) continue
-                        val dst = if (flip) (n - 1 - y) * n + (n - 1 - x) else y * n + x
-                        out[dst] = maskWork[y * n + x]
-                    }
+                    if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = maskWork[i] else System.arraycopy(maskWork, 0, out, 0, n * n)
                     handMask = out; handMaskSeq++
                 }
             } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { small.recycle(); maskBusy.set(false) }

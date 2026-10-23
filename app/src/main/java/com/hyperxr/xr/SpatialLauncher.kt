@@ -606,7 +606,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private fun openSystem(target: String) {
         val head = ctx.input.head
         val w: XrPanel = when (target) {
-            "settings" -> QuickSettingsPanel(this) { openSystem(it) }
+            "settings" -> SettingsHubPanel(this) { openSystem(it) }
             "library" -> { if (!libraryOpen()) toggleLibrary(); return }
             "environments" -> EnvironmentsPanel(this)
             "files" -> com.hyperxr.files.FilesPanel(this)

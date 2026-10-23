@@ -6,8 +6,9 @@ import com.hyperxr.handtracking.HandState
 import com.hyperxr.handtracking.TrackingState
 
 /**
- * The hands as a lilac outline: a thin bright line along the hand's silhouette with a short lilac
- * glow, nothing inside, open at the bottom where it runs down past the wrist.
+ * The hands as a headset draws them: a thin light outline and a see-through dark fill, the
+ * forearm fading out below the wrist. No glow, and every fragment outside the hand
+ * is discarded right away, so it is cheap to draw.
  *
  * One pass per hand, no intermediate texture: the joints are projected onto a plane at the hand's
  * depth, a quad covering them is drawn on that plane, and its fragment shader evaluates the hand
@@ -25,7 +26,7 @@ class HandAura {
     private val plane = FloatArray(HandJoint.COUNT * 2)
 
     /** 0..1 overall strength (the settings slider). */
-    var opacity = 0.8f
+    var opacity = 1f
 
     fun init() {
         prog = Gl.compile(VS, FS, "hand-aura")
@@ -110,14 +111,14 @@ class HandAura {
             minX = minOf(minX, x); maxX = maxOf(maxX, x); minY = minOf(minY, y); maxY = maxOf(maxY, y)
         }
         // room for the finger thickness and the glow
-        val margin = 0.03f
+        val margin = 0.015f
         minX -= margin; minY -= margin; maxX += margin; maxY += margin
         // the forearm part of the outline runs below the wrist
         val wx = plane[HandJoint.WRIST * 2]; val wy = plane[HandJoint.WRIST * 2 + 1]
         val ax = plane[HandJoint.MIDDLE_MCP * 2] - wx; val ay = plane[HandJoint.MIDDLE_MCP * 2 + 1] - wy
         val al = kotlin.math.sqrt(ax * ax + ay * ay).coerceAtLeast(1e-4f)
         val fx = wx - ax / al * 0.1f; val fy = wy - ay / al * 0.1f
-        minX = minOf(minX, fx - 0.06f); maxX = maxOf(maxX, fx + 0.06f); minY = minOf(minY, fy - 0.06f); maxY = maxOf(maxY, fy + 0.06f)
+        minX = minOf(minX, fx - 0.04f); maxX = maxOf(maxX, fx + 0.04f); minY = minOf(minY, fy - 0.04f); maxY = maxOf(maxY, fy + 0.04f)
         quad.clear()
         quad.put(minX).put(minY).put(planeZ)
         quad.put(maxX).put(minY).put(planeZ)
@@ -197,18 +198,20 @@ float hand(vec2 p) {
 void main() {
     float d = hand(vP);
     float aa = max(uPx, 1e-4);
-    // only the outline: a thin bright core with a short lilac glow on both sides, nothing inside
-    float lineW = max(0.0009, 1.2 * aa);
-    float core = 1.0 - smoothstep(lineW * 0.5, lineW * 0.5 + aa, abs(d));
-    float glow = exp(-abs(d) / 0.0032);
-    // open at the bottom: the lines fade out a few centimetres below the wrist
+    // outside the hand: nothing to draw (most of the quad), so it costs nothing more
+    if (d > aa * 1.5) discard;
+    // like a headset's hands: a thin light outline and a see-through dark fill, no glow
+    float lineW = max(0.0010, 1.3 * aa);
+    float inside = clamp(0.5 - d / aa, 0.0, 1.0);
+    float rim = 1.0 - smoothstep(lineW * 0.5, lineW * 0.5 + aa, abs(d + lineW * 0.5));
+    // the forearm fades out a few centimetres below the wrist
     vec2 ax = uJ[9] - uJ[0];
     float below = -dot(vP - uJ[0], ax / max(length(ax), 1e-4));
-    float keep = 1.0 - smoothstep(0.015, 0.06, below);
-    vec3 white = vec3(0.93, 0.85, 1.0);
-    vec3 lilac = vec3(0.72, 0.48, 1.0);
-    float a = clamp(core + glow * 0.55, 0.0, 1.0) * keep * uAlpha;
-    vec3 c = (white * core + lilac * glow * 0.95) * keep * uAlpha;
+    float keep = 1.0 - smoothstep(0.01, 0.08, below);
+    float fillA = inside * (1.0 - rim) * 0.32;
+    float lineA = rim * 0.85;
+    float a = (lineA + fillA) * keep * uAlpha;
+    vec3 c = vec3(0.92) * lineA * keep * uAlpha;   // premultiplied: light line, black fill
     fragColor = vec4(c, a);
 }"""
     }

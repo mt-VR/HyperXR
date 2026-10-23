@@ -115,6 +115,9 @@ dependencies {
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.litert)
+    // GPU delegate: the hand mask runs on the GPU while the NPU does hands and depth
+    implementation(libs.litert.gpu)
+    implementation(libs.litert.gpu.api)
     // native YouTube: NewPipe Extractor built from source, played with Media3 ExoPlayer
     implementation(project(":newpipe"))
     implementation(libs.media3.exoplayer)

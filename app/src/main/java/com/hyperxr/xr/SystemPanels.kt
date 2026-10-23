@@ -73,7 +73,7 @@ class QuickSettingsPanel(private val a: LauncherActions, private val open: (Stri
         c.paragraph(a.handStatus, 22f)
         c.toggle("mode", "Launcher no modo New", a.mode() == LauncherMode.NEW) { a.setMode(if (it) LauncherMode.NEW else LauncherMode.DOCK); dirty = true }
         val hv = s.current.handTracking.handVisual
-        c.row("handvis", "Mãos: " + if (hv == com.hyperxr.settings.HandVisual.NONE) "ocultas" else "aura lilás") {
+        c.row("handvis", "Mãos: " + if (hv == com.hyperxr.settings.HandVisual.NONE) "ocultas" else "contorno") {
             val next = if (hv == com.hyperxr.settings.HandVisual.NONE) com.hyperxr.settings.HandVisual.AURA else com.hyperxr.settings.HandVisual.NONE
             s.update { it.copy(handTracking = it.handTracking.copy(handVisual = next)) }; dirty = true
         }

@@ -220,7 +220,7 @@ fun HandsSection(a: MainActivity) {
             a.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }
         }
         ChoiceRow("Visual das mãos", listOf(com.hyperxr.settings.HandVisual.AURA, com.hyperxr.settings.HandVisual.NONE), h.handVisual, {
-            if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Aura lilás"
+            if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Contorno"
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }
         ToggleRow("Apontar com a bolinha", h.ballPointer, "Ligado: clica no que está sob a bolinha, como você vê. Desligado: raio que sai do ombro") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(ballPointer = v)) }
@@ -229,7 +229,7 @@ fun HandsSection(a: MainActivity) {
         Note("Maior = alcança janelas altas com a mão mais baixa. Se o cursor ficar preso na dock, aumente.")
         SliderRow("Filtro de Kalman: resposta", h.kalmanProcessNoise, 0.3f..30f, { "%.1f".format(it) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(kalmanProcessNoise = v)) } }
         Note("Kalman menor = mais suave; maior = segue movimentos rápidos. O One Euro abaixo remove o tremor restante.")
-        SliderRow("Intensidade da aura", h.auraOpacity, 0.2f..1f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
+        SliderRow("Intensidade do contorno", h.auraOpacity, 0.2f..1f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(auraOpacity = v)) } }
         SliderRow("Comprimento da sua mão (punho até a ponta do dedo médio)", h.handLengthCm, 14f..23f, { "%.1f cm".format(it) }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(handLengthCm = v)) }
         }
