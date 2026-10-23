@@ -476,6 +476,9 @@ class XrEngine(
         // real hands in front of the UI (mixed reality): camera pixels where the NPU mask sees a hand
         if (camera != null && scene.background == Background.PASSTHROUGH && maskTex != 0 && hands.handMask != null)
             renderer.drawHandCutout(eye, camera, maskTex)
+        // someone walked up while you are in a virtual environment: they show through it
+        if (camera != null && scene.background != Background.PASSTHROUGH && personTex != 0 && hands.personMask != null)
+            renderer.drawHandCutout(eye, camera, personTex)
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
         if (visual != com.hyperxr.settings.HandVisual.NONE) {
@@ -494,20 +497,35 @@ class XrEngine(
     private var maskSeq = -1
     private val maskBuf = java.nio.ByteBuffer.allocateDirect(com.hyperxr.handtracking.HandMaskEngine.SIZE * com.hyperxr.handtracking.HandMaskEngine.SIZE)
 
-    /** Turns the NPU hand mask on in mixed reality and uploads each new mask (R8 texture). */
+    private var personTex = 0
+    private var personSeq = -1
+
+    /**
+     * Turns the NPU hand mask on in mixed reality (and the people mask inside virtual
+     * environments) and uploads each new mask (R8 texture).
+     */
     private fun updateHandMask() {
         val want = settings.handTracking.handOcclusion && input.handsAvailable &&
             scene.background == Background.PASSTHROUGH && ctx.passthroughAvailable
         hands.handMaskEnabled = want
-        if (!want) return
-        val seq = hands.handMaskSeq
-        if (seq == maskSeq) return
-        maskSeq = seq
-        val m = hands.handMask ?: return
+        hands.personMaskEnabled = settings.graphics.peopleBreakthrough && input.handsAvailable &&
+            scene.background != Background.PASSTHROUGH && ctx.passthroughAvailable
+        if (want && hands.handMaskSeq != maskSeq) {
+            maskSeq = hands.handMaskSeq
+            hands.handMask?.let { maskTex = uploadMask(maskTex, it) }
+        }
+        if (hands.personMaskSeq != personSeq) {
+            personSeq = hands.personMaskSeq
+            hands.personMask?.let { personTex = uploadMask(personTex, it) }
+        }
+    }
+
+    private fun uploadMask(texture: Int, m: ByteArray): Int {
         val n = com.hyperxr.handtracking.HandMaskEngine.SIZE
-        if (maskTex == 0) {
-            maskTex = com.hyperxr.rendering.Gl.genTexture()
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskTex)
+        var tex = texture
+        if (tex == 0) {
+            tex = com.hyperxr.rendering.Gl.genTexture()
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -515,10 +533,11 @@ class XrEngine(
             GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R8, n, n, 0, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, null)
         }
         maskBuf.clear(); maskBuf.put(m); maskBuf.flip()
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskTex)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
         GLES30.glTexSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, n, n, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, maskBuf)
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+        return tex
     }
     private val headMatrix = FloatArray(16)
     private val eyeOffset = Vec3()

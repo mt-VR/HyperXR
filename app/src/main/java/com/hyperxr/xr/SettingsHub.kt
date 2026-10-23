@@ -59,11 +59,13 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
         )),
         Category("guardian", "fence", "Limite", "Aviso de limite, passthrough", listOf(
             Item.Toggle("Aviso de limite", "Mostra a câmera perto de obstáculos (ARCore Depth)", { it.graphics.vrBoundary }) { s, v -> s.copy(graphics = s.graphics.copy(vrBoundary = v)) },
+            Item.Toggle("Pessoas atravessam o ambiente", "Quem chegar perto aparece pela câmera (IA na NPU/GPU)", { it.graphics.peopleBreakthrough }) { s, v -> s.copy(graphics = s.graphics.copy(peopleBreakthrough = v)) },
             Item.Toggle("Câmera preenchendo a visão", "Passthrough sem bordas", { it.graphics.passthroughFill }) { s, v -> s.copy(graphics = s.graphics.copy(passthroughFill = v)) },
             Item.Toggle("3D na realidade mista", "Distância entre os olhos sobre a câmera", { it.graphics.stereoInMixedReality }) { s, v -> s.copy(graphics = s.graphics.copy(stereoInMixedReality = v)) },
         )),
         Category("personalization", "edit", "Personalização", "Ambiente virtual", listOf(
             Item.Action("Ambientes", "Escolher o ambiente ao seu redor") { open("environments") },
+            Item.Action("Capturar sua sala em 360°", "Gire no lugar e sua sala vira um ambiente") { open("roomcapture") },
             Item.Toggle("Ambiente pela hora do dia", "Troca sozinho de manhã, à tarde e à noite", { it.launcher.autoEnvironmentByTime }) { s, v -> s.copy(launcher = s.launcher.copy(autoEnvironmentByTime = v)) },
             Item.Toggle("Reabrir janelas", "As janelas da última vez voltam ao abrir", { it.launcher.restoreWindows }) { s, v -> s.copy(launcher = s.launcher.copy(restoreWindows = v)) },
         )),

@@ -42,6 +42,8 @@ data class GraphicsSettings(
     val stereoInMixedReality: Boolean = false,
     /** VR boundary warning: fade the camera in near real obstacles (needs ARCore Depth). */
     val vrBoundary: Boolean = true,
+    /** Inside a virtual environment, people walking into view show through (camera + segmenter). */
+    val peopleBreakthrough: Boolean = true,
     /** Distance in metres at which the boundary warning starts. */
     val boundaryDistanceM: Float = 1.0f,
     val theme: String = "aurora",

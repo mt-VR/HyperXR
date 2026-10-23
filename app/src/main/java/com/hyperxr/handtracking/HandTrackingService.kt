@@ -371,15 +371,34 @@ class HandTrackingService(private val context: Context) {
     @Volatile var handMaskSeq = 0; private set
     val handMaskDevice: String get() = maskEngine.device
 
+    /** People walking into view while inside a virtual environment (see PersonBreakthrough). */
+    @Volatile var personMaskEnabled = false
+    @Volatile var personMask: ByteArray? = null; private set
+    @Volatile var personMaskSeq = 0; private set
+    private val breakthrough = PersonBreakthrough(HandMaskEngine.SIZE)
+    private val maskLabels = ByteArray(HandMaskEngine.SIZE * HandMaskEngine.SIZE)
+
+    /**
+     * Every analysed camera frame with its intrinsics and camera pose (tracking space), for the
+     * room capture. Called on the hand tracking thread: copy what you need, the bitmap is reused.
+     */
+    @Volatile var frameTap: ((Bitmap, CameraIntrinsics, Pose) -> Unit)? = null
+
     private fun maybeRunHandMask(slot: Slot) {
-        if (!handMaskEnabled) return
-        if (seen.isEmpty()) { if (handMask != null) { handMask = null; handMaskSeq++ }; return }
+        frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p) } }
+        val wantHands = handMaskEnabled && seen.isNotEmpty()
+        val wantPeople = personMaskEnabled
+        if (!wantHands && handMask != null) { handMask = null; handMaskSeq++ }
+        if (!wantPeople && personMask != null) { personMask = null; personMaskSeq++ }
+        if (!wantHands && !wantPeople) return
         val now = System.nanoTime()
-        if (now - lastMaskNs < 30_000_000L || !maskBusy.compareAndSet(false, true)) return
+        // hands follow every frame they can; looking for people alone, ~8 times a second is plenty
+        val interval = if (wantHands) 30_000_000L else 120_000_000L
+        if (now - lastMaskNs < interval || !maskBusy.compareAndSet(false, true)) return
         lastMaskNs = now
         val src = slot.bitmap ?: run { maskBusy.set(false); return }
         val small = Bitmap.createScaledBitmap(src, HandMaskEngine.SIZE, HandMaskEngine.SIZE, true)
-        val hands = seen.map { sideImage.getValue(it).copyOf() }
+        val hands = if (wantHands) seen.map { sideImage.getValue(it).copyOf() } else emptyList()
         val aspect = src.width.toFloat() / src.height
         val flip = slot.rotation180
         val preferGpu = npu != null  // the NPU is busy with the hands: the mask goes to the GPU
@@ -388,12 +407,17 @@ class HandTrackingService(private val context: Context) {
                 if (maskStarted == null) maskStarted = maskEngine.start(preferGpu)
                 val n = HandMaskEngine.SIZE
                 // only inside the hands' shape (from the landmarks): no background, no arm, no legs
-                java.util.Arrays.fill(maskWhere, 0)
-                for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere)
-                if (maskStarted == true && maskEngine.run(small, maskWhere, maskWork)) {
-                    val out = ByteArray(n * n)
-                    if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = maskWork[i] else System.arraycopy(maskWork, 0, out, 0, n * n)
-                    handMask = out; handMaskSeq++
+                if (wantHands) { java.util.Arrays.fill(maskWhere, 0); for (h in hands) HandSilhouette.raster(h, aspect, n, maskWhere) }
+                if (maskStarted == true && maskEngine.run(small, if (wantHands) maskWhere else null, if (wantHands) maskWork else null, if (wantPeople) maskLabels else null)) {
+                    fun oriented(m: ByteArray) = ByteArray(n * n).also { out -> if (flip) for (i in 0 until n * n) out[n * n - 1 - i] = m[i] else System.arraycopy(m, 0, out, 0, n * n) }
+                    if (wantHands) { handMask = oriented(maskWork); handMaskSeq++ }
+                    if (wantPeople) {
+                        val m = breakthrough.update(maskLabels, System.nanoTime())
+                        val was = personMask
+                        personMask = m?.let(::oriented)
+                        if (m != null || was != null) personMaskSeq++
+                        if ((m != null) != (was != null)) Diagnostics.log(if (m != null) "Pessoa por perto: aparecendo no ambiente" else "Pessoa saiu de vista")
+                    }
                 }
             } catch (t: Throwable) { Diagnostics.log("Hand mask failed: ${t.message}") } finally { small.recycle(); maskBusy.set(false) }
         }

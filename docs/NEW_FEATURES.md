@@ -376,3 +376,26 @@ painéis e janelas. A máscara tem até um quadro de atraso em movimentos rápid
   Armazenamento, Apps, Notificações, Mãos e controles, Acessibilidade, Privacidade, Experimental)
   com ícone, nome e resumo; cada um abre sua página de chaves e ações; faixa de baixo com fechar,
   minimizar e o nome. Todas as chaves são configurações reais do HyperXR.
+
+## Pessoas atravessam o ambiente
+
+Dentro de um ambiente virtual (com a câmera ligada para o hand tracking), quem chegar perto
+aparece por cima do ambiente, recortado da imagem real, sem você precisar sair do VR. O mesmo
+segmentador que recorta as mãos (MediaPipe selfie multiclass, na NPU/GPU) classifica cada pixel
+em cabelo, pele, rosto, roupa e fundo. `PersonBreakthrough` (core) cresce a região da pessoa a
+partir dos pixels de rosto e cabelo, passando por pele e roupa. Como você nunca vê o próprio
+rosto, seu próprio corpo e suas mãos, quando olha para baixo, não aparecem. A pessoa só aparece
+depois de 2 análises seguidas, para não piscar, e continua visível por 0,7 s depois de sumir
+(alguém virando de costas). Sem mãos na frente, a análise roda cerca de 8 vezes por segundo.
+Fica em Ajustes > Limite > "Pessoas atravessam o ambiente".
+
+## Capturar sua sala em 360°
+
+Ajustes > Personalização > "Capturar sua sala em 360°". Você gira devagar no lugar; os quadros
+da câmera e a orientação da câmera em cada um são costurados num panorama equirretangular de
+2048x1024 (`PanoramaStitcher`, core), mostrado ao vivo com a porcentagem da esfera já vista.
+Cada pixel do panorama fica com o pixel de câmera que o viu mais perto do centro de um quadro,
+o que dá uma imagem mais nítida do que tirar a média de quadros que nunca se alinham perfeitamente.
+Quadros com a cabeça girando rápido (acima de ~60°/s) são ignorados por causa do borrão. Teto e
+chão não vistos são completados a partir da linha vista mais próxima. O resultado é salvo como
+ambiente pessoal e aplicado na hora; nada sai do celular.

@@ -73,9 +73,10 @@ class HandMaskEngine(private val context: Context) {
 
     /**
      * Body-skin probability (0..255) for [bmp] (SIZE x SIZE) into [out] (SIZE x SIZE), computed
-     * only where [where] (the hands' silhouette, 0..255) is non-zero and multiplied by it.
+     * only where [where] (the hands' silhouette, 0..255) is non-zero and multiplied by it; with
+     * [labels], also the most likely class of every pixel (for people walking into view).
      */
-    fun run(bmp: Bitmap, where: ByteArray, out: ByteArray): Boolean {
+    fun run(bmp: Bitmap, where: ByteArray?, out: ByteArray?, labels: ByteArray? = null): Boolean {
         val i = interpreter ?: return false
         val t0 = System.nanoTime()
         bmp.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
@@ -85,7 +86,13 @@ class HandMaskEngine(private val context: Context) {
         i.run(input, output)
         output.rewind(); output.asFloatBuffer().get(logits)
         // softmax over the classes, keep body skin
-        for (k in 0 until SIZE * SIZE) {
+        if (labels != null) for (k in 0 until SIZE * SIZE) {
+            val b = k * CLASSES
+            var best = 0; var bl = logits[b]
+            for (c in 1 until CLASSES) if (logits[b + c] > bl) { bl = logits[b + c]; best = c }
+            labels[k] = best.toByte()
+        }
+        if (where != null && out != null) for (k in 0 until SIZE * SIZE) {
             val w = where[k].toInt() and 0xff
             if (w == 0) { out[k] = 0; continue }
             // p(skin) = 1 / sum_c exp(l_c - l_skin)

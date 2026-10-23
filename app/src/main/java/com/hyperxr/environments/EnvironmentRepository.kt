@@ -188,7 +188,7 @@ class EnvironmentRepository(private val context: Context) {
      * Saves the user's own 360 photo as an environment. It never leaves the device, so no licence
      * check applies; the entry records that it is personal content.
      */
-    fun importPanorama(name: String, input: java.io.InputStream): EnvironmentEntry {
+    fun importPanorama(name: String, input: java.io.InputStream, source: String = "Galeria do aparelho"): EnvironmentEntry {
         val id = "personal_" + System.currentTimeMillis()
         val dir = dirOf(id)
         dir.mkdirs()
@@ -199,12 +199,12 @@ class EnvironmentRepository(private val context: Context) {
         require(o.outWidth > 0) { "A imagem não pôde ser lida" }
         val entry = EnvironmentEntry(
             id = id, name = name.ifBlank { "Minha foto 360" }, kind = EnvironmentKind.PANORAMA_360, author = "Você",
-            source = "Galeria do aparelho", sourceUrl = "", license = "Pessoal", licenseUrl = "", format = "jpg",
+            source = source, sourceUrl = "", license = "Pessoal", licenseUrl = "", format = "jpg",
             downloadBytes = out.length(), compatibility = "${o.outWidth}x${o.outHeight}", mainFile = out.name,
         )
         File(dir, "entry.json").writeText(json.encodeToString(EnvironmentEntry.serializer(), entry))
         File(dir, "complete").writeText("ok")
-        Diagnostics.log("Environment imported from gallery: ${entry.name}")
+        Diagnostics.log("Environment imported ($source): ${entry.name}")
         return entry
     }
 
