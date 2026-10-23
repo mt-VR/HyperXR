@@ -78,6 +78,9 @@ class QuickSettingsPanel(private val a: LauncherActions, private val open: (Stri
             s.update { it.copy(handTracking = it.handTracking.copy(handVisual = next)) }; dirty = true
         }
         c.toggle("dt", "Direct Touch", s.current.handTracking.directTouch) { v -> s.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) }; dirty = true }
+        c.toggle("pp", "Clicar apontando e empurrando", s.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH) { v ->
+            s.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }; dirty = true
+        }
         c.row("env", "Ambientes…") { open("environments") }
         c.row("rc", "Recentralizar visão") { a.recenter() }
         c.row("exit", "Sair para as configurações 2D", accent = true) { a.exitToSettings() }
@@ -229,6 +232,8 @@ class KeyboardPanel(
     val target: com.hyperxr.windows.KeyTarget,
     /** Starts voice dictation; the recognized text is passed to the callback (null when unavailable). */
     private val dictate: ((onText: (String?) -> Unit) -> Unit)? = null,
+    /** Lays the keyboard on the real table instead (null: not offered). */
+    private val onTable: (() -> Unit)? = null,
 ) : XrPanel(0.82f, 0.38f, ppm = 1500f, title = "Teclado") {
     init { priority = 2 } // the keyboard is always reachable
     private var shift = false
@@ -253,7 +258,7 @@ class KeyboardPanel(
             }
         }
         val y = c.y + 3 * 84f
-        val keys = 7
+        val keys = if (onTable != null) 8 else 7
         val w7 = (c.w - 2 * c.pad - (keys - 1) * 8f) / keys
         var x = c.pad
         fun k(id: String, label: String, width: Float = w7, accent: Boolean = false, act: () -> Unit) { c.button(id, label, x, y, width, 74f, accent = accent) { act() }; x += width + 8f }
@@ -272,6 +277,7 @@ class KeyboardPanel(
                 }
             }
         }
+        if (onTable != null) k("table", "Mesa", w7 * 0.9f) { onTable.invoke() }
         k("enter", "Enter", c.w - c.pad - x, accent = true) { target.sendKey(android.view.KeyEvent.KEYCODE_ENTER) }
         note?.let { c.label(it, c.pad, y + 80f, 24f, XrTheme.accent2) }
     }

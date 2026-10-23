@@ -183,6 +183,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             if (!isTheater(w)) windowControls[w]?.let { surfaces += it }
         }
         keyboard?.let { if (it.visible) surfaces += it }
+        tableKeyboard?.let { tk ->
+            tk.update(ctx.input.hands, head, ctx.camera as? com.hyperxr.mixedreality.ArCoreSession, System.nanoTime())
+            surfaces += tk.controls
+        }
         lab?.let { surfaces += it.panel }
         if (ctx.input.handsAvailable && !immersiveMedia) handTools.update(ctx.input.hands, head, dt)
         surfaces += handTools.surfaces()
@@ -204,6 +208,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             placeAbove(w, c); w.submit(ctx.scene); c.update(dt); c.submit(ctx.scene)
         }
         keyboard?.let { k -> if (k.visible) k.submit(ctx.scene) else { k.release(); keyboard = null } }
+        tableKeyboard?.submit(ctx.scene)
         handTools.submit()
         submitPointerVisuals()
         updateLinkDrag()
@@ -244,6 +249,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val handRayOut = arrayOf(Ray(), Ray())
     private val handRayVisible = BooleanArray(2)
     private val pinchStrength = FloatArray(2)
+    private val pointPush = arrayOf(com.hyperxr.input.PointPush(), com.hyperxr.input.PointPush())
+    private val pushPressed = BooleanArray(2)
     private val dwell = com.hyperxr.input.DwellClick()
     private val linkDrag = com.hyperxr.input.DragDrop<String>()
     private val pendingDrags = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, Int>>()
@@ -333,20 +340,31 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val labBusy = lab?.handBusy?.get(i) == true
             // The pinch ball is the pointer: what is under the ball, as seen from the eyes, is what a
             // pinch clicks (no beam). The shoulder ray remains available in Settings.
-            if (h.isUsable) pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+            // Point and push (default): the index fingertip aims, a short push towards the target
+            // clicks, holding the push drags. Pinch mode keeps the older pinch ball.
+            val pointMode = app.settings.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH
+            val pushed = pointMode && pointPush[i].update(if (h.isUsable && !menuOpen && !labBusy) h.joints else null, input.head.position,
+                h.depthSource == DepthSource.HAND_SIZE_PRIOR, now)
+            if (h.isUsable) {
+                if (pointMode) pinchBall[i].set(h.joints[HandJoint.INDEX_TIP])
+                else pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+            }
             val raw = when {
                 menuOpen || labBusy || !h.isUsable -> { ballPointers[i].reset(); null }
+                pointMode -> if (pointPush[i].pointing) ballPointers[i].update(pinchBall[i], pushed, input.head.position, now, ray) else { ballPointers[i].reset(); null }
                 app.settings.current.handTracking.ballPointer -> ballPointers[i].update(pinchBall[i], pinching, input.head.position, now, ray)
                 else -> com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray)
             }
-            pinchBallVisible[i] = h.isUsable && !labBusy
+            pinchBallVisible[i] = h.isUsable && !labBusy && (!pointMode || pointPush[i].pointing)
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
-            // pinch is the click; it is read from the (held) state so a lost frame does not release it
-            val pinch = h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
+            // the click (push or pinch) is read from the held state so a lost frame does not release it
+            val pinch = if (pointMode) pushed || (raw == null && handRays[i].captured != null && handRay != null && pointPush[i].pressed)
+                else h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
             handRays[i].update(handRay, pinch, surfaces, now)
             if (handRay != null) recordPointer(5 + i, handRay, pinch) else pointerRays.remove(5 + i)
             handRayVisible[i] = handRay != null
-            pinchStrength[i] = if (h.isUsable) h.pinchStrength else 0f
+            pinchStrength[i] = if (!h.isUsable) 0f else if (pointMode) pointPush[i].progress else h.pinchStrength
+            pushPressed[i] = pointMode && pointPush[i].pressed
             if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch, if (h.isUsable) pinchBall[i] else null) }
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
             if (h.isUsable && !menuOpen && handRays[i].captured == null) {
@@ -383,7 +401,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     /** Back: keyboard, then the top panel, then the window's own back. */
     private fun backOrClose() {
-        if (keyboard != null) { closeKeyboard(); return }
+        if (keyboard != null || tableKeyboard != null) { closeKeyboard(); return }
         val top = windows.lastOrNull { it.visible && it.closable }
         if (top != null) { top.visible = false; top.onClose?.invoke(); return }
         ((ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible })?.back()
@@ -528,7 +546,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         for (i in 0..1) {
             if (!pinchBallVisible[i]) continue
             val k = pinchStrength[i]
-            val pinched = handRays[i].captured != null || ctx.input.hands[i].gesture == com.hyperxr.handtracking.Gesture.PINCH
+            val pointMode = app.settings.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH
+            val pinched = handRays[i].captured != null || pushPressed[i] ||
+                (!pointMode && ctx.input.hands[i].gesture == com.hyperxr.handtracking.Gesture.PINCH)
             val ball = ctx.scene.addDraw()
             ball.mesh = ctx.renderer.sphere
             ball.unlit = true
@@ -705,8 +725,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun openKeyboard(target: com.hyperxr.windows.KeyTarget) {
         val k = keyboard
         if (k != null && k.visible && k.target === target) return
+        if (tableKeyboardTarget === target && tableKeyboard != null) return
         k?.release()
-        keyboard = KeyboardPanel(target) { cb -> dictate(cb) }.also { kb ->
+        closeTableKeyboard()
+        keyboard = KeyboardPanel(target, { cb -> dictate(cb) }, onTable = { glTasks += { openTableKeyboard(target) } }).also { kb ->
             // close and low, tilted up: reachable with the fingertip (Direct Touch) or a pinch
             kb.placeInFront(ctx.input.head, 0.72f, -0.32f)
             kb.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.45f), kb.pose.orientation)
@@ -716,6 +738,32 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun closeKeyboard() {
         keyboard?.let { k -> (k.target as? UrlEditor)?.let { if (it.active) it.cancel() }; k.release() }
         keyboard = null
+        (tableKeyboardTarget as? UrlEditor)?.let { if (it.active) it.cancel() }
+        closeTableKeyboard()
+    }
+
+    // ---------------------------------------------------------------- keyboard on the table
+    private var tableKeyboard: TableKeyboardView? = null
+    private var tableKeyboardTarget: com.hyperxr.windows.KeyTarget? = null
+    private var keyClickSound = 0
+
+    /** Lays the keyboard on the real table for [target] (the floating one closes). */
+    private fun openTableKeyboard(target: com.hyperxr.windows.KeyTarget) {
+        keyboard?.release(); keyboard = null
+        closeTableKeyboard()
+        if (keyClickSound == 0) keyClickSound = runCatching { ctx.audio.synth("sine", 1900f, 1300f, 0.03f, 0.35f, 0.002f, 0.025f) }.getOrDefault(0)
+        tableKeyboardTarget = target
+        tableKeyboard = TableKeyboardView(
+            target,
+            click = { if (keyClickSound != 0) runCatching { ctx.audio.play(keyClickSound, 0.5f, 1f, false, null, null) } },
+            onClose = { glTasks += { closeKeyboard() } },
+            onFloating = { glTasks += { closeTableKeyboard(); openKeyboard(target) } },
+        )
+    }
+
+    private fun closeTableKeyboard() {
+        tableKeyboard?.release()
+        tableKeyboard = null; tableKeyboardTarget = null
     }
 
     override fun openBookmarks(w: com.hyperxr.browser.BrowserWindow) {

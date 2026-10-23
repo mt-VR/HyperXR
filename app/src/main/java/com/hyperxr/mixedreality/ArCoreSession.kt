@@ -337,6 +337,48 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
         } finally { img.close() }
     }
 
+    /**
+     * Depth API points in tracking space: every [step]th pixel of the depth image, unprojected with
+     * the CPU image intrinsics (the depth image covers the same view) and the camera pose. Up to
+     * [out].size / 3 points, nearer than [maxM]; 0 without depth or tracking. GL thread.
+     */
+    fun depthPoints(out: FloatArray, step: Int = 4, maxM: Float = 2.5f): Int {
+        if (!depthEnabled) return 0
+        val f = lastFrame ?: return 0
+        val intr = cpuIntrinsics() ?: return 0
+        val cam = Pose()
+        if (!cameraPose(cam)) return 0
+        val img = try { f.acquireDepthImage16Bits() } catch (t: Throwable) { null } ?: return 0
+        try {
+            val w = img.width; val h = img.height
+            val plane = img.planes[0]
+            val buf = plane.buffer.order(ByteOrder.nativeOrder())
+            val row = plane.rowStride; val px = plane.pixelStride
+            val sx = intr.width.toFloat() / w; val sy = intr.height.toFloat() / h
+            val p = Vec3(); val q = Vec3()
+            var n = 0
+            val cap = out.size / 3
+            var y = step / 2
+            while (y < h && n < cap) {
+                var x = step / 2
+                while (x < w && n < cap) {
+                    val mm = buf.getShort(y * row + x * px).toInt() and 0xffff
+                    if (mm != 0 && mm <= maxM * 1000) {
+                        val d = mm / 1000f
+                        val u = (x + 0.5f) * sx; val v = (y + 0.5f) * sy
+                        q.set((u - intr.cx) * d / intr.fx, -(v - intr.cy) * d / intr.fy, -d)
+                        cam.transformPoint(q, p)
+                        out[n * 3] = p.x; out[n * 3 + 1] = p.y; out[n * 3 + 2] = p.z
+                        n++
+                    }
+                    x += step
+                }
+                y += step
+            }
+            return n
+        } finally { img.close() }
+    }
+
     /** Camera pose in tracking space (needed to place hands detected in the camera image). */
     fun cameraPose(out: Pose): Boolean {
         val f = lastFrame ?: return false

@@ -197,6 +197,10 @@ fun HandsSection(a: MainActivity) {
             ", deixando a GPU livre para o VR. GPU: MediaPipe. Os dois passam pelo verificador que descarta pés, cortinas e outras pessoas.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
+        ToggleRow("Clicar apontando e empurrando", h.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH,
+            "Ligado: aponte com o indicador e empurre o dedo para clicar (segure empurrado para arrastar). Desligado: pinça") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }
+        }
         ChoiceRow("Visual das mãos", listOf(com.hyperxr.settings.HandVisual.AURA, com.hyperxr.settings.HandVisual.NONE), h.handVisual, {
             if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Aura lilás"
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }

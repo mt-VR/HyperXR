@@ -259,3 +259,37 @@ Limites físicos: a latência nunca chega a 1 ms. A tela mostra um quadro novo a
 (120–60 Hz) e leva esse tempo para varrer de cima a baixo; a câmera expõe e lê cada imagem em
 10–30 ms antes do hand tracking começar. A previsão esconde parte disso (o movimento parece em
 dia enquanto é suave), mas não remove.
+
+## Clique apontando e empurrando
+O clique com a mão agora é apontar e empurrar (padrão; a pinça continua nas configurações):
+- aponte com o indicador (os outros dedos dobrados, o polegar livre, como uma "arminha");
+- a ponta do dedo mira no que está embaixo dela, vista dos olhos (a bolinha aparece na ponta);
+- um empurrão curto do dedo para a frente (~2 cm, ~3 cm sem Depth API) clica; a bolinha enche
+  conforme o empurrão;
+- segurando empurrado e movendo, arrasta (rolar páginas, mover janelas pela barra, selecionar);
+- puxando o dedo de volta, solta.
+O empurrão é medido como a distância da ponta do dedo aos olhos contra uma referência que segue
+a mão devagar: mover o braço devagar ou andar não clica. Com a Depth API do ARCore a distância
+é medida; sem ela é estimada pelo tamanho da mão e o empurrão precisa ser maior.
+
+## Teclado na mesa
+No teclado flutuante, o botão **Mesa** deita o teclado sobre uma mesa de verdade:
+- **Com a Depth API:** os pontos de profundidade à frente, ao alcance das mãos, são procurados
+  por uma superfície nivelada abaixo dos olhos (histograma de alturas, robusto a chão, parede e
+  objetos em cima da mesa). Duas leituras seguidas que concordam colocam o teclado na mesa, à
+  frente do usuário. Depois disso a altura continua acompanhando a mesa.
+- **Sem Depth API (ou sem mesa encontrada):** toque a mesa com a ponta do indicador e segure
+  parado por 1 segundo; o teclado é centrado onde o dedo tocou. "Mais alto"/"Mais baixo" ajustam
+  a altura em 5 mm e "Recalibrar" procura de novo.
+- **Digitação:** pontas do indicador, médio e anelar (e o polegar só para o espaço). Cada dedo
+  digita uma vez por toque e precisa levantar ~2,4 cm antes da próxima tecla; a mesma tecla não
+  é aceita duas vezes em 140 ms; quando dois dedos da mesma mão encostam juntos, só o mais baixo
+  conta. Teclas de 3,2 cm (maiores que as reais) por causa da precisão do hand tracking.
+- **Retorno:** a tecla sob a ponta do dedo acende em lilás, a tecla digitada pisca, um clique
+  curto toca, e o painel atrás do teclado mostra o texto digitado.
+- **Integração:** digita no mesmo alvo do teclado flutuante (campos da web, apps Android, barra
+  de endereço). "Flutuante" volta ao teclado no ar; X ou Voltar fecha.
+
+Limites: precisão de ~1 cm do hand tracking de celular (por isso as teclas grandes); dedos
+escondidos atrás da mão (vistos de cima pela câmera) podem não ser detectados; sem Depth API a
+altura das pontas dos dedos é estimada e a calibração manual é necessária.
