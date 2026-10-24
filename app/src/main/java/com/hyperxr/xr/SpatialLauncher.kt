@@ -1187,6 +1187,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     override fun backgroundChoice(): String = background.ifEmpty { if (ctx.passthroughAvailable) "camera" else currentEnvId }
 
+    override fun vrOn(): Boolean = backgroundChoice().let { it != "camera" && it != "dim" }
+    override fun vrSwitchable(): Boolean = ::ctx.isInitialized && ctx.passthroughAvailable
+    override fun setVr(on: Boolean) {
+        if (on) { app.environments.installed().firstOrNull { it.id == currentEnvId }?.let { selectEnvironment(it) } ?: run { background = currentEnvId } }
+        else if (vrSwitchable()) background = "camera"
+    }
+
     override fun setBackgroundChoice(id: String) {
         background = id
         if (id != "camera" && id != "dim") app.environments.installed().firstOrNull { it.id == id }?.let { loadEnvironment(it) }

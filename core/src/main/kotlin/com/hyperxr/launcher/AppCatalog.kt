@@ -75,7 +75,7 @@ object BuiltinApps {
         AppEntry("hx:gallery", "Galeria", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "gallery", "gallery"),
         AppEntry("hx:camera_share", "Captura", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "camera_share", "capture",
             limitations = "Captures the rendered eye buffer; camera pixels only when MR is active"),
-        AppEntry("hx:store", "HyperXR Environments", AppKind.SYSTEM_PANEL, AppCategory.ENVIRONMENT, "store", "environments"),
+        AppEntry("hx:store", "Ambientes", AppKind.SYSTEM_PANEL, AppCategory.ENVIRONMENT, "store", "environments"),
         AppEntry("hx:system_messenger", "Mensagens do sistema", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "system_messenger", "messages"),
         AppEntry("hx:help_center", "Central de ajuda", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "help_center", "help"),
         AppEntry("hx:tv", "TV", AppKind.SYSTEM_PANEL, AppCategory.WEB, "tv", "tv"),

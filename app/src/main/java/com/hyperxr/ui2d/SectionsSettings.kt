@@ -34,16 +34,11 @@ internal fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.sett
 
 @Composable
 fun HomeSection(a: MainActivity) {
-    val s = a.settingsState
     val caps = a.app.capabilities.last
-    val decision = XrModeResolver.resolve(caps, s.xrMode)
-    SectionCard("Experiência imersiva", "O HyperXR inicia em realidade mista quando o aparelho permite; senão, em VR SBS para o VR Box.") {
-        Segmented(
-            listOf("AUTO" to "Automático", "MIXED_REALITY" to "Realidade mista", "VR_SBS" to "VR SBS", "OPENXR_RUNTIME" to "Runtime OpenXR"),
-            s.xrMode.name,
-        ) { k -> a.app.settings.update { it.copy(xrMode = XrModePreference.valueOf(k)) } }
-        KeyValue("Modo que será usado", decision.mode.name)
+    val decision = XrModeResolver.resolve(caps, XrModePreference.AUTO)
+    SectionCard("Experiência imersiva", "O HyperXR sempre começa em realidade mista (a câmera mostra o seu ambiente). Dentro dele, o botão Modo VR na dock liga o ambiente virtual, escolhido no app Ambientes.") {
         KeyValue("Rastreamento de cabeça", decision.headTracking)
+        if (decision.mode == com.hyperxr.capabilities.XrMode.VR_SBS) Note("Sem câmera utilizável agora: o modo VR fica sempre ligado.", HxColors.warn)
         decision.reasons.forEach { Note("• $it") }
         if (!a.hasPermission(Manifest.permission.CAMERA)) {
             Note("A câmera é necessária para realidade mista e hand tracking.", HxColors.warn)

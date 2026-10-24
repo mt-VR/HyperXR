@@ -157,7 +157,7 @@ class XrEngine(
 ) : GLSurfaceView.Renderer {
     private val app = HyperXRApp.instance
     private var settings = tweak(app.settings.current)
-    val decision: XrModeDecision = XrModeResolver.resolve(app.capabilities.last.takeIf { it.androidSdk > 0 } ?: app.capabilities.probe(app.runtimeBroker), settings.xrMode)
+    val decision: XrModeDecision = XrModeResolver.resolve(app.capabilities.last.takeIf { it.androidSdk > 0 } ?: app.capabilities.probe(app.runtimeBroker), com.hyperxr.settings.XrModePreference.AUTO)
 
     private val renderer = SceneRenderer()
     private val aura = com.hyperxr.rendering.HandAura()

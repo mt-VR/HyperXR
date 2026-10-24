@@ -61,18 +61,8 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
         val status = listOf(battery, time, a.trackingDescription).filter { it.isNotEmpty() }.joinToString("    ")
         c.label(status, c.w / 2 - 260f, 22f, 24f, XrTheme.textDim, maxWidth = 520f)
         c.label("Biblioteca", c.w / 2 - 110f, 60f, 44f, XrTheme.text, bold = true, maxWidth = 400f)
-        // background tabs, as one pill group
-        val options = a.backgroundOptions()
-        val tabW = 168f
-        val groupW = options.size * tabW + 12f
-        var tx = c.w / 2 - groupW / 2
-        fill.color = XrTheme.buttonDisabled
-        c.canvas.drawRoundRect(android.graphics.RectF(tx, 128f, tx + groupW, 192f), 32f, 32f, fill)
-        tx += 6f
-        for ((id, label) in options) {
-            c.button("bg:$id", label, tx, 134f, tabW, 52f, accent = a.backgroundChoice() == id) { a.setBackgroundChoice(id); dirty = true }
-            tx += tabW
-        }
+        // VR mode (the environment instead of the camera), like the dock's button
+        if (a.vrSwitchable()) c.button("vr", if (a.vrOn()) "Modo VR: ligado" else "Modo VR: desligado", c.w / 2 - 170f, 134f, 340f, 56f, accent = a.vrOn()) { a.setVr(!a.vrOn()); dirty = true }
         // search
         val sw = 460f
         val active = search.active
@@ -131,7 +121,7 @@ class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.7f, 0.13f, title 
 
     override fun update(dt: Float) {
         val m = System.currentTimeMillis() / 60_000
-        val k = "${a.windowCount()}/${a.windowsMinimized()}/${a.mode()}/${a.voiceStatus()}/${a.pinnedApps().joinToString { it.id }}"
+        val k = "${a.windowCount()}/${a.windowsMinimized()}/${a.mode()}/${a.voiceStatus()}/${a.vrOn()}/${a.pinnedApps().joinToString { it.id }}"
         if (m != minute || k != key) { minute = m; key = k; battery = batteryText(); dirty = true }
     }
 
@@ -169,6 +159,8 @@ class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.7f, 0.13f, title 
             rx -= gap
         }
         right("qs", "Ajustes", 130f) { a.openTarget("settings") }
+        // VR mode on: the environment from the Ambientes app around you; off: the camera (mixed reality)
+        if (a.vrSwitchable()) right("vr", "Modo VR", 150f, accent = a.vrOn()) { a.setVr(!a.vrOn()) }
         right("voice", "Voz", 110f, accent = voice.isNotEmpty()) { a.startVoice() }
         right("mode", if (a.mode() == LauncherMode.DOCK) "Dock" else "New", 100f) {
             a.setMode(if (a.mode() == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)

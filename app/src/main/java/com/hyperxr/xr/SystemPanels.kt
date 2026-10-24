@@ -49,6 +49,11 @@ interface LauncherActions {
     fun backgroundOptions(): List<Pair<String, String>>
     fun backgroundChoice(): String
     fun setBackgroundChoice(id: String)
+    /** VR mode: the chosen environment around you instead of the camera (the dock's VR button). */
+    fun vrOn(): Boolean
+    fun setVr(on: Boolean)
+    /** False without a usable camera: VR is then always on. */
+    fun vrSwitchable(): Boolean
     /** Opens a system panel by its catalog target ("files", "settings", "environments"...). */
     fun openTarget(target: String)
     fun appIcon(app: AppEntry, size: Int): Bitmap
@@ -219,7 +224,7 @@ class HelpPanel : XrPanel(1.3f, 1.0f, title = "Central de ajuda") {
         c.paragraph("Mãos: toque diretamente nos botões com o indicador (Direct Touch). Pinça para selecionar à distância nos jogos.")
         c.paragraph("Joy-Con: aponte e pressione R para selecionar, L para voltar. Segure em um ícone (modo New) para movê-lo. HOME recentraliza.")
         c.heading("Modos")
-        c.paragraph("Realidade mista usa a câmera quando o aparelho permite; em VR SBS um ambiente 3D substitui a câmera. A imagem da câmera é mono (não estéreo).")
+        c.paragraph("O HyperXR sempre começa em realidade mista: a câmera mostra o seu ambiente. O botão Modo VR na dock troca a câmera por um ambiente virtual, escolhido no app Ambientes. A imagem da câmera é mono (não estéreo).")
         c.heading("Privacidade")
         c.paragraph("Imagens da câmera são processadas no aparelho e nunca são enviadas para a rede pelo HyperXR.")
     }
