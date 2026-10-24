@@ -34,7 +34,7 @@ add_library(hyperxr_openxr SHARED
 target_include_directories(hyperxr_openxr PRIVATE ${HX_RUNTIME_DIR}/include)
 target_compile_options(hyperxr_openxr PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
     -fno-exceptions -fno-rtti -fvisibility=hidden -fvisibility-inlines-hidden)
-target_link_options(hyperxr_openxr PRIVATE -nostdlib++ -Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
+target_link_options(hyperxr_openxr PRIVATE -nostdlib++ -Wl,--no-undefined -Wl,-z,nodelete -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
 target_link_libraries(hyperxr_openxr EGL GLESv3 android log dl m)
 
 # Camera frame conversion for hand tracking (hot path: optimised even in debug builds).

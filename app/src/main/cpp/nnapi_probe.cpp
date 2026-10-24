@@ -2,6 +2,7 @@
 // driver actually exposes instead of assuming every SoC has an NPU reachable through NNAPI.
 #include <jni.h>
 #include <dlfcn.h>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -24,10 +25,15 @@ const char* typeName(int32_t t) {
 }
 }  // namespace
 
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_hyperxr_diagnostics_NnapiNative_nativeDevices(JNIEnv* env, jclass) {
-    std::vector<std::string> rows;
-    void* lib = dlopen("libneuralnetworks.so", RTLD_NOW | RTLD_LOCAL);
+// The device list, read once. libneuralnetworks talks to the driver over binder and leaves
+// per-thread cleanup on binder threads: it must never be unloaded (RTLD_NODELETE, no dlclose),
+// or a binder thread that exits later jumps into unmapped code (SIGSEGV in pthread_key_clean_all).
+static std::once_flag gOnce;
+static std::vector<std::string> gRows;
+
+static void readDevices() {
+    std::vector<std::string>& rows = gRows;
+    void* lib = dlopen("libneuralnetworks.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
     if (lib) {
         auto count = reinterpret_cast<GetDeviceCount>(dlsym(lib, "ANeuralNetworks_getDeviceCount"));
         auto get = reinterpret_cast<GetDevice>(dlsym(lib, "ANeuralNetworks_getDevice"));
@@ -48,8 +54,13 @@ Java_com_hyperxr_diagnostics_NnapiNative_nativeDevices(JNIEnv* env, jclass) {
                 rows.push_back(std::string(nm) + "|" + typeName(ty) + "|" + std::to_string(fl));
             }
         }
-        dlclose(lib);
     }
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_hyperxr_diagnostics_NnapiNative_nativeDevices(JNIEnv* env, jclass) {
+    std::call_once(gOnce, readDevices);
+    const std::vector<std::string>& rows = gRows;
     jobjectArray arr = env->NewObjectArray(static_cast<jsize>(rows.size()), env->FindClass("java/lang/String"), nullptr);
     for (size_t i = 0; i < rows.size(); i++) {
         jstring s = env->NewStringUTF(rows[i].c_str());
