@@ -1,0 +1,58 @@
+# Builds the phone APK (arm64) and publishes it on the Releases page when a version tag is
+# pushed (v0.2.0, v0.3.0...). It can also be started by hand from the Actions tab.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of the release (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK, NDK and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests
+        run: ./gradlew :core:test --no-daemon
+
+      - name: APK (arm64)
+        run: ./gradlew :app:assembleDebug -PhxAbi=arm64-v8a --no-daemon
+
+      - name: Name the APK
+        id: names
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "HyperXR-$TAG-arm64.apk"
+          NOTES="docs/releases/$TAG.md"
+          [ -f "$NOTES" ] || NOTES=README.md
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.names.outputs.tag }}
+          name: HyperXR ${{ steps.names.outputs.tag }}
+          body_path: ${{ steps.names.outputs.notes }}
+          files: HyperXR-${{ steps.names.outputs.tag }}-arm64.apk

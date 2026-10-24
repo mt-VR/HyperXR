@@ -16,8 +16,8 @@ android {
         applicationId = "com.hyperxr"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         // -PhxAbi=arm64-v8a builds a phone-only APK (x86_64 is for emulators)
         ndk { abiFilters += (project.findProperty("hxAbi")?.toString()?.split(",") ?: listOf("arm64-v8a", "x86_64")) }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
