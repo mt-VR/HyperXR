@@ -67,6 +67,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var lab: com.hyperxr.lab.HandPhysicsLab? = null
     /** The Ocean app (sky, sea and the sinking room), in the same space as the launcher while open. */
     private var ocean: com.hyperxr.ocean.OceanApp? = null
+    /** One of the ten games, played in the launcher's space. */
+    private var game: com.hyperxr.questgames.GameHost? = null
     private val cursorRay = Ray()
     private var cursorRayValid = false
     private var cursorLabDown = false
@@ -146,6 +148,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         keyboard?.release()
         lab?.release(); lab = null
         ocean?.release(); ocean = null
+        game?.release(); game = null
         Gl.deleteTexture(reticleTex); Gl.deleteTexture(ringTex); Gl.deleteTexture(dragChipTex)
         radialTex.forEach { Gl.deleteTexture(it) }
     }
@@ -181,7 +184,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         // inside a 360 photo/video only the taskbar and the open panels stay
         val immersiveMedia = ctx.renderer.immersive != null
         // New mode: the library is home while no window is open; otherwise it opens from the taskbar
-        val showLibrary = !immersiveMedia && (libraryShown || (s.launcher.mode == LauncherMode.NEW && !windowsShown))
+        val showLibrary = !immersiveMedia && (libraryShown || (game == null && s.launcher.mode == LauncherMode.NEW && !windowsShown))
         if (!showLibrary && libraryShown) libraryShown = false
         if (showLibrary) surfaces += library
         surfaces += taskbar
@@ -197,6 +200,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         lab?.let { surfaces += it.panel }
         ocean?.let { surfaces += it.panel }
+        game?.let { surfaces += it.hud }
         if (ctx.input.handsAvailable && !immersiveMedia) handTools.update(ctx.input.hands, head, dt)
         surfaces += handTools.surfaces()
         // App-to-World objects (hidden inside a 360 photo/video, like the library)
@@ -211,6 +215,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (showLibrary) { library.update(dt); library.submit(ctx.scene) }
         lab?.submit()
         ocean?.let { it.update(dt, head); it.submit(ctx.scene) }
+        game?.let { it.update(dt); it.draw() }
         if (!immersiveMedia) { appWorld.update(dt); appWorld.submit() }
         taskbar.update(dt); taskbar.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
@@ -648,6 +653,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
             "ocean" -> { toggleOcean(); return }
+            in com.hyperxr.questgames.QuestGameCatalog.ids -> { startGame(target); return }
             "guardian" -> ctx.guardian?.let { com.hyperxr.guardian.GuardianPanel(it) } ?: InfoPanel("HyperGuardian", "Indisponível")
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
@@ -915,6 +921,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             it.initGl()
             it.place(ctx.input.head, anchorYaw)
         }
+    }
+
+    // ---------------------------------------------------------------- games
+    private fun startGame(id: String) {
+        game?.release()
+        libraryShown = false
+        game = com.hyperxr.questgames.GameHost(ctx, id) { glTasks += { game?.release(); game = null } }.also { it.start(ctx.input.head) }
     }
 
     // ---------------------------------------------------------------- Ocean

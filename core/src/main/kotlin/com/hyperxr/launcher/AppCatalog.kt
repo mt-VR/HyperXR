@@ -57,6 +57,7 @@ object IconLibrary {
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
+        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -125,6 +126,11 @@ object BuiltinApps {
         AppEntry("game:catgame", "Gato vs. Vovó", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "catgame", "catgame",
             runtime = "HyperXR (nativo)", compatibility = "VR com Joy-Cons",
             limitations = "Você é um gato na casa da vovó: atrapalhe as tarefas e acerte-a com objetos antes que ela termine"),
+    ) + com.hyperxr.questgames.QuestGameCatalog.games.map { g ->
+        AppEntry("game:${g.id}", g.title, AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "qg_${g.id}", g.id,
+            runtime = "HyperXR (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else "Só as mãos (hand tracking)",
+            limitations = "${g.howTo}. Inspirado em ${g.inspiredBy}; modelos 3D da Kenney (CC0)")
+    } + listOf(
         AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, "youtube", "https://m.youtube.com"),
         AppEntry("web:twitch", "Twitch", AppKind.WEB, AppCategory.WEB, "twitch", "https://m.twitch.tv"),
         AppEntry("web:tiktok", "TikTok", AppKind.WEB, AppCategory.WEB, "tiktok", "https://www.tiktok.com"),

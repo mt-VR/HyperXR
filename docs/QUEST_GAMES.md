@@ -1,0 +1,58 @@
+# Jogos inspirados nos famosos do Quest
+
+Dez jogos do HyperXR inspirados na jogabilidade dos jogos mais famosos do Quest. Eles ficam na
+biblioteca, em Jogos e experiências, cada um com seu ícone, e rodam no espaço do launcher: ele
+coloca o jogo na sua frente, com o chão sob você.
+
+Só a ideia de jogo foi aproveitada. Nomes, regras, visual e código são do HyperXR, e nada vem
+dos jogos originais. Os modelos 3D são dos kits da Kenney (CC0, domínio público), com a licença
+ao lado de cada kit em `app/src/main/assets/games/*/License.txt`.
+
+## Só com as mãos
+
+| Jogo | Inspirado em | Como joga |
+|---|---|---|
+| Sabre de Ritmo | Beat Saber | Blocos vêm no ritmo de uma música sintetizada (128 BPM). Corte com a mão da cor certa (esquerda vermelha, direita azul), na direção da seta. Tem combo e multiplicador até 8x. |
+| Ninja das Frutas | Fruit Ninja VR | Frutas da Kenney sobem na sua frente: passe a mão rápido por elas. Viram metades com suco. Bombas tiram pontos. Dura 1 minuto. |
+| Ringue | The Thrill of the Fight | Boxe contra um adversário que dá socos anunciados: esquive movendo a cabeça ou bloqueie com as mãos na frente do rosto. Soque cabeça e corpo; nocaute vence. |
+| Prancha no Céu | Richie's Plank Experience | Elevador até 90 m, a porta abre e há uma prancha sobre a rua. Ande até a ponta e dê um passo para fora. Sem posição 6DoF, segurar a pinça faz você avançar. |
+| Minigolfe | Walkabout Mini Golf | Três buracos no seu chão. Faça a pinça para segurar o taco e empurre a bola, que tem física de rolamento, bate nas paredes e cai na caçapa. |
+
+## Com controle
+
+Funcionam com Joy-Con, com o celular controle (HyperConnect) ou com um gamepad Bluetooth.
+
+| Jogo | Inspirado em | Como joga |
+|---|---|---|
+| Tempo Parado | SUPERHOT VR | O tempo só anda quando você se mexe. Inimigos vermelhos chegam e atiram balas lentas. Mire com o controle e atire; desvie das balas (dá para acertar as balas também). |
+| Caçador de Drones | Space Pirate Trainer | Drones da Kenney voam em volta e atiram. Gatilho atira; o outro botão segura um escudo. Três vidas, ondas cada vez maiores. |
+| Tênis de Mesa | Eleven Table Tennis | O controle é a raquete e o gatilho saca. Contra o computador, até 11 pontos, com regras de quique e rede. |
+| Pescaria | Real VR Fishing | Lago com árvores e acampamento. Segure o gatilho, balance e solte para lançar. Quando a boia afunda (o controle vibra), aperte para fisgar. Recolha com o outro botão sem passar da tensão da linha. Quatro peixes. |
+| Pequeno Herói | Moss | Um mundo em miniatura sobre a mesa. Ande com o analógico (no celular controle, segure B e aponte), pule com o gatilho, pegue as moedas e chegue à bandeira. |
+
+## Testes
+
+A física e as regras ficam no módulo core e têm testes no JVM (`QuestGamesTest`, 11 testes):
+- cortes no ritmo;
+- frutas;
+- socos e esquivas;
+- bola de golfe;
+- tênis de mesa;
+- pesca;
+- o herói pulando e caindo;
+- drones e mira.
+
+`GameAssetsTest` carrega todos os modelos com o carregador glTF do HyperXR.
+
+**Ainda não testado num celular:** a sensação de jogo (velocidades, tamanhos, dificuldade) pode
+precisar de ajuste depois de jogar de verdade.
+
+## Por que não Sketchfab
+
+A API do Sketchfab só deixa baixar modelos com o token de uma conta ("Authentication credentials
+were not provided"). Os kits da Kenney são CC0 e baixam direto.
+
+Para trocar por modelos do Sketchfab:
+- é preciso o token da sua conta, que fica em Configurações > Senha e API no site;
+- a licença de cada modelo precisa ser seguida; CC-BY exige o crédito do autor na tela de
+  créditos.

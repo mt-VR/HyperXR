@@ -22,6 +22,16 @@ icons = {
     "hyperx_package": ("extension.svg",   "#8e9eab", "#566373", 0.50),
     "ocean":       ("tsunami.svg",        "#38d6ee", "#0b4aa6", 0.54),
     "guardian":    ("shield_person.svg",  "#7be0a0", "#1c7a6c", 0.54),
+    "qg_rhythm":   ("music_note.svg",     "#ff4d6d", "#3b6cff", 0.52),
+    "qg_fruit":    ("nutrition.svg",      "#ffcf3a", "#ff5a3c", 0.54),
+    "qg_boxing":   ("sports_mma.svg",     "#ff6a4a", "#a3162a", 0.54),
+    "qg_plank":    ("apartment.svg",      "#87c9ff", "#3a5b8c", 0.54),
+    "qg_golf":     ("golf_course.svg",    "#8fe36b", "#2c8a3e", 0.54),
+    "qg_slowtime": ("hourglass_bottom.svg","#ff5b5b", "#2b2b30", 0.52),
+    "qg_drones":   ("rocket_launch.svg",  "#7a5cff", "#101a46", 0.52),
+    "qg_pingpong": ("sports_tennis.svg",  "#ffa94d", "#1e5aa8", 0.52),
+    "qg_fishing":  ("phishing.svg",       "#5fd0e0", "#14608a", 0.54),
+    "qg_diorama":  ("cruelty_free.svg",   "#b6e388", "#4f8a3a", 0.54),
 }
 def hexc(h): return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
 def gradient(a, b):

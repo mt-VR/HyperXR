@@ -51,6 +51,7 @@ Gerados por `tools/make_icons.py` (SVG → PNG 216 px, camadas `bg`/`fg` como as
 | emulators | videogame_asset (Material) | Emuladores |
 | androidapps | android (Material) | Apps Android |
 | handlab | back_hand (Material) | Hand Physics Lab |
+| qg_* | music_note, nutrition, sports_mma, apartment, golf_course, hourglass_bottom, rocket_launch, sports_tennis, phishing, cruelty_free (Material) | os 10 jogos inspirados no Quest |
 | guardian | shield_person (Material) | HyperGuardian (botões: power_settings_new, pan_tool, sensors, gesture, delete) |
 | ocean | tsunami (Material) | Oceano (blocos do menu: rainy, thunderstorm, waves, layers, view_in_ar, light_mode, volume_up, arrow_downward, undo) |
 | appworld | view_in_ar (Material) | App-to-World |
