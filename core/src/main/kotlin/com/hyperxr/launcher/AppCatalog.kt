@@ -57,7 +57,7 @@ object IconLibrary {
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
-        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama",
+        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -128,7 +128,7 @@ object BuiltinApps {
             limitations = "Você é um gato na casa da vovó: atrapalhe as tarefas e acerte-a com objetos antes que ela termine"),
     ) + com.hyperxr.questgames.QuestGameCatalog.games.map { g ->
         AppEntry("game:${g.id}", g.title, AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "qg_${g.id}", g.id,
-            runtime = "HyperXR (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else "Só as mãos (hand tracking)",
+            runtime = "HyperXR (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id == "climb") "Mãos ou controle" else "Só as mãos (hand tracking)",
             limitations = "${g.howTo}. Inspirado em ${g.inspiredBy}; modelos 3D da Kenney (CC0)")
     } + listOf(
         AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, "youtube", "https://m.youtube.com"),

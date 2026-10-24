@@ -825,6 +825,7 @@ object QuestGames {
         "pingpong" -> PingPongGame(host)
         "fishing" -> FishingGame(host)
         "diorama" -> DioramaGame(host)
+        "climb" -> ClimbGame(host)
         else -> null
     }
 }

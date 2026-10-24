@@ -1,7 +1,7 @@
 package com.hyperxr.questgames
 
 /**
- * HyperXR's ten games inspired by famous Quest games: the mechanics only (names, rules, art
+ * HyperXR's games inspired by famous Quest games: the mechanics only (names, rules, art
  * and code are HyperXR's own; 3D models from Kenney's CC0 kits). Five play with the hands
  * alone, five need a controller (Joy-Con, the HyperConnect phone or a Bluetooth gamepad).
  */
@@ -29,6 +29,8 @@ object QuestGameCatalog {
             "Balance e solte o gatilho para lançar, fisgue quando a boia afundar, recolha sem arrebentar a linha"),
         Info("diorama", "Pequeno Herói", "Moss", true, "cruelty_free",
             "Ande com o analógico num mundo em miniatura sobre a mesa, pule, pegue moedas e chegue à bandeira"),
+        Info("climb", "Escalada", "The Climb", false, "hiking",
+            "Feche a mão numa agarra (ou aperte o gatilho do controle) e puxe para subir um penhasco de 27 m; soltando tudo, você cai até a última plataforma"),
     )
 
     val ids = games.map { it.id }.toSet()

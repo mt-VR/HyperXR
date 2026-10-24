@@ -655,3 +655,106 @@ fun raySphere(ox: Float, oy: Float, oz: Float, dx: Float, dy: Float, dz: Float, 
     if (d2 > r * r) return -1f
     return tca - sqrt(r * r - d2)
 }
+
+/**
+ * Climbing (Escalada): you hold the wall, not the floor. Grab a hold and your body hangs from it:
+ * moving the hand down pulls you up. [offset] is where your body is moved to in the world
+ * (game space = your room + offset). Grabbers: the two hands and the controller.
+ *
+ * Released with nothing held, you fall after a short grace (time to reach the next hold) and land
+ * on the ground or the highest ledge below you. Hanging by one grip tires it ([stamina]); with
+ * two grips or standing it recovers; at zero the grip slips.
+ */
+class ClimbRig(val holds: List<FloatArray>, val ledges: FloatArray, val summitY: Float) {
+    class Grip { var hold = -1; var ax = 0f; var ay = 0f; var az = 0f }
+    val grips = Array(3) { Grip() }
+    var ox = 0f; var oy = 0f; var oz = 0f
+    var vy = 0f
+    var standing = true; private set
+    var stamina = 1f; private set
+    var grace = 0f; private set
+    var maxHeight = 0f; private set
+    var falls = 0; private set
+    var won = false; private set
+
+    /** The nearest hold to a point in the world within [reach], or -1. */
+    fun nearest(x: Float, y: Float, z: Float, reach: Float): Int {
+        var best = -1; var bd = reach * reach
+        for ((i, h) in holds.withIndex()) {
+            val d = (h[0] - x) * (h[0] - x) + (h[1] - y) * (h[1] - y) + (h[2] - z) * (h[2] - z)
+            if (d < bd) { bd = d; best = i }
+        }
+        return best
+    }
+
+    /**
+     * One step. For each grabber: its position in the room (x, y, z) and whether it is closed
+     * (fist, trigger); [present] false when it is not tracked. Returns the index of a hold just
+     * grabbed (for the sound), or -1.
+     */
+    fun step(dt: Float, px: FloatArray, py: FloatArray, pz: FloatArray, closed: BooleanArray, present: BooleanArray, reach: FloatArray, graceTime: Float): Int {
+        var grabbed = -1
+        for (i in grips.indices) {
+            val g = grips[i]
+            if (!present[i] || !closed[i]) { g.hold = -1; continue }
+            if (g.hold >= 0) continue
+            val wx = px[i] + ox; val wy = py[i] + oy; val wz = pz[i] + oz
+            val h = nearest(wx, wy, wz, reach[i])
+            if (h >= 0) { g.hold = h; g.ax = wx - holds[h][0]; g.ay = wy - holds[h][1]; g.az = wz - holds[h][2]; grabbed = h }
+        }
+        val held = grips.withIndex().filter { it.value.hold >= 0 }
+        if (held.isNotEmpty()) {
+            // the body goes where the held hands stay on their holds
+            var nx = 0f; var ny = 0f; var nz = 0f
+            for ((i, g) in held) {
+                val h = holds[g.hold]
+                nx += h[0] + g.ax - px[i]; ny += h[1] + g.ay - py[i]; nz += h[2] + g.az - pz[i]
+            }
+            nx /= held.size; ny /= held.size; nz /= held.size
+            vy = if (dt > 0f) ((ny - oy) / dt).coerceIn(-6f, 6f) else 0f
+            ox = nx; oy = maxOf(ny, ground()); oz = nz
+            standing = false
+            grace = graceTime
+            stamina = (stamina + (if (held.size >= 2) 0.25f else -0.09f) * dt).coerceIn(0f, 1f)
+            if (stamina <= 0f) { for (g in grips) g.hold = -1; grace = 0f }
+            if (oy + 1.6f >= summitY) won = true
+        } else if (!standing) {
+            if (grace > 0f) grace -= dt
+            else {
+                vy -= 9.81f * dt
+                val land = ground()
+                oy += vy * dt
+                if (oy <= land) { if (vy < -3f) falls++; oy = land; vy = 0f; standing = true }
+            }
+        } else stamina = (stamina + 0.5f * dt).coerceAtMost(1f)
+        maxHeight = maxOf(maxHeight, oy)
+        return grabbed
+    }
+
+    /** The ground or the highest ledge at or below the body. */
+    fun ground(): Float {
+        var g = 0f
+        for (l in ledges) if (l <= oy + 0.02f && l > g) g = l
+        return g
+    }
+
+    companion object {
+        /**
+         * A route up a cliff [height] metres high: holds every 35 to 50 cm, zigzagging within reach,
+         * a second hold beside most of them, on the wall plane z = [wallZ]; ledges every 9 m.
+         */
+        fun route(seed: Long, height: Float = 27f, wallZ: Float = -0.42f): ClimbRig {
+            val rnd = java.util.Random(seed)
+            val holds = ArrayList<FloatArray>()
+            var y = 0.9f; var x = 0f
+            while (y < height + 1.2f) {
+                holds += floatArrayOf(x, y, wallZ)
+                if (rnd.nextFloat() < 0.8f) holds += floatArrayOf((x + (if (rnd.nextBoolean()) 0.45f else -0.45f)).coerceIn(-1.1f, 1.1f), y + (rnd.nextFloat() - 0.5f) * 0.2f, wallZ)
+                y += 0.35f + rnd.nextFloat() * 0.15f
+                x = (x + (rnd.nextFloat() - 0.5f) * 0.6f).coerceIn(-0.9f, 0.9f)
+            }
+            val ledges = floatArrayOf(9f, 18f)
+            return ClimbRig(holds, ledges, height)
+        }
+    }
+}

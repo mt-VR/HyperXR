@@ -32,6 +32,7 @@ icons = {
     "qg_pingpong": ("sports_tennis.svg",  "#ffa94d", "#1e5aa8", 0.52),
     "qg_fishing":  ("phishing.svg",       "#5fd0e0", "#14608a", 0.54),
     "qg_diorama":  ("cruelty_free.svg",   "#b6e388", "#4f8a3a", 0.54),
+    "qg_climb":    ("hiking.svg",         "#ffb35c", "#6a4a8c", 0.54),
 }
 def hexc(h): return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
 def gradient(a, b):
