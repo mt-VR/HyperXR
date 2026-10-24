@@ -9,6 +9,7 @@ layout(location=2) in vec2 aUv;
 uniform mat4 uMvp;
 uniform mat4 uModel;
 uniform mat4 uLightVP;
+uniform vec2 uUvScale;
 out vec3 vNormal;
 out vec2 vUv;
 out vec3 vWorld;
@@ -18,7 +19,7 @@ void main() {
     vWorld = w.xyz;
     vShadow = uLightVP * w;
     vNormal = mat3(uModel) * aNormal;
-    vUv = aUv;
+    vUv = aUv * uUvScale;
     gl_Position = uMvp * vec4(aPos, 1.0);
 }"""
 
@@ -42,14 +43,23 @@ uniform vec3 uLightColor;
 uniform vec3 uAmbient;
 uniform vec3 uEye;
 uniform float uAlphaCutoff;
+uniform int uAdditive;  // glow: soft edges, added to what is behind
+uniform vec4 uFog;      // rgb, density per metre (0: none)
 out vec4 fragColor;
 void main() {
     vec4 base = uColor;
     if (uHasTex == 1) base *= texture(uTex, vUv);
     if (base.a < uAlphaCutoff) discard;
-    if (uUnlit == 1) { fragColor = base; return; }
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
+    float fog = uFog.w > 0.0 ? 1.0 - exp(-uFog.w * distance(uEye, vWorld)) : 0.0;
+    if (uAdditive == 1) {
+        // a glowing volume: brightest where you look through most of it, fading at the rim
+        float ndv0 = abs(dot(n, normalize(uEye - vWorld)));
+        fragColor = vec4(base.rgb, base.a * pow(ndv0, 1.6) * (1.0 - fog));
+        return;
+    }
+    if (uUnlit == 1) { fragColor = vec4(mix(base.rgb, uFog.rgb, fog), base.a); return; }
     vec3 l = normalize(-uLightDir);
     float diff = max(dot(n, l), 0.0);
     // shadow map with 4-tap PCF (soft contact shadows on the bench)
@@ -78,7 +88,7 @@ void main() {
     vec3 specColor = mix(vec3(mix(0.04, 1.0, fres)), base.rgb, uMetal) * uGloss;
     vec3 albedo = base.rgb * (1.0 - 0.85 * uMetal);
     vec3 c = albedo * (amb + uLightColor * diff * lit) + specColor * spec * uLightColor * lit * diff + rim * (1.0 - uMetal) + base.rgb * amb * uMetal * 0.6;
-    fragColor = vec4(c, base.a);
+    fragColor = vec4(mix(c, uFog.rgb, fog), base.a);
 }"""
 
     /** Depth-only pass for the shadow map. */

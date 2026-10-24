@@ -37,6 +37,10 @@ class DrawItem {
      * them) would end up covered by icons and windows even when it is closer to the eyes.
      */
     var late = false
+    /** Glow: drawn last, added to what is behind, edges fading (lasers, sabres, sparks). */
+    var additive = false
+    /** Texture repeats across the mesh (tiling floors and walls). */
+    val uvScale = floatArrayOf(1f, 1f)
     val matrix = FloatArray(16)
 }
 
@@ -79,6 +83,8 @@ class FrameScene {
     val lightColor = floatArrayOf(1f, 0.97f, 0.92f)
     val ambient = floatArrayOf(0.32f, 0.33f, 0.4f)
     val clear = floatArrayOf(0.05f, 0.05f, 0.08f, 1f)
+    /** Distance fog: rgb and density per metre (0 = none; cleared by [reset]). */
+    val fog = floatArrayOf(0f, 0f, 0f, 0f)
     var background = Background.ENVIRONMENT
     /** Region covered by the shadow map (content sets it every frame; radius 0 = no shadows). */
     val shadowCenter = Vec3()
@@ -86,10 +92,10 @@ class FrameScene {
     /** Set by content every frame that wants to paint (cleared by [reset]). */
     var painter: ScenePainter? = null
 
-    fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f; painter = null }
+    fun reset() { drawCount = 0; panelCount = 0; shadowRadius = 0f; painter = null; fog[3] = 0f }
     fun addDraw(): DrawItem {
         if (drawCount == drawPool.size) drawPool += DrawItem()
-        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false; it.late = false }
+        return drawPool[drawCount++].also { it.mesh = null; it.model = null; it.texture = 0; it.cameraTexture = false; it.unlit = false; it.transparent = false; it.doubleSided = false; it.gloss = 0f; it.metal = 0f; it.castShadow = false; it.late = false; it.additive = false; it.uvScale[0] = 1f; it.uvScale[1] = 1f }
     }
     fun addPanel(): PanelItem {
         if (panelCount == panelPool.size) panelPool += PanelItem()
@@ -255,6 +261,7 @@ class SceneRenderer {
         val shadowMap = p.u("uShadowMap"); val mvp = p.u("uMvp"); val model = p.u("uModel"); val color = p.u("uColor")
         val hasTex = p.u("uHasTex"); val unlit = p.u("uUnlit"); val lightDir = p.u("uLightDir"); val lightColor = p.u("uLightColor")
         val ambient = p.u("uAmbient"); val eye = p.u("uEye"); val alphaCutoff = p.u("uAlphaCutoff"); val tex = p.u("uTex")
+        val additive = p.u("uAdditive"); val fog = p.u("uFog"); val uvScale = p.u("uUvScale")
     }
     private lateinit var litLoc: LitLocations
     private class QuadLocations(p: Program) {
@@ -525,26 +532,26 @@ class SceneRenderer {
         visibleDraws = 0
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glEnable(GLES30.GL_CULL_FACE)
-        // opaque first, then transparent
-        for (pass in 0..1) {
+        // opaque first, then transparent, then glow
+        for (pass in 0..2) {
             if (pass == 1) {
                 GLES30.glEnable(GLES30.GL_BLEND)
                 GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 GLES30.glDepthMask(false)
-            }
+            } else if (pass == 2) GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
             for (i in 0 until scene.drawCount) {
                 val d = scene.draw(i)
                 if (d.late) continue
-                val isTransparent = d.transparent || d.color[3] < 0.999f
-                if ((pass == 1) != isTransparent) continue
+                val p = if (d.additive) 2 else if (d.transparent || d.color[3] < 0.999f) 1 else 0
+                if (p != pass) continue
                 val model = d.model
                 if (model != null) {
-                    drawModel(model, d.matrix, eye, d.color, scene)
+                    drawModel(model, d.matrix, eye, d.color, scene, d.gloss, d.metal, blended = pass > 0)
                 } else {
                     val mesh = d.mesh ?: continue
                     if (!visible(mesh, d.matrix, eye)) continue
                     if (d.doubleSided) GLES30.glDisable(GLES30.GL_CULL_FACE)
-                    drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal)
+                    drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal, additive = d.additive, uvScale = d.uvScale)
                     if (d.doubleSided) GLES30.glEnable(GLES30.GL_CULL_FACE)
                 }
                 visibleDraws++
@@ -587,7 +594,7 @@ class SceneRenderer {
     }
 
     fun drawMesh(mesh: GpuMesh, model: FloatArray, eye: EyeView, color: FloatArray, texture: Int, scene: FrameScene, unlit: Boolean, alphaCutoff: Float = 0f,
-                 gloss: Float = 0f, metal: Float = 0f) {
+                 gloss: Float = 0f, metal: Float = 0f, additive: Boolean = false, uvScale: FloatArray = ONE_UV) {
         val L = litLoc
         GLES30.glUseProgram(lit.id)
         // uniforms keep their values in the program: what is the same for the whole eye is sent once
@@ -601,7 +608,10 @@ class SceneRenderer {
             GLES30.glUniform3fv(L.ambient, 1, scene.ambient, 0)
             GLES30.glUniform3f(L.eye, eye.position.x, eye.position.y, eye.position.z)
             GLES30.glUniform1i(L.tex, 0)
+            GLES30.glUniform4fv(L.fog, 1, scene.fog, 0)
         }
+        GLES30.glUniform1i(L.additive, if (additive) 1 else 0)
+        GLES30.glUniform2f(L.uvScale, uvScale[0], uvScale[1])
         GLES30.glUniform1f(L.gloss, gloss)
         GLES30.glUniform1f(L.metal, metal)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
@@ -676,12 +686,23 @@ class SceneRenderer {
         GLES30.glPolygonOffset(1.5f, 3f)
         GLES30.glDisable(GLES30.GL_CULL_FACE)
         GLES30.glUseProgram(depthProg.id)
+        val uMvp = depthProg.u("uMvp")
         for (i in 0 until scene.drawCount) {
             val d = scene.draw(i)
             if (!d.castShadow) continue
+            val model = d.model
+            if (model != null) {
+                for (p in model.parts) {
+                    Matrix.multiplyMM(partMatrix, 0, d.matrix, 0, p.world, 0)
+                    Matrix.multiplyMM(mvp, 0, lightVP, 0, partMatrix, 0)
+                    GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
+                    p.mesh.draw()
+                }
+                continue
+            }
             val mesh = d.mesh ?: continue
             Matrix.multiplyMM(mvp, 0, lightVP, 0, d.matrix, 0)
-            GLES30.glUniformMatrix4fv(depthProg.u("uMvp"), 1, false, mvp, 0)
+            GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
             mesh.draw()
         }
         GLES30.glDisable(GLES30.GL_POLYGON_OFFSET_FILL)
@@ -692,15 +713,16 @@ class SceneRenderer {
 
     private val partMatrix = FloatArray(16)
     private val partColor = FloatArray(4)
-    fun drawModel(model: GpuModel, transform: FloatArray, eye: EyeView, tint: FloatArray, scene: FrameScene) {
+    fun drawModel(model: GpuModel, transform: FloatArray, eye: EyeView, tint: FloatArray, scene: FrameScene, gloss: Float = 0f, metal: Float = 0f, blended: Boolean = false) {
         for (p in model.parts) {
             Matrix.multiplyMM(partMatrix, 0, transform, 0, p.world, 0)
             if (!visible(p.mesh, partMatrix, eye)) continue
             for (k in 0..3) partColor[k] = p.color[k] * tint[k]
             if (p.doubleSided) GLES30.glDisable(GLES30.GL_CULL_FACE)
-            if (p.blend) { GLES30.glEnable(GLES30.GL_BLEND); GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA) }
-            drawMesh(p.mesh, partMatrix, eye, partColor, p.texture, scene, false, p.alphaCutoff)
-            if (p.blend) GLES30.glDisable(GLES30.GL_BLEND)
+            // inside the transparent pass blending is already on: leave it on
+            if (p.blend && !blended) { GLES30.glEnable(GLES30.GL_BLEND); GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA) }
+            drawMesh(p.mesh, partMatrix, eye, partColor, p.texture, scene, false, p.alphaCutoff, gloss, metal)
+            if (p.blend && !blended) GLES30.glDisable(GLES30.GL_BLEND)
             if (p.doubleSided) GLES30.glEnable(GLES30.GL_CULL_FACE)
         }
     }
@@ -760,6 +782,7 @@ class SceneRenderer {
     private val flipY = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
 
     companion object {
+        private val ONE_UV = floatArrayOf(1f, 1f)
         private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
 
         /** Centre crop (u, v scale) that makes the camera image cover an eye of [eyeAspect]. */

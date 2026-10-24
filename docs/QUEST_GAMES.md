@@ -56,3 +56,33 @@ Para trocar por modelos do Sketchfab:
 - é preciso o token da sua conta, que fica em Configurações > Senha e API no site;
 - a licença de cada modelo precisa ser seguida; CC-BY exige o crédito do autor na tela de
   créditos.
+
+## Visual (cenários, brilho, sombras)
+
+Cada jogo tem o próprio mundo, pintado por `GameSky` (um único passe atrás de tudo): céu em
+gradiente, sol, estrelas, nebulosa ou nuvens, e um chão infinito (grade neon, planície ou água
+que reflete o céu), com neblina no horizonte. A luz da cena vem do sol de cada cenário.
+
+- Motor: itens aditivos (`DrawItem.additive`, bordas suaves) para lasers, sabres, faíscas e
+  lâmpadas; neblina por distância (`FrameScene.fog`); textura repetida (`uvScale`); modelos glTF
+  também projetam sombra.
+- `GameArt`: caixa de cantos arredondados, toro, cone, seta; texturas geradas no aparelho
+  (madeira, grama, feltro, lona do ringue, papel de shoji, fachada de prédio, casca, metal).
+- `Particles`: faíscas, estilhaços e gotas compartilhados por todos os jogos (o Tempo Parado os
+  desacelera junto com o tempo).
+
+| Jogo | Cenário |
+|---|---|
+| Sabre de Ritmo | plataforma de vidro escuro, pista neon, túnel de luz e lasers no ritmo, sabres com rastro, blocos que se partem com faíscas |
+| Ninja das Frutas | dojo ao pôr do sol (piso, papel, lanternas), katanas, suco que respinga na parede, bombas com pavio |
+| Ringue | arena escura, ringue elevado com cordas e postes, holofotes, torcida com flashes, luvas de verdade |
+| Prancha no Céu | céu com nuvens, cidade com ruas, prédio de vidro, elevador de aço com painel, pássaros |
+| Minigolfe | dia de sol, feltro, trilhos de madeira, árvores, pedras, montanhas na névoa |
+| Tempo Parado | mundo branco com sombras duras, inimigos de vidro vermelho que estilhaçam, balas com rastro |
+| Caçador de Drones | plataforma neon sobre cidade à noite, nebulosa, tiros de plasma, explosões, escudo de energia |
+| Tênis de Mesa | sala de clube, mesa com linhas e rede, raquete de borracha e cabo, adversário |
+| Pescaria | píer num lago ao pôr do sol (água que reflete), fogueira com brasas, vaga-lumes, vara que enverga |
+| Pequeno Herói | toco musgoso numa floresta de árvores gigantes, névoa, raios de luz, vaga-lumes |
+
+Nada disso foi testado num aparelho ainda: compila, os shaders foram validados num compilador
+GLSL ES 3.00, mas desempenho e aparência reais precisam ser vistos no celular.
