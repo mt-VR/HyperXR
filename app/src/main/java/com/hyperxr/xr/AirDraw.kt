@@ -117,7 +117,9 @@ class AirDrawPanel(private val draw: AirDraw, private val onDone: () -> Unit) : 
         c.label("${draw.strokes.size} traços", c.pad + 724f, c.y + 20f, 26f, XrTheme.textDim)
     }
 
-    override fun update(dt: Float) { dirty = true }
+    // redrawn only when the stroke count it shows changes (a canvas redraw + upload is not free)
+    private var shown = -1
+    override fun update(dt: Float) { if (draw.strokes.size != shown) { shown = draw.strokes.size; dirty = true } }
 
     /** Closing the palette (its X too) ends drawing; the strokes stay in the room. */
     override fun release() { draw.active = false; super.release() }

@@ -208,6 +208,7 @@ class SceneRenderer {
 
     fun init() {
         lit = Program(Gl.compile(Shaders.LIT_VS, Shaders.LIT_FS, "lit"))
+        litLoc = LitLocations(lit)
         quadProg = Program(Gl.compile(Shaders.QUAD_VS, Shaders.QUAD_FS, "quad"))
         oesProg = Program(Gl.compile(Shaders.OES_VS, Shaders.OES_FS, "oes"))
         skyProg = Program(Gl.compile(Shaders.SKY_VS, Shaders.SKY_FS, "sky"))
@@ -248,7 +249,26 @@ class SceneRenderer {
         2 -> sphere; 3 -> plane; 4 -> cylinder; 5 -> quad; else -> cube
     }
 
+    /** Uniform locations of the lit program, looked up once (drawMesh runs hundreds of times a frame). */
+    private class LitLocations(p: Program) {
+        val gloss = p.u("uGloss"); val metal = p.u("uMetal"); val shadowOn = p.u("uShadowOn"); val lightVP = p.u("uLightVP")
+        val shadowMap = p.u("uShadowMap"); val mvp = p.u("uMvp"); val model = p.u("uModel"); val color = p.u("uColor")
+        val hasTex = p.u("uHasTex"); val unlit = p.u("uUnlit"); val lightDir = p.u("uLightDir"); val lightColor = p.u("uLightColor")
+        val ambient = p.u("uAmbient"); val eye = p.u("uEye"); val alphaCutoff = p.u("uAlphaCutoff"); val tex = p.u("uTex")
+    }
+    private lateinit var litLoc: LitLocations
+    private class QuadLocations(p: Program) {
+        val mvp = p.u("uMvp"); val alpha = p.u("uAlpha"); val radius = p.u("uRadius"); val aspect = p.u("uAspect")
+        val glow = p.u("uGlow"); val tint = p.u("uTint"); val tex = p.u("uTex")
+    }
+    private var quadLoc: QuadLocations? = null
+    /** Counts eye renders: the lit program's per-eye uniforms are sent once per pass, not per draw. */
+    private var pass = 0
+    private var litPass = -1
+    private var litEye: EyeView? = null
+
     fun renderBackground(scene: FrameScene, eye: EyeView, camera: CameraImageSource?, headPose: Pose) {
+        pass++
         val c = scene.clear
         GLES30.glClearColor(c[0], c[1], c[2], c[3])
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
@@ -568,28 +588,33 @@ class SceneRenderer {
 
     fun drawMesh(mesh: GpuMesh, model: FloatArray, eye: EyeView, color: FloatArray, texture: Int, scene: FrameScene, unlit: Boolean, alphaCutoff: Float = 0f,
                  gloss: Float = 0f, metal: Float = 0f) {
+        val L = litLoc
         GLES30.glUseProgram(lit.id)
-        GLES30.glUniform1f(lit.u("uGloss"), gloss)
-        GLES30.glUniform1f(lit.u("uMetal"), metal)
-        GLES30.glUniform1i(lit.u("uShadowOn"), if (shadowActive) 1 else 0)
-        GLES30.glUniformMatrix4fv(lit.u("uLightVP"), 1, false, lightVP, 0)
+        // uniforms keep their values in the program: what is the same for the whole eye is sent once
+        if (litPass != pass || litEye !== eye) {
+            litPass = pass; litEye = eye
+            GLES30.glUniform1i(L.shadowOn, if (shadowActive) 1 else 0)
+            GLES30.glUniformMatrix4fv(L.lightVP, 1, false, lightVP, 0)
+            GLES30.glUniform1i(L.shadowMap, 1)
+            GLES30.glUniform3fv(L.lightDir, 1, scene.lightDir, 0)
+            GLES30.glUniform3fv(L.lightColor, 1, scene.lightColor, 0)
+            GLES30.glUniform3fv(L.ambient, 1, scene.ambient, 0)
+            GLES30.glUniform3f(L.eye, eye.position.x, eye.position.y, eye.position.z)
+            GLES30.glUniform1i(L.tex, 0)
+        }
+        GLES30.glUniform1f(L.gloss, gloss)
+        GLES30.glUniform1f(L.metal, metal)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowTex) // always a depth texture: drivers dislike an empty shadow sampler
-        GLES30.glUniform1i(lit.u("uShadowMap"), 1)
         Matrix.multiplyMM(mvp, 0, eye.viewProj, 0, model, 0)
-        GLES30.glUniformMatrix4fv(lit.u("uMvp"), 1, false, mvp, 0)
-        GLES30.glUniformMatrix4fv(lit.u("uModel"), 1, false, model, 0)
-        GLES30.glUniform4fv(lit.u("uColor"), 1, color, 0)
-        GLES30.glUniform1i(lit.u("uHasTex"), if (texture != 0) 1 else 0)
-        GLES30.glUniform1i(lit.u("uUnlit"), if (unlit) 1 else 0)
-        GLES30.glUniform3fv(lit.u("uLightDir"), 1, scene.lightDir, 0)
-        GLES30.glUniform3fv(lit.u("uLightColor"), 1, scene.lightColor, 0)
-        GLES30.glUniform3fv(lit.u("uAmbient"), 1, scene.ambient, 0)
-        GLES30.glUniform3f(lit.u("uEye"), eye.position.x, eye.position.y, eye.position.z)
-        GLES30.glUniform1f(lit.u("uAlphaCutoff"), alphaCutoff)
+        GLES30.glUniformMatrix4fv(L.mvp, 1, false, mvp, 0)
+        GLES30.glUniformMatrix4fv(L.model, 1, false, model, 0)
+        GLES30.glUniform4fv(L.color, 1, color, 0)
+        GLES30.glUniform1i(L.hasTex, if (texture != 0) 1 else 0)
+        GLES30.glUniform1i(L.unlit, if (unlit) 1 else 0)
+        GLES30.glUniform1f(L.alphaCutoff, alphaCutoff)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (texture != 0) texture else whiteTexture)
-        GLES30.glUniform1i(lit.u("uTex"), 0)
         mesh.draw()
     }
 
@@ -689,6 +714,9 @@ class SceneRenderer {
         for (i in 0 until scene.panelCount) {
             val p = scene.panel(i)
             if (p.overlay != overlayPass || p.texture == 0) continue
+            // off-screen for this eye (icons behind you, windows to the side): nothing to draw
+            val pr = 0.5f * kotlin.math.sqrt(p.width * p.width + p.height * p.height) + (if (p.curvature > 0f) 0.1f else 0f)
+            if (!eye.sphereVisible(p.pose.position.x, p.pose.position.y, p.pose.position.z, pr)) continue
             val mesh = if (p.curvature > 0f) curvedMesh(p.width, p.height, p.curvature) else quad
             if (p.curvature > 0f) Mat4.compose(p.pose.position, p.pose.orientation, 1f, 1f, 1f, panelModel)
             else Mat4.compose(p.pose.position, p.pose.orientation, p.width, p.height, 1f, panelModel)
@@ -702,16 +730,17 @@ class SceneRenderer {
                 GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, p.texture)
                 GLES30.glUniform1i(oesProg.u("uTex"), 0)
             } else {
+                val q = quadLoc ?: QuadLocations(quadProg).also { quadLoc = it }
                 GLES30.glUseProgram(quadProg.id)
-                GLES30.glUniformMatrix4fv(quadProg.u("uMvp"), 1, false, mvp, 0)
-                GLES30.glUniform1f(quadProg.u("uAlpha"), p.alpha)
-                GLES30.glUniform1f(quadProg.u("uRadius"), p.radius / p.height)
-                GLES30.glUniform1f(quadProg.u("uAspect"), p.width / p.height)
-                GLES30.glUniform1f(quadProg.u("uGlow"), p.glow)
-                GLES30.glUniform4fv(quadProg.u("uTint"), 1, p.tint, 0)
+                GLES30.glUniformMatrix4fv(q.mvp, 1, false, mvp, 0)
+                GLES30.glUniform1f(q.alpha, p.alpha)
+                GLES30.glUniform1f(q.radius, p.radius / p.height)
+                GLES30.glUniform1f(q.aspect, p.width / p.height)
+                GLES30.glUniform1f(q.glow, p.glow)
+                GLES30.glUniform4fv(q.tint, 1, p.tint, 0)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, p.texture)
-                GLES30.glUniform1i(quadProg.u("uTex"), 0)
+                GLES30.glUniform1i(q.tex, 0)
             }
             mesh.draw()
         }

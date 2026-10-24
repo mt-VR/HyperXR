@@ -131,7 +131,7 @@ class VisualGyroTracker(context: Context, private val displayRotation: Int) : He
     }
 
     override fun pose(predictionNs: Long, out: Pose) {
-        val q = Quat(); val w = Vec3(); val ts: Long
+        val q = poseQ; val w = poseW; val ts: Long
         synchronized(lock) { q.set(orientation); w.set(angular); ts = sampleNs }
         // camera rate (30-60 Hz): carried forward by the measured angular velocity to photon time
         val age = if (ts > 0) (SystemClock.elapsedRealtimeNanos() - ts + predictionNs).coerceIn(0L, 80_000_000L) else 0L
@@ -145,8 +145,11 @@ class VisualGyroTracker(context: Context, private val displayRotation: Int) : He
         out.orientation.normalize()
         // eyes ~8 cm in front of and ~7.5 cm above the neck pivot
         out.orientation.rotate(neck.set(0f, 0.075f, -0.08f), out.position)
-        out.position.add(Vec3(0f, 1.6f - 0.075f, 0.08f))
+        out.position.add(neckBase)
     }
+
+    // pose() scratch (GL thread, two or three calls a frame)
+    private val poseQ = Quat(); private val poseW = Vec3(); private val neckBase = Vec3(0f, 1.6f - 0.075f, 0.08f)
 
     override fun recenter() { pendingRecenter = true }
 

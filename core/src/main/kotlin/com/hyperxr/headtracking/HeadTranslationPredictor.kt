@@ -34,9 +34,11 @@ class HeadTranslationPredictor(
 
     fun reset() { velocity.set(0f, 0f, 0f); gain = 0f; prevTs = 0L }
 
+    private val pivotScratch = Vec3()
+
     /** A new tracked pose: eye position [pos] and orientation [q] at [timestampNs]. */
     fun onPose(pos: Vec3, q: Quat, timestampNs: Long) {
-        val pivot = Vec3().set(pos).sub(q.rotate(eyeFromNeck, tmp))
+        val pivot = pivotScratch.set(pos).sub(q.rotate(eyeFromNeck, tmp))
         if (prevTs != 0L && timestampNs > prevTs) {
             val dt = (timestampNs - prevTs) / 1e9f
             if (dt in 0.005f..0.2f) {

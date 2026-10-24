@@ -157,3 +157,35 @@ Limites:
 - precisa de luz e de um ambiente com detalhes (parede lisa ou escuro não dão pontos);
 - a taxa é a da câmera (30 a 60 Hz), com previsão entre os quadros;
 - o desvio de yaw só é corrigido quando o usuário olha de novo para uma direção já vista.
+
+## Rodada de otimização do app inteiro
+
+**Mãos (RTMPose):** o recorte da mão e o letterbox do detector saíram do Canvas + getPixels +
+laço em Kotlin. Agora são uma passada nativa (`warpToTensorNorm`): recorte afim, interpolação
+bilinear e a normalização do OpenMMLab direto no buffer de entrada do modelo (RGB intercalado
+para a pose, planos BGR com borda cinza 114 para o detector). O caminho antigo fica como reserva.
+
+**Giroscópio:** o histórico acha as amostras antigas por busca binária, não mais uma a uma, e
+não aloca nada no ajuste da previsão nem em `delta` (2-3 chamadas por quadro).
+
+**6DoF (ARCore):**
+- A detecção de planos foi desligada. Nada no HyperXR usa os planos (âncoras, profundidade e
+  rastreio funcionam sem eles), e ela gastava CPU em todo quadro da câmera.
+- A pose e o preditor de translação não alocam mais por quadro.
+
+**Giroscópio visual:**
+- O RANSAC para cedo quando 90% dos pontos já concordam.
+- O teste de cada hipótese não cria vetores.
+- O método de Horn para de iterar quando converge e não aloca a cada passo.
+
+**Renderização:**
+- Os endereços dos uniforms do shader principal e dos painéis são buscados uma vez, não por
+  nome em cada objeto.
+- Luz, sombra e posição do olho são enviadas uma vez por olho.
+- Painéis fora do campo de visão de cada olho não são desenhados.
+
+**Painéis:** o do Desenho no Ar e o de Compartilhar tela só se redesenham quando o que mostram
+muda (antes, em todo quadro ou a cada meio segundo).
+
+**Medição:** nenhum ganho foi medido num celular ainda. A tela de diagnóstico mostra os tempos
+por etapa para comparar.

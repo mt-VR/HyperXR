@@ -48,7 +48,10 @@ class RtmHandEngine(private val context: Context) : HandEngine {
     private val cropPixels = IntArray(n * n)
     private val det = Bitmap.createBitmap(DET, DET, Bitmap.Config.ARGB_8888)
     private val detPixels = IntArray(DET * DET)
-    private val detIn = ByteBuffer.allocateDirect(3 * DET * DET * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private val detBytes = ByteBuffer.allocateDirect(3 * DET * DET * 4).order(ByteOrder.nativeOrder())
+    private val detIn = detBytes.asFloatBuffer()
+    @Volatile private var detReady = false
+    private val warpM = FloatArray(6); private val detM = FloatArray(6)
     private val detFloats = FloatArray(3 * DET * DET)
     /** Per-channel normalisation tables (value - mean) / std, indexed by the 0..255 byte. */
     private val normR = FloatArray(256) { (it - 123.675f) / 58.395f }
@@ -181,6 +184,10 @@ class RtmHandEngine(private val context: Context) : HandEngine {
 
     /** Runs RTMPose on [c]; joints and confidences land in [joints] / [conf]. Returns the presence. */
     private fun runPose(p: Interpreter, bmp: Bitmap, c: RtmHand.Crop): Float {
+        // native: crop, bilinear and normalisation straight into the model's input in one pass
+        warpM[0] = c.side / n; warpM[1] = 0f; warpM[2] = c.cx - c.side / 2; warpM[3] = 0f; warpM[4] = c.side / n; warpM[5] = c.cy - c.side / 2
+        poseIn.rewind()
+        if (YuvNative.available && YuvNative.warpToTensorNorm(bmp, warpM, n, n, MEAN, INV_STD, 0f, false, poseIn)) return infer(p, c)
         matrix.reset()
         matrix.postTranslate(-(c.cx - c.side / 2), -(c.cy - c.side / 2))
         matrix.postScale(n / c.side, n / c.side)
@@ -195,6 +202,10 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             o += 3
         }
         poseIn.rewind(); poseIn.asFloatBuffer().put(f)
+        return infer(p, c)
+    }
+
+    private fun infer(p: Interpreter, c: RtmHand.Crop): Float {
         poseIn.rewind(); outX.rewind(); outY.rewind()
         p.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to outX, 1 to outY))
         outX.rewind(); outX.asFloatBuffer().get(flatX)
@@ -208,6 +219,12 @@ class RtmHandEngine(private val context: Context) : HandEngine {
     /** The frame scaled into the detector's 320x320 letterbox (on the tracking thread; the bitmap is reused). */
     private fun letterbox(bmp: Bitmap) {
         val s = DET.toFloat() / maxOf(bmp.width, bmp.height)
+        // native: the letterbox straight into the detector's input (BGR planes, grey 114 padding)
+        detM[0] = 1f / s; detM[1] = 0f; detM[2] = 0f; detM[3] = 0f; detM[4] = 1f / s; detM[5] = 0f
+        detBytes.rewind()
+        detReady = YuvNative.available && YuvNative.warpToTensorNorm(bmp, detM, DET, DET, MEAN, INV_STD, 114f, true, detBytes)
+        detScale = s
+        if (detReady) return
         detMatrix.reset(); detMatrix.postScale(s, s)
         detCanvas.drawColor(Color.rgb(114, 114, 114)); detCanvas.drawBitmap(bmp, detMatrix, paint)
         detScale = s
@@ -218,17 +235,20 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         val d = detector ?: return emptyList()
         val e = env ?: return emptyList()
         val s = detScale
-        det.getPixels(detPixels, 0, DET, 0, 0, DET, DET)
-        val plane = DET * DET
-        val f = detFloats
-        for (i in 0 until plane) {
-            val px = detPixels[i]
-            // BGR planes, as the detector was trained
-            f[i] = normB[px and 0xff]
-            f[plane + i] = normG[(px shr 8) and 0xff]
-            f[2 * plane + i] = normR[(px shr 16) and 0xff]
+        if (!detReady) {
+            det.getPixels(detPixels, 0, DET, 0, 0, DET, DET)
+            val plane = DET * DET
+            val f = detFloats
+            for (i in 0 until plane) {
+                val px = detPixels[i]
+                // BGR planes, as the detector was trained
+                f[i] = normB[px and 0xff]
+                f[plane + i] = normG[(px shr 8) and 0xff]
+                f[2 * plane + i] = normR[(px shr 16) and 0xff]
+            }
+            detIn.rewind(); detIn.put(f)
         }
-        detIn.rewind(); detIn.put(f); detIn.rewind()
+        detIn.rewind()
         // a direct buffer: ONNX Runtime reads it in place
         OnnxTensor.createTensor(e, detIn, longArrayOf(1, 3, DET.toLong(), DET.toLong())).use { t ->
             d.run(mapOf("input" to t)).use { r ->
@@ -255,6 +275,9 @@ class RtmHandEngine(private val context: Context) : HandEngine {
     }
 
     companion object {
+        /** OpenMMLab's ImageNet normalisation (RGB order), for the native path. */
+        private val MEAN = floatArrayOf(123.675f, 116.28f, 103.53f)
+        private val INV_STD = floatArrayOf(1f / 58.395f, 1f / 57.12f, 1f / 57.375f)
         const val POSE = "models/rtm_hand_pose.tflite"
         const val DETECTOR = "models/rtm_hand_detector.onnx"
         private const val DET = 320

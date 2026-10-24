@@ -79,7 +79,9 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             val config = Config(s).apply {
                 updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                 focusMode = Config.FocusMode.FIXED
-                planeFindingMode = if (lightweight) Config.PlaneFindingMode.DISABLED else Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                // nothing in HyperXR uses ARCore's planes (anchors, depth and tracking work without
+                // them): plane finding would only cost CPU on every camera frame
+                planeFindingMode = Config.PlaneFindingMode.DISABLED
                 lightEstimationMode = Config.LightEstimationMode.DISABLED
             }
             // Camera configuration. The Depth API is only offered with some of them (often not
@@ -229,9 +231,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     }
 
     override fun pose(predictionNs: Long, out: Pose) {
-        // pose relative to the recentred origin, as of the camera frame
-        val inv = origin.inverse()
-        inv.compose(headPose, out)
+        // pose relative to the recentred origin, as of the camera frame (no allocation: 2-3 calls a frame)
+        origin.inverse(originInv).compose(headPose, out)
         val g = gyro ?: return
         if (frameTs == 0L) return
         // ARCore's pose is as old as the camera frame (30-60 Hz, tens of ms): the gyroscope
@@ -256,6 +257,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     private var lostPropNs = 0L
     private val shownWhileLost = Pose()
     private val qAtPose = Quat()
+    private val originInv = Pose()
+    private val relScratch = Pose()
     private val posAtPose = Vec3()
 
     override fun recenter() { recenterPending = true; translation.reset(); prevTs = 0L }
@@ -294,7 +297,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     }
 
     private fun onArPose(ts: Long) {
-        val rel = origin.inverse().compose(headPose)
+        val rel = origin.inverse(originInv).compose(headPose, relScratch)
         val g = gyro
         translation.onPose(rel.position, rel.orientation, ts)
         if (prevTs != 0L && ts > prevTs) {

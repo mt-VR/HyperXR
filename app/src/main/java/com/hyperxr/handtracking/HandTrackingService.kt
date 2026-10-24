@@ -832,6 +832,10 @@ object YuvNative {
 
     /** Affine crop + bilinear + RGB/255 floats into a direct buffer (size x size x 3). */
     @JvmStatic external fun warpToTensor(bitmap: Bitmap, m: FloatArray, size: Int, out: java.nio.ByteBuffer): Boolean
+
+    /** Affine crop + bilinear + (pixel - mean) * invStd into a direct buffer: interleaved RGB, or BGR planes. */
+    @JvmStatic external fun warpToTensorNorm(bitmap: Bitmap, m: FloatArray, outW: Int, outH: Int, mean: FloatArray, invStd: FloatArray, pad: Float,
+                                             planarBgr: Boolean, out: java.nio.ByteBuffer): Boolean
 }
 
 /**

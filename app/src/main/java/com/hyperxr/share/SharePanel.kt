@@ -9,7 +9,14 @@ class SharePanel(private val share: ScreenShare, private val activity: android.a
     private var t = 0f
     private var saved = ""
 
-    override fun update(dt: Float) { t += dt; if (t > 0.5f) { t = 0f; dirty = true } }
+    private var lastSummary = ""
+    override fun update(dt: Float) {
+        t += dt
+        if (t < 0.5f) return
+        t = 0f
+        val s = share.summary + share.error + share.stream.clients + share.displays.count
+        if (s != lastSummary) { lastSummary = s; dirty = true }
+    }
 
     override fun draw(c: PanelCanvas) {
         c.paragraph("Tudo que sai do HyperXR para fora sai numa imagem única em 16:9, sem as duas lentes do Cardboard e sem distorção, em alta resolução.", 24f)

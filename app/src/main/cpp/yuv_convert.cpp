@@ -85,3 +85,53 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_hyperxr_handtracking_YuvNative_wa
     AndroidBitmap_unlockPixels(env, bitmap);
     return JNI_TRUE;
 }
+
+/*
+ * Like warpToTensor, with the model's own normalisation folded in: out = (pixel - mean) * invStd
+ * per channel, pixels outside the image take [pad] (raw 0..255). [planarBgr] writes three
+ * planes in B, G, R order (NCHW, as OpenMMLab's detectors take it); otherwise interleaved RGB
+ * (NHWC). Writes width x height samples (a letterbox may be wider than the image).
+ */
+extern "C" JNIEXPORT jboolean JNICALL Java_com_hyperxr_handtracking_YuvNative_warpToTensorNorm(
+        JNIEnv* env, jclass, jobject bitmap, jfloatArray jm, jint outW, jint outH, jfloatArray jmean, jfloatArray jinv, jfloat pad,
+        jboolean planarBgr, jobject out) {
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS || info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
+    float* dst = static_cast<float*>(env->GetDirectBufferAddress(out));
+    const size_t plane = static_cast<size_t>(outW) * outH;
+    if (!dst || env->GetDirectBufferCapacity(out) < static_cast<jlong>(plane * 3 * 4)) return JNI_FALSE;
+    float m[6], mean[3], inv[3];
+    env->GetFloatArrayRegion(jm, 0, 6, m);
+    env->GetFloatArrayRegion(jmean, 0, 3, mean);
+    env->GetFloatArrayRegion(jinv, 0, 3, inv);
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS || !pixels) return JNI_FALSE;
+    const uint8_t* src = static_cast<const uint8_t*>(pixels);
+    const int w = static_cast<int>(info.width), h = static_cast<int>(info.height);
+    const int stride = static_cast<int>(info.stride);
+    const float pr = (pad - mean[0]) * inv[0], pg = (pad - mean[1]) * inv[1], pb = (pad - mean[2]) * inv[2];
+    const bool planar = planarBgr == JNI_TRUE;
+    for (int v = 0; v < outH; v++) {
+        float x = m[0] * 0.5f + m[1] * (v + 0.5f) + m[2] - 0.5f;
+        float y = m[3] * 0.5f + m[4] * (v + 0.5f) + m[5] - 0.5f;
+        for (int u = 0; u < outW; u++, x += m[0], y += m[3]) {
+            float r, g, b;
+            int x0 = static_cast<int>(x < 0 ? x - 1 : x), y0 = static_cast<int>(y < 0 ? y - 1 : y);
+            if (x0 < 0 || y0 < 0 || x0 >= w - 1 || y0 >= h - 1) { r = pr; g = pg; b = pb; }
+            else {
+                float fx = x - x0, fy = y - y0;
+                const uint8_t* p = src + y0 * stride + x0 * 4;
+                const uint8_t* q = p + stride;
+                float w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+                r = ((p[0] * w00 + p[4] * w10 + q[0] * w01 + q[4] * w11) - mean[0]) * inv[0];
+                g = ((p[1] * w00 + p[5] * w10 + q[1] * w01 + q[5] * w11) - mean[1]) * inv[1];
+                b = ((p[2] * w00 + p[6] * w10 + q[2] * w01 + q[6] * w11) - mean[2]) * inv[2];
+            }
+            const size_t i = static_cast<size_t>(v) * outW + u;
+            if (planar) { dst[i] = b; dst[plane + i] = g; dst[2 * plane + i] = r; }
+            else { float* o = dst + i * 3; o[0] = r; o[1] = g; o[2] = b; }
+        }
+    }
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return JNI_TRUE;
+}

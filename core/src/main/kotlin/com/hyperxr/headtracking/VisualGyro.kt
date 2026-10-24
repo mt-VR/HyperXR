@@ -365,6 +365,8 @@ class VisualGyro(
         return n
     }
 
+    private val rv = Vec3()
+
     /** 2-point RANSAC on bearing pairs, then Horn's method on the inliers. */
     private fun ransac(a: List<Vec3>, b: List<Vec3>, out: Quat): Int {
         val n = a.size
@@ -373,17 +375,21 @@ class VisualGyro(
         val q = Quat()
         val rnd = java.util.Random(n.toLong() * 7919)
         val cosT = kotlin.math.cos(INLIER_RAD)
-        repeat(RANSAC_ITERS) {
+        val pa = arrayListOf(a[0], a[0]); val pb = arrayListOf(b[0], b[0])
+        for (iter in 0 until RANSAC_ITERS) {
             val i = rnd.nextInt(n); var j = rnd.nextInt(n)
             if (j == i) j = (j + 1) % n
-            horn(listOf(a[i], a[j]), listOf(b[i], b[j]), q)
+            pa[0] = a[i]; pa[1] = a[j]; pb[0] = b[i]; pb[1] = b[j]
+            horn(pa, pb, q)
             var inl = 0
-            for (k in 0 until n) if (q.rotate(a[k]).dot(b[k]) > cosT) inl++
+            for (k in 0 until n) if (q.rotate(a[k], rv).dot(b[k]) > cosT) inl++
             if (inl > bestInl) { bestInl = inl; best.set(q) }
+            // nearly everything agrees already (a pure rotation, few outliers): no need to keep drawing
+            if (iter >= 8 && bestInl >= n * 0.9f) break
         }
         if (bestInl < MIN_MATCHES) return bestInl
-        val ia = ArrayList<Vec3>(); val ib = ArrayList<Vec3>()
-        for (k in 0 until n) if (best.rotate(a[k]).dot(b[k]) > cosT) { ia += a[k]; ib += b[k] }
+        val ia = ArrayList<Vec3>(bestInl); val ib = ArrayList<Vec3>(bestInl)
+        for (k in 0 until n) if (best.rotate(a[k], rv).dot(b[k]) > cosT) { ia += a[k]; ib += b[k] }
         horn(ia, ib, out)
         return ia.size
     }
@@ -392,6 +398,8 @@ class VisualGyro(
      * Horn's closed-form rotation (unit quaternion) minimising Σ|b - R a|²: the eigenvector of the
      * largest eigenvalue of a 4x4 symmetric matrix, by shifted power iteration.
      */
+    private val hv = FloatArray(4); private val ht = FloatArray(4)
+
     fun horn(a: List<Vec3>, b: List<Vec3>, out: Quat) {
         var sxx = 0f; var sxy = 0f; var sxz = 0f; var syx = 0f; var syy = 0f; var syz = 0f; var szx = 0f; var szy = 0f; var szz = 0f
         for (k in a.indices) {
@@ -409,12 +417,15 @@ class VisualGyro(
         // shift so every eigenvalue is positive; the largest stays the largest
         val shift = a.size.toFloat() + 1f
         for (i in 0..3) n[i][i] += shift
-        var v = floatArrayOf(1f, 0f, 0f, 0f)
-        val t = FloatArray(4)
-        repeat(60) {
+        val v = hv; v[0] = 1f; v[1] = 0f; v[2] = 0f; v[3] = 0f
+        val t = ht
+        for (it in 0 until 60) {
             for (i in 0..3) t[i] = n[i][0] * v[0] + n[i][1] * v[1] + n[i][2] * v[2] + n[i][3] * v[3]
             val l = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2] + t[3] * t[3]).coerceAtLeast(1e-12f)
-            v = floatArrayOf(t[0] / l, t[1] / l, t[2] / l, t[3] / l)
+            var change = 0f
+            for (i in 0..3) { val nv = t[i] / l; change += abs(nv - v[i]); v[i] = nv }
+            // converged: further power steps change nothing measurable
+            if (change < 1e-7f) break
         }
         out.set(v[1], v[2], v[3], v[0]).normalize()
     }

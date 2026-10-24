@@ -29,6 +29,8 @@ class GyroHistory(private val capacity: Int = 1024) {
     /** When false, extrapolation uses the newest rate only (the earlier behaviour, for comparison). */
     var secondOrder = true
     private val fit = FloatArray(6)
+    private val fitSw = DoubleArray(3); private val fitStw = DoubleArray(3)
+    private val qa = Quat(); private val qb = Quat()
     /** Called before every read: lets a polled source (direct sensor channel) add its newest samples. */
     @Volatile var beforeRead: (() -> Unit)? = null
     private var head = -1
@@ -71,20 +73,20 @@ class GyroHistory(private val capacity: Int = 1024) {
             }
             return true
         }
-        // newest to oldest: find the two samples around timeNs
-        var i = head
-        repeat(count - 1) {
-            val prev = (i - 1 + capacity) % capacity
-            if (t[prev] <= timeNs) {
-                val f = (timeNs - t[prev]).toFloat() / (t[i] - t[prev]).coerceAtLeast(1)
-                a.set(q[prev * 4], q[prev * 4 + 1], q[prev * 4 + 2], q[prev * 4 + 3])
-                b.set(q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3])
-                a.slerp(b, f, out)
-                return true
-            }
-            i = prev
+        // binary search over the ring (k = 0 is the oldest sample, count - 1 the newest)
+        val oldest = (head - count + 1 + capacity) % capacity
+        if (timeNs < t[oldest]) return false  // older than the history
+        var lo = 0; var hi = count - 1
+        while (hi - lo > 1) {
+            val mid = (lo + hi) ushr 1
+            if (t[(oldest + mid) % capacity] <= timeNs) lo = mid else hi = mid
         }
-        return false  // older than the history
+        val prev = (oldest + lo) % capacity; val i = (oldest + hi) % capacity
+        val f = ((timeNs - t[prev]).toFloat() / (t[i] - t[prev]).coerceAtLeast(1)).coerceIn(0f, 1f)
+        a.set(q[prev * 4], q[prev * 4 + 1], q[prev * 4 + 2], q[prev * 4 + 3])
+        b.set(q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3])
+        a.slerp(b, f, out)
+        return true
     }
 
     /**
@@ -94,7 +96,8 @@ class GyroHistory(private val capacity: Int = 1024) {
     private fun fitRate(): Boolean {
         val tEnd = t[head]
         var n = 0; var st = 0.0; var stt = 0.0
-        val sw = DoubleArray(3); val stw = DoubleArray(3)
+        val sw = fitSw; val stw = fitStw
+        sw.fill(0.0); stw.fill(0.0)
         var i = head
         while (n < count) {
             val x = (t[i] - tEnd) / 1e9
@@ -119,7 +122,10 @@ class GyroHistory(private val capacity: Int = 1024) {
     /** Device-frame rotation from [fromNs] to [toNs]: orientation(to) = orientation(from) * delta. */
     fun delta(fromNs: Long, toNs: Long, out: Quat): Boolean {
         beforeRead?.invoke()
-        val qa = Quat(); val qb = Quat()
+        return deltaLocked(fromNs, toNs, out)
+    }
+
+    @Synchronized private fun deltaLocked(fromNs: Long, toNs: Long, out: Quat): Boolean {
         if (!at(fromNs, qa) || !at(toNs, qb)) return false
         qa.conjugate(out).mul(qb, out)
         out.normalize()
