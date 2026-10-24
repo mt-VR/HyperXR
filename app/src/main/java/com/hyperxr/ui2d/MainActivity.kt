@@ -21,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -128,6 +130,7 @@ private fun Root(a: MainActivity) {
     var section by remember { mutableStateOf(Section.HOME) }
     Column(Modifier.fillMaxSize().background(HxColors.bg)) {
     FreeAppBanner()
+    CrashBanner(a)
     Row(Modifier.fillMaxSize()) {
         Column(
             Modifier.width(250.dp).fillMaxHeight().background(Color(0xFF101020)).verticalScroll(rememberScrollState()).padding(12.dp),
@@ -171,6 +174,42 @@ private fun Root(a: MainActivity) {
             Dialogs(a)
         }
     }
+    }
+}
+
+/** When HyperXR closed by itself: what happened, to copy or send. */
+@Composable
+private fun CrashBanner(a: MainActivity) {
+    @Suppress("UNUSED_EXPRESSION") a.refresh
+    val reports = remember(a.refresh) { com.hyperxr.diagnostics.CrashReporter.reports(a) }
+    if (reports.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().background(Color(0xFF3A2A10)).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("O HyperXR fechou sozinho ${reports.size} vez(es). O relatório mostra o motivo.", color = Color(0xFFFFD27A), fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text("Ver relatório", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickableNoRipple { open = true }.padding(8.dp))
+    }
+    if (open) {
+        val text = reports.joinToString("\n\n==========\n\n") { runCatching { it.readText() }.getOrDefault("") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Relatórios de erro") },
+            text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) { Text(text, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) } },
+            confirmButton = {
+                Row {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val cm = a.getSystemService(android.content.ClipboardManager::class.java)
+                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("HyperXR crash", text))
+                    }) { Text("Copiar") }
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text)
+                        a.startActivity(android.content.Intent.createChooser(send, "Enviar relatório"))
+                    }) { Text("Compartilhar") }
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { com.hyperxr.diagnostics.CrashReporter.clear(a); open = false; a.refresh++ }) { Text("Apagar") }
+            },
+        )
     }
 }
 

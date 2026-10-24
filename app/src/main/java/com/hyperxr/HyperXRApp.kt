@@ -27,6 +27,7 @@ class HyperXRApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.hyperxr.diagnostics.CrashReporter.install(this)
     }
 
     companion object {

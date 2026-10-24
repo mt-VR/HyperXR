@@ -45,8 +45,9 @@ class JoyCon(val deviceId: Int, val name: String, val side: JoyConSide, val prof
 class JoyConManager(context: Context) : InputManager.InputDeviceListener {
     private val im = context.getSystemService(InputManager::class.java)
     private val main = Handler(Looper.getMainLooper())
-    val controllers = HashMap<Int, JoyCon>()
-    val mappers = HashMap<JoyConSide, ButtonMapper>()
+    // written on the main thread (devices come and go), read every frame on the render thread
+    val controllers = java.util.concurrent.ConcurrentHashMap<Int, JoyCon>()
+    val mappers = java.util.concurrent.ConcurrentHashMap<JoyConSide, ButtonMapper>()
     var onAction: ((JoyConSide, ButtonMapper.ActionEvent) -> Unit)? = null
     var onChange: (() -> Unit)? = null
     var settings = com.hyperxr.settings.ControllerSettings()

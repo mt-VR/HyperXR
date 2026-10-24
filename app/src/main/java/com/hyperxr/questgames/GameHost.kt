@@ -247,13 +247,24 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
         } catch (t: Throwable) { Diagnostics.log("Game model $path: ${t.message}"); null }
     }
 
-    /** A procedural material (GameTextures), tiling, made once. */
-    fun texture(name: String): Int = textures.getOrPut(name) {
-        val bmp = GameTextures.make(name)
+    private val painting = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.Future<android.graphics.Bitmap>>()
+    private val painter = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-game-textures").apply { isDaemon = true } }
+
+    /**
+     * A procedural material (GameTextures), tiling, made once. It is painted on a worker thread
+     * (it takes a moment on slow phones): 0 until it is ready, the surface is plain meanwhile.
+     */
+    fun texture(name: String): Int {
+        textures[name]?.let { return it }
+        val f = painting.getOrPut(name) { painter.submit(java.util.concurrent.Callable { GameTextures.make(name) }) }
+        if (!f.isDone) return 0
+        painting.remove(name)
+        val bmp = runCatching { f.get() }.getOrNull() ?: return 0.also { textures[name] = 0 }
         val t = com.hyperxr.rendering.Gl.uploadBitmap(bmp, mipmap = true)
         com.hyperxr.rendering.Gl.repeatTexture(t)
         bmp.recycle()
-        t
+        textures[name] = t
+        return t
     }
 
     /** Draws a model at game position, turned by [yaw] (and [pitch], [roll]), scaled, tinted. */
@@ -313,6 +324,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
         d.castShadow = shadow && !d.transparent && !unlit
         if (tex != null) {
             d.texture = texture(tex)
+            if (d.texture == 0) { d.color[0] *= 0.8f; d.color[1] *= 0.78f; d.color[2] *= 0.75f }
             // tiles of [tile] metres across the box's two largest sides
             if (tile > 0f) { val a = maxOf(sx, sz); val b = if (sx >= sz) maxOf(sy, sz) else maxOf(sy, sx); d.uvScale[0] = a / tile; d.uvScale[1] = maxOf(b, minOf(sx, sz)) / tile }
         }
@@ -375,6 +387,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
         game?.release(); game = null
         models.values.forEach { it?.release() }; models.clear()
         textures.values.forEach { com.hyperxr.rendering.Gl.deleteTexture(it) }; textures.clear()
+        painter.shutdownNow(); painting.clear()
         sky.release()
         meshes.forEach { if (it.isInitialized()) it.value.release() }
         val sc = ctx.scene
