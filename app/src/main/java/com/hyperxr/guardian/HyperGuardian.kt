@@ -121,6 +121,8 @@ class HyperGuardian(private val activity: Activity) {
     fun update(dt: Float, head: Pose, hands: Array<HandState>, ar: ArCoreSession?, sixDof: Boolean) {
         tracked = sixDof && ar != null
         depthAvailable = ar?.depthEnabled == true
+        // plane finding only while HyperGuardian is on (it costs CPU on every camera frame)
+        if (mode == Mode.OFF) ar?.wantPlanes(PLANES, false)
         if (mode == Mode.OFF || !tracked) {
             warning.update(dt, Float.NaN, Float.NaN, Float.NaN)
             status = when {
@@ -132,20 +134,21 @@ class HyperGuardian(private val activity: Activity) {
         }
         val hx = head.position.x; val hy = head.position.y; val hz = head.position.z
 
-        // depth: the floor in both modes, the obstacle map in Auto
+        // the floor in both modes (ARCore's planes first, the depth points otherwise), the
+        // obstacle map in Auto
+        ar!!.wantPlanes(PLANES, true)
         scanT += dt
-        if (depthAvailable && scanT >= 0.25f) {
+        if (scanT >= 0.25f) {
             scanT = 0f
-            val n = ar!!.depthPoints(depthBuf, step = 8, maxM = 4f)
-            if (n > 0) {
-                scan.add(depthBuf, n)
-                val f = scan.floorY(hy)
-                if (!f.isNaN()) { floorY = if (floorMeasured) floorY + (f - floorY) * 0.2f else f; floorMeasured = true }
-                if (mode == Mode.AUTO && floorMeasured && ar.cameraPose(camPose)) {
-                    var k = 0
-                    for (h in hands) if (h.isUsable) for (j in h.joints) { handBuf[k * 3] = j.x; handBuf[k * 3 + 1] = j.y; handBuf[k * 3 + 2] = j.z; k++ }
-                    map.integrate(depthBuf, n, camPose.position.x, camPose.position.z, hx, hy, hz, floorY, handBuf, k)
-                }
+            val n = if (depthAvailable) ar.depthPoints(depthBuf, step = 8, maxM = 4f) else 0
+            if (n > 0) scan.add(depthBuf, n)
+            val plane = ar.floorFromPlanes()
+            val f = if (!plane.isNaN()) plane else if (n > 0) scan.floorY(hy) else Float.NaN
+            if (!f.isNaN()) { floorY = if (floorMeasured) floorY + (f - floorY) * 0.2f else f; floorMeasured = true }
+            if (n > 0 && mode == Mode.AUTO && floorMeasured && ar.cameraPose(camPose)) {
+                var k = 0
+                for (h in hands) if (h.isUsable) for (j in h.joints) { handBuf[k * 3] = j.x; handBuf[k * 3 + 1] = j.y; handBuf[k * 3 + 2] = j.z; k++ }
+                map.integrate(depthBuf, n, camPose.position.x, camPose.position.z, hx, hy, hz, floorY, handBuf, k)
             }
         }
         if (!floorMeasured) floorY = hy - 1.6f
@@ -326,6 +329,8 @@ class HyperGuardian(private val activity: Activity) {
         }
         wallMesh = mesh(wv); lowMesh = mesh(lv)
     }
+
+    private companion object { const val PLANES = "guardian" }
 
     private data class Quad(val x: Float, val y: Float, val z: Float, val corner: Float)
 

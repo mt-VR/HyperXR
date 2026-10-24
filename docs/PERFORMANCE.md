@@ -169,8 +169,11 @@ para a pose, planos BGR com borda cinza 114 para o detector). O caminho antigo f
 não aloca nada no ajuste da previsão nem em `delta` (2-3 chamadas por quadro).
 
 **6DoF (ARCore):**
-- A detecção de planos foi desligada. Nada no HyperXR usa os planos (âncoras, profundidade e
-  rastreio funcionam sem eles), e ela gastava CPU em todo quadro da câmera.
+- A detecção de planos fica desligada enquanto ninguém precisa dela, porque gasta CPU em todo
+  quadro da câmera.
+- O Oceano e o HyperGuardian ligam a detecção de planos horizontais enquanto estão abertos
+  (`wantPlanes`) e usam o plano mais baixo como chão. Isso também funciona em celulares sem o
+  sensor de profundidade.
 - A pose e o preditor de translação não alocam mais por quadro.
 
 **Giroscópio visual:**

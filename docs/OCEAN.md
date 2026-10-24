@@ -13,8 +13,9 @@ dia, pôr do sol, noite com lua e tempestade com chuva.
 1. **Medir a sala.** Enquanto a sala ainda está lá (realidade mista), o sensor de profundidade do
    ARCore mapeia a sala conforme você olha em volta. Os pontos aparecem em cores falsas: quente é
    perto, frio é longe. Deles saem:
-   - a altura do chão (a camada horizontal mais densa bem abaixo dos olhos; um tampo de mesa não
-     engana);
+   - a altura do chão: pelos planos do ARCore (ligados só enquanto o Oceano está aberto; funcionam
+     até sem o sensor de profundidade) ou, sem plano, pela camada horizontal mais densa de pontos
+     bem abaixo dos olhos (um tampo de mesa não engana);
    - a distância das paredes;
    - a altura do teto.
 
@@ -75,8 +76,9 @@ O céu e o mar passam por tone mapping (ACES), como um filme.
 
 ## Limites
 
-- **Sem o sensor de profundidade do ARCore:** o chão é estimado pela sua altura (1,6 m) e as
-  paredes a 2,6 m. A sala ainda afunda, mas a forma 3D dela é aproximada.
+- **Sem o sensor de profundidade do ARCore:** o chão vem dos planos do ARCore (ou da sua
+  altura, 1,6 m, até achar um plano) e as paredes ficam a 2,6 m. A sala ainda afunda, mas a forma
+  3D dela é aproximada.
 - **Em VR (sem câmera):** não há sala para afundar; o mar aparece direto.
 - **A foto da sala** cobre o campo de visão da câmera. Fora dele já é mar desde o começo.
 - **Não testado no celular.** O desempenho real ainda não foi medido: mar e céu nos dois olhos

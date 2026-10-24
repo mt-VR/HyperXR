@@ -79,8 +79,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             val config = Config(s).apply {
                 updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                 focusMode = Config.FocusMode.FIXED
-                // nothing in HyperXR uses ARCore's planes (anchors, depth and tracking work without
-                // them): plane finding would only cost CPU on every camera frame
+                // off until an app asks for it (Ocean, HyperGuardian: the floor): plane finding costs
+                // CPU on every camera frame, and anchors, depth and tracking work without it
                 planeFindingMode = Config.PlaneFindingMode.DISABLED
                 lightEstimationMode = Config.LightEstimationMode.DISABLED
             }
@@ -128,6 +128,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
                 }
             }
             fps60 = chosen60
+            sessionConfig = config
             textureId = Gl.externalTexture()
             s.setCameraTextureName(textureId)
             session = s
@@ -160,6 +161,45 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     override fun start() { recenterPending = true; lost = false; translation.reset(); prevTs = 0L; try { session?.resume() } catch (t: Throwable) { error = t.message; Diagnostics.log("ARCore resume failed: ${t.message}") } }
     override fun stop() { session?.pause() }
     fun close() { session?.close(); session = null }
+
+    // ---------------------------------------------------------------- planes (the floor)
+    private var sessionConfig: Config? = null
+    private val planeUsers = HashSet<String>()
+
+    /**
+     * Horizontal plane finding on while at least one user ([who]) wants it (GL thread). The
+     * session is reconfigured in place: tracking and depth carry on.
+     */
+    fun wantPlanes(who: String, on: Boolean) {
+        val changed = if (on) planeUsers.add(who) else planeUsers.remove(who)
+        if (!changed) return
+        val s = session ?: return; val c = sessionConfig ?: return
+        val mode = if (planeUsers.isEmpty()) Config.PlaneFindingMode.DISABLED else Config.PlaneFindingMode.HORIZONTAL
+        if (c.planeFindingMode == mode) return
+        c.planeFindingMode = mode
+        runCatching { s.configure(c) }.onFailure { Diagnostics.log("ARCore plane finding: ${it.message}") }
+    }
+
+    /**
+     * The floor from ARCore's planes: the lowest tracked upward-facing plane of at least half a
+     * square metre, in HyperXR's tracking space (y). NaN when none has been found yet.
+     */
+    fun floorFromPlanes(): Float {
+        val s = session ?: return Float.NaN
+        if (planeUsers.isEmpty()) return Float.NaN
+        var best = Float.NaN
+        val inv = origin.inverse(planeInv)
+        for (p in runCatching { s.getAllTrackables(com.google.ar.core.Plane::class.java) }.getOrDefault(emptyList())) {
+            if (p.trackingState != TrackingState.TRACKING || p.subsumedBy != null) continue
+            if (p.type != com.google.ar.core.Plane.Type.HORIZONTAL_UPWARD_FACING) continue
+            if (p.extentX * p.extentZ < 0.5f) continue
+            val c = p.centerPose
+            inv.transformPoint(planeTmp.set(c.tx(), c.ty(), c.tz()), planeOut)
+            if (best.isNaN() || planeOut.y < best) best = planeOut.y
+        }
+        return best
+    }
+    private val planeInv = Pose(); private val planeTmp = Vec3(); private val planeOut = Vec3()
 
     /** Advances ARCore one frame (GL thread). */
     fun update() {

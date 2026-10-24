@@ -171,31 +171,41 @@ class OceanApp(private val ctx: XrContext, private val onClose: () -> Unit) : Sc
     }
 
     /** Depth points from ARCore a few times a second while the room is there. */
+    /**
+     * Measures the room a few times a second while it is still there: the floor from ARCore's
+     * planes (found with or without the depth sensor), and with the Depth API also the points
+     * shown in false colour, the walls and the ceiling (and the floor when no plane is found).
+     */
     private fun scanDepth(dt: Float) {
         val a = ar
-        if (a == null || !a.depthEnabled) {
-            depthNote = if (a == null) "Sem ARCore: o chão é estimado pela sua altura (1,6 m)." else "Este celular não tem o sensor de profundidade do ARCore: o chão é estimado pela sua altura."
-            return
-        }
+        if (a == null) { depthNote = "Sem ARCore: o chão é estimado pela sua altura (1,6 m)."; return }
+        a.wantPlanes(PLANES, true)
         scanTimer += dt
         if (scanTimer < 0.3f) return
         scanTimer = 0f
-        val n = a.depthPoints(depthBuf, step = 8, maxM = 4.5f)
-        if (n > 0) scan.add(depthBuf, n)
-        val f = scan.floorY(eyeY)
+        if (a.depthEnabled) {
+            val n = a.depthPoints(depthBuf, step = 8, maxM = 4.5f)
+            if (n > 0) scan.add(depthBuf, n)
+        }
+        val plane = a.floorFromPlanes()
+        val f = if (!plane.isNaN()) plane else if (a.depthEnabled) scan.floorY(eyeY) else Float.NaN
+        floorFromPlane = !plane.isNaN()
         if (!f.isNaN()) {
             floorY = if (floorMeasured) floorY + (f - floorY) * 0.3f else f
             floorMeasured = true
-            ceilY = scan.ceilingY(eyeY)
-            wallDistance = scan.wallDistance(ctx.input.head.position.x, ctx.input.head.position.z, floorY)
+            if (a.depthEnabled) {
+                ceilY = scan.ceilingY(eyeY)
+                wallDistance = scan.wallDistance(ctx.input.head.position.x, ctx.input.head.position.z, floorY)
+            }
         }
         depthNote = buildString {
-            append("Profundidade ARCore · ${"%,d".format(scan.count).replace(',', '.')} pontos")
-            if (floorMeasured) append(" · chão a ${fmt(eyeY - floorY)} m dos olhos") else append(" · olhe para o chão para medir")
+            append(if (a.depthEnabled) "Profundidade ARCore · ${"%,d".format(scan.count).replace(',', '.')} pontos" else "Sem sensor de profundidade · planos do ARCore")
+            if (floorMeasured) append(" · chão a ${fmt(eyeY - floorY)} m dos olhos${if (floorFromPlane) " (plano)" else ""}") else append(" · olhe para o chão para medir")
             if (!wallDistance.isNaN()) append(" · paredes a ~${fmt(wallDistance)} m")
             if (!ceilY.isNaN()) append(" · teto a ${fmt(ceilY - floorY)} m")
         }
     }
+    private var floorFromPlane = false
 
     private fun fmt(v: Float) = "%.2f".format(v).replace('.', ',')
 
@@ -288,13 +298,14 @@ class OceanApp(private val ctx: XrContext, private val onClose: () -> Unit) : Sc
     fun onResume() = audio.start()
 
     fun release() {
+        ar?.wantPlanes(PLANES, false)
         ctx.hands?.let { if (waitingForPhoto) it.frameTap = null }
         audio.stop()
         renderer.release()
         panel.release()
     }
 
-    private companion object { const val SINK_S = 7f }
+    private companion object { const val SINK_S = 7f; const val PLANES = "ocean" }
 }
 
 /**
