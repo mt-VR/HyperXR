@@ -29,11 +29,17 @@ class HyperConnectServer(private val context: Context) {
     val connected get() = client != null && state != null && System.nanoTime() - receivedNs < 500_000_000L
 
     @SuppressLint("MissingPermission")
+    /** Bluetooth writes can block for a while: never on the render thread. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hyperconnect-write").apply { isDaemon = true } }
+    /** Each start gets a number: a server thread left from before a quick stop/start ends itself. */
+    @Volatile private var generation = 0
+
     fun start() {
         if (running) return
         running = true
+        val my = ++generation
         thread = Thread({
-            while (running) {
+            while (running && generation == my) {
                 val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
                 if (adapter == null || !adapter.isEnabled) { status = "Bluetooth desligado"; sleep(2000); continue }
                 try {
@@ -82,14 +88,18 @@ class HyperConnectServer(private val context: Context) {
     fun setKeyboardOpen(open: Boolean) {
         if (keyboardSent == open || client == null) return
         keyboardSent = open
-        val c = client ?: return
-        try { synchronized(this) { c.outputStream.write(HyperConnectProtocol.encode(HyperConnectProtocol.Keyboard(open))) } } catch (_: Throwable) {}
+        send(HyperConnectProtocol.encode(HyperConnectProtocol.Keyboard(open)))
     }
 
     /** Buzzes the controller phone (the pointer reaching a button, a click). */
     fun vibrate(ms: Int, amplitude: Int = 120) {
+        if (client == null) return
+        send(HyperConnectProtocol.encode(HyperConnectProtocol.Vibrate(ms, amplitude)))
+    }
+
+    private fun send(bytes: ByteArray) {
         val c = client ?: return
-        try { synchronized(this) { c.outputStream.write(HyperConnectProtocol.encode(HyperConnectProtocol.Vibrate(ms, amplitude))) } } catch (_: Throwable) {}
+        writer.execute { try { c.outputStream.write(bytes) } catch (_: Throwable) {} }
     }
 
     fun stop() {

@@ -403,6 +403,7 @@ class YouTubePlayerPanel(private val host: MediaHost, private var video: XrYouTu
         }
     }
 
+    @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
     private fun source(url: String): MediaSource {
         val http = DefaultHttpDataSource.Factory().setUserAgent(XrYouTube.userAgentFor(url)).setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000).setReadTimeoutMs(30000)
@@ -410,6 +411,7 @@ class YouTubePlayerPanel(private val host: MediaHost, private var video: XrYouTu
     }
 
     /** (Re)starts playback of the current quality at [atMs]. */
+    @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
     private fun start(atMs: Long) {
         val d = details ?: return
         val surface = screen?.surface

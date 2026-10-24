@@ -133,7 +133,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         File(app.filesDir, "crash").listFiles()?.forEach { Diagnostics.log("Package crash report: ${it.nameWithoutExtension}: ${it.readText().take(160)}") }
     }
 
-    override fun onResume() { if (::ctx.isInitialized) activity.runOnUiThread { refreshInstalled() } }
+    override fun onResume() { if (::ctx.isInitialized) activity.runOnUiThread { refreshInstalled() }; ocean?.onResume() }
+    override fun onPause() { ocean?.onPause() }
 
     override fun onGlRelease() {
         (windows + library + taskbar).forEach { it.release() }
@@ -182,7 +183,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (!showLibrary && libraryShown) libraryShown = false
         if (showLibrary) surfaces += library
         surfaces += taskbar
-        surfaces += windows.filter { it.visible }
+        for (w in windows) if (w.visible) surfaces += w
         if (!windowsMinimized) for (w in appWindows) if (w.visible) {
             surfaces += w
             if (!isTheater(w)) windowControls[w]?.let { surfaces += it }
@@ -715,7 +716,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                     focusGame(w)
                 }
             },
-            onError = { msg -> glTasks += { val p = InfoPanel("Emuladores", msg); placeAboveDock(p, 0f); openWindow(p) } },
+            onError = { msg ->
+                glTasks += {
+                    val p = InfoPanel("Emuladores", msg)
+                    placeAboveDock(p, 0f)
+                    openWindow(p)
+                }
+            },
         )
     }
 

@@ -88,14 +88,17 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    // scratch for pose(): it runs on the GL thread two or three times a frame, without allocating
+    private val pq = Quat(); private val pw = Vec3(); private val pd = Quat(); private val neckBase = Vec3(0f, 1.6f - 0.075f, 0.08f)
+
     override fun pose(predictionNs: Long, out: Pose) {
-        val q = Quat()
-        val w = Vec3()
+        val q = pq
+        val w = pw
         val ts: Long
         synchronized(lock) { q.set(deviceRot); w.set(gyro); ts = sampleTimeNs }
         // the measured gyro rotation since the fused sample, then prediction to photon time
         val target = SystemClock.elapsedRealtimeNanos() + predictionNs
-        val d = Quat()
+        val d = pd
         if (gyroHistory != null && ts > 0 && gyroHistory.delta(ts, target, d)) q.mul(d, tmp)
         else {
             val ageNs = if (ts > 0) SystemClock.elapsedRealtimeNanos() - ts else 0L
@@ -115,7 +118,7 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
         if (neckModel) {
             // eyes are ~8 cm in front of and ~7.5 cm above the neck pivot
             out.orientation.rotate(neck.set(0f, 0.075f, -0.08f), out.position)
-            out.position.add(Vec3(0f, 1.6f - 0.075f, 0.08f))
+            out.position.add(neckBase)
         } else {
             out.position.set(0f, 1.6f, 0f)
         }

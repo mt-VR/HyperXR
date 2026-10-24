@@ -72,6 +72,7 @@ class ScreenShare(private val activity: Activity) {
 
     /** True while [recorder] was started because another app is recording the screen. */
     @Volatile var pairedRecording = false; private set
+    private var pairedFailed = false
     /** Name of the last video saved by a paired recording, for the panel. */
     @Volatile var lastPairedSave = ""; private set
 
@@ -228,8 +229,11 @@ class ScreenShare(private val activity: Activity) {
      */
     private fun followExternalRecording() {
         val ext = externalRecording16x9 && externalRecordingDetector.recording
-        if (ext && recorder == null) {
+        if (!ext) pairedFailed = false
+        if (ext && recorder == null && !pairedFailed) {
+            // one try per external recording: a failure would otherwise be retried every frame
             if (startRecording(mic = false)) { pairedRecording = true; Diagnostics.log("Screen share: paired 16:9 recording started") }
+            else pairedFailed = true
         } else if (!ext && pairedRecording) {
             pairedRecording = false
             stopRecording { name -> lastPairedSave = name ?: "" }

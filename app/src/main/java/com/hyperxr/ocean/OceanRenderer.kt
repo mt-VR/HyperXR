@@ -60,6 +60,7 @@ class OceanRenderer {
     private var roomVbo = 0; private var roomIbo = 0; private var roomCount = 0; private var roomTex = 0
     private var boltVbo = 0; private var boltCount = 0
     private var pointVbo = 0; private var pointCount = 0
+    private var pointBuf = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     private var noiseTex = 0
     private val uniformCache = HashMap<Int, HashMap<String, Int>>()
 
@@ -248,8 +249,9 @@ class OceanRenderer {
         if (pointVbo == 0) { val ids = IntArray(1); GLES30.glGenBuffers(1, ids, 0); pointVbo = ids[0] }
         GLES30.glBindVertexArray(pointVao)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pointVbo)
-        val buf = ByteBuffer.allocateDirect(n * 12).order(ByteOrder.nativeOrder()).asFloatBuffer().put(p, 0, n * 3).also { it.position(0) }
-        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, n * 12, buf, GLES30.GL_DYNAMIC_DRAW)
+        if (pointBuf.capacity() < n * 3) pointBuf = ByteBuffer.allocateDirect(n * 12).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        pointBuf.clear(); pointBuf.put(p, 0, n * 3); pointBuf.position(0)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, n * 12, pointBuf, GLES30.GL_DYNAMIC_DRAW)
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 12, 0)
         GLES30.glBindVertexArray(0)
@@ -575,8 +577,10 @@ void main() {
     foam += smoothstep(0.86, 0.98, fn) * smoothstep(0.75, 1.0, height) * (uMaxH > 2.0 ? 0.5 : 0.0);
     c = mix(c, vec3(0.9, 0.95, 0.97) * (uAmbient * 0.8 + 0.2) + uFlash * 0.3, clamp(foam, 0.0, 0.9));
     c += uFlash * 0.12 * F;
-    // haze toward the horizon
-    vec3 hz = sky(normalize(vec3(-V.x, 0.015, -V.z)), false);
+    // haze toward the horizon: the horizon's colour with the sun's glow (no clouds to look up there)
+    vec3 hd = normalize(vec3(-V.x, 0.015, -V.z));
+    float hs = max(dot(hd, uSunDir), 0.0);
+    vec3 hz = uHorizon * 1.05 + uSunColor * (pow(hs, 48.0) * 0.5 + pow(hs, 5.0) * 0.12) + uFlash * 0.35 * vec3(0.55, 0.6, 0.78);
     c = mix(c, hz, 1.0 - exp(-dist * uFog));
     o = vec4(tonemap(c), 1.0);
 }"""

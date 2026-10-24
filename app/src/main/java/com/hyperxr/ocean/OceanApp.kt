@@ -283,6 +283,10 @@ class OceanApp(private val ctx: XrContext, private val onClose: () -> Unit) : Sc
 
     fun close() = onClose()
 
+    /** The activity went to the background: no sound from an app nobody sees. */
+    fun onPause() = audio.stop()
+    fun onResume() = audio.start()
+
     fun release() {
         ctx.hands?.let { if (waitingForPhoto) it.frameTap = null }
         audio.stop()
@@ -312,7 +316,14 @@ class OceanPanel(private val app: OceanApp) : XrPanel(0.95f, 0.98f, title = "Oce
         if (id == 0) null else BitmapFactory.decodeResource(r, id)
     }
 
-    override fun update(dt: Float) { t += dt; if (t > 0.5f) { t = 0f; dirty = true } }
+    private var lastNote = ""
+    override fun update(dt: Float) {
+        t += dt
+        if (t < 0.5f) return
+        t = 0f
+        val note = app.depthNote + app.phase + app.scan.count / 500
+        if (note != lastNote) { lastNote = note; dirty = true }
+    }
 
     override fun draw(c: PanelCanvas) {
         val note = when (app.phase) {

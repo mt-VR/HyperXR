@@ -34,7 +34,7 @@ object SteamVrPlanner {
         val list = runCatching { MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos }.getOrNull() ?: return null
         return list.firstOrNull { info ->
             !info.isEncoder && hardware(info) && info.supportedTypes.any { it.equals(mime, true) } && runCatching {
-                val caps = info.getCapabilitiesForType(mime).videoCapabilities
+                val caps = info.getCapabilitiesForType(mime).videoCapabilities ?: return@runCatching false
                 caps.areSizeAndRateSupported(w, h, fps.toDouble()) || (caps.isSizeSupported(w, h) && fps <= 60)
             }.getOrDefault(false)
         }?.name

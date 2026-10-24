@@ -789,7 +789,7 @@ class XrEngine(
         val st = hyperConnect.state
         val on = hyperConnect.connected && st != null
         if (on != phoneWasConnected) { phoneWasConnected = on; if (!on) phoneModel.reset() }
-        if (!on || st == null) return
+        if (st == null) return
         val h = input.head
         headPosArr[0] = h.position.x; headPosArr[1] = h.position.y; headPosArr[2] = h.position.z
         headQArr[0] = h.orientation.x; headQArr[1] = h.orientation.y; headQArr[2] = h.orientation.z; headQArr[3] = h.orientation.w

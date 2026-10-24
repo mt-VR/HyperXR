@@ -25,7 +25,9 @@ object EmulatorFiles {
  * latency); without audio the loop sleeps to the core's frame rate. The game's own save memory
  * is written every 10 s and when the session ends.
  */
-class EmulatorSession(private val context: Context, val core: EmulatorCore, val rom: File) {
+class EmulatorSession(context: Context, val core: EmulatorCore, val rom: File) {
+    // the application context: the session outlives activities (and sits in [current] while it runs)
+    private val context: Context = context.applicationContext
     @Volatile var status: String? = "Carregando…"; private set
     @Volatile var aspect = 4f / 3f; private set
     /** Base picture size of the game (pixels), for mouse movement. */
@@ -130,6 +132,7 @@ class EmulatorSession(private val context: Context, val core: EmulatorCore, val 
             RetroNative.setSurface(null)
             RetroNative.close()
             track?.run { runCatching { stop() }; release() }
+            synchronized(EmulatorSession) { if (current === this) current = null }
         }
     }
 
