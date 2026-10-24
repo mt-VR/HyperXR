@@ -114,6 +114,14 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - [SteamVR no HyperXR](docs/STEAMVR.md) e [HyperXR PC](pc/README.md)
 - [Emuladores embutidos](docs/EMULATORS.md)
 
+## Licença
+
+Copyright (C) 2026 AkunDiscoRemake
+
+HyperXR é software livre: você pode redistribuí-lo e/ou modificá-lo sob os termos da GNU General
+Public License, versão 3, publicada pela Free Software Foundation. É distribuído na esperança de
+ser útil, mas SEM NENHUMA GARANTIA. Veja o arquivo [LICENSE](LICENSE).
+
 ## Licenças de terceiros
 
 - LuaJIT — MIT (`native/luajit/COPYRIGHT`)
