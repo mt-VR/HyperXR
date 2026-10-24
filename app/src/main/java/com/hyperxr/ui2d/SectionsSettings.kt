@@ -127,7 +127,7 @@ fun GraphicsSection(a: MainActivity) {
             else "Requer a ARCore Depth API, que não foi confirmada neste aparelho (${depth.detail}). Sem ela, o alerta fica desligado.",
         )
     }
-    SectionCard("Lentes do visor (VR Box)") {
+    SectionCard("Lentes do visor", "Ajuste fino do óculos escolhido em RealityLenses (${com.hyperxr.viewers.ViewerCatalog.byId(g.viewerId)?.title ?: "personalizado"})") {
         ToggleRow("Correção de distorção da lente", g.lensDistortion) { v -> a.update { it.copy(graphics = it.graphics.copy(lensDistortion = v)) } }
         ToggleRow("Timewarp (reajusta a imagem com o giroscópio antes de mostrar)", g.timewarp) { v -> a.update { it.copy(graphics = it.graphics.copy(timewarp = v)) } }
         SliderRow("Coeficiente k1", g.distortionK1, 0f..0.6f, { "%.2f".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(distortionK1 = v)) } }

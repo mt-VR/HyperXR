@@ -36,6 +36,10 @@ data class GraphicsSettings(
     /** Distance between lens centres of the viewer, in millimetres. */
     val lensSeparationMm: Float = 60f,
     val fovDegrees: Float = 95f,
+    /** The headset chosen in RealityLenses (ViewerCatalog id). */
+    val viewerId: String = "vrbox-1",
+    val screenToLensMm: Float = 42f,
+    val trayToLensMm: Float = 35f,
     /** Camera image fills each eye completely (centre crop). Off = true angular size (smaller image). */
     val passthroughFill: Boolean = true,
     /** Stereo (IPD) for virtual content over the mono camera image. Off keeps it aligned with reality. */

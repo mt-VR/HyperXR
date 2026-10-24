@@ -95,7 +95,11 @@ object CompatLayer {
      */
     fun writeCardboardParams(ctx: Context): Boolean = try {
         val g = com.hyperxr.HyperXRApp.instance.settings.current.graphics
-        val v = com.hyperxr.xrapps.CardboardParams.fromSettings(g.lensSeparationMm, g.fovDegrees, g.distortionK1, g.distortionK2)
+        val vw = com.hyperxr.viewers.ViewerCatalog.byId(g.viewerId)
+        // Cardboard button types: 0 none, 1 magnet, 2 touch, 3 indirect touch
+        val button = when (vw?.button) { com.hyperxr.viewers.ViewerCatalog.Button.MAGNET -> 1; com.hyperxr.viewers.ViewerCatalog.Button.NONE -> 0; else -> 3 }
+        val v = com.hyperxr.xrapps.CardboardParams.fromSettings(g.lensSeparationMm, g.fovDegrees, g.distortionK1, g.distortionK2,
+            vendor = vw?.brand ?: "HyperXR", model = vw?.name ?: "VR Box", screenToLensMm = g.screenToLensMm, trayToLensMm = g.trayToLensMm, button = button)
         val f = File(android.os.Environment.getExternalStorageDirectory(), com.hyperxr.xrapps.CardboardParams.FILE_PATH)
         f.parentFile?.mkdirs()
         f.writeBytes(com.hyperxr.xrapps.CardboardParams.fileBytes(v))

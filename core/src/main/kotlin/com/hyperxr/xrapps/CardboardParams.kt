@@ -33,7 +33,9 @@ object CardboardParams {
         val button: Int = BUTTON_INDIRECT_TOUCH,
     )
 
-    fun fromSettings(lensSeparationMm: Float, fovDegrees: Float, k1: Float, k2: Float) = Viewer(
+    fun fromSettings(lensSeparationMm: Float, fovDegrees: Float, k1: Float, k2: Float, vendor: String = "HyperXR", model: String = "VR Box",
+                     screenToLensMm: Float = 42f, trayToLensMm: Float = 35f, button: Int = BUTTON_INDIRECT_TOUCH) = Viewer(
+        vendor = vendor, model = model, screenToLensM = screenToLensMm / 1000f, trayToLensM = trayToLensMm / 1000f, button = button,
         interLensM = lensSeparationMm / 1000f,
         halfFovDeg = (fovDegrees / 2f).coerceIn(20f, 60f),
         k1 = k1, k2 = k2,
