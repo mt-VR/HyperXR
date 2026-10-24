@@ -1,19 +1,6 @@
 # HyperXR
 
 Plataforma XR para celulares Android em VR Box, headsets móveis e realidade mista: launcher espacial
-<!-- HyperXR Status -->"Status" (https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge&logo=github)
-"Download" (https://img.shields.io/badge/Download-Ready-brightgreen?style=for-the-badge&logo=android)
-"Quality" (https://img.shields.io/badge/Quality-One%20of%20the%20Most%20Well--Done%20Projects-blueviolet?style=for-the-badge)
-"OpenXR" (https://img.shields.io/badge/OpenXR-Supported-6C47FF?style=for-the-badge)
-"Android on Windows" (https://img.shields.io/badge/Android%20Apps%20on%20Windows-Supported-0078D4?style=for-the-badge&logo=windows)
-"Android" (https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-"VRBox" (https://img.shields.io/badge/VR-Cardboard%20%26%20VRBox-black?style=for-the-badge)
-"Mixed Reality" (https://img.shields.io/badge/Experience-Mixed%20Reality-8A2BE2?style=for-the-badge)
-"WebXR" (https://img.shields.io/badge/WebXR-Integration-orange?style=for-the-badge)
-"Last Commit" (https://img.shields.io/github/last-commit/mt-VR/HyperXR?style=for-the-badge&logo=git)
-"Downloads" (https://img.shields.io/github/downloads/mt-VR/HyperXR/total?style=for-the-badge&logo=github)
-"Stars" (https://img.shields.io/github/stars/mt-VR/HyperXR?style=for-the-badge&logo=github)
-"License" (https://img.shields.io/github/license/mt-VR/HyperXR?style=for-the-badge)
 (modos **Dock** e **New**), realidade mista com câmera, VR estereoscópico SBS, um **runtime OpenXR
 próprio**, hand tracking com esqueleto (Kalman + One Euro), Joy-Cons, navegador GeckoView, apps
 Android em janelas (Shizuku), o **Hand Physics Lab** (física de corpos rígidos numa bancada em
