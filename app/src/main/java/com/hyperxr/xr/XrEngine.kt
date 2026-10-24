@@ -776,15 +776,20 @@ class XrEngine(
     private var phoneWasConnected = false
 
     private fun updateControllers(dt: Float) {
-        for (i in 0..1) { input.controllers[i].connected = false; input.controllers[i].aim = null; input.controllers[i].haptics = null }
+        for (i in 0..1) { val c = input.controllers[i]; c.connected = false; c.aim = null; c.haptics = null; c.buttons = 0; c.stickX = 0f; c.stickY = 0f; c.stick2X = 0f; c.stick2Y = 0f }
         val now = System.nanoTime()
+        joyCons.tick(now)
         for (jc in joyCons.controllers.values) {
             val idx = when (jc.side) { JoyConSide.LEFT -> 0; else -> 1 }
             val c = input.controllers[idx]
+            val first = !c.connected
             c.connected = true
-            c.buttons = jc.buttons
-            c.stickX = jc.stickX; c.stickY = jc.stickY
-            c.stick2X = jc.stick2X; c.stick2Y = jc.stick2Y
+            // one controller can be several Android devices (a remote's keyboard and mouse parts):
+            // their buttons add up and the most deflected stick wins
+            c.buttons = c.buttons or jc.buttons
+            if (jc.stickX * jc.stickX + jc.stickY * jc.stickY >= c.stickX * c.stickX + c.stickY * c.stickY) { c.stickX = jc.stickX; c.stickY = jc.stickY }
+            if (jc.stick2X * jc.stick2X + jc.stick2Y * jc.stick2Y >= c.stick2X * c.stick2X + c.stick2Y * c.stick2Y) { c.stick2X = jc.stick2X; c.stick2Y = jc.stick2Y }
+            if (!first) continue
             // Controller motion sensors are not used; games get the pose of the hand holding it.
             fusions[idx].useImu = false
             fusions[idx].update(null, input.hands[idx], input.head, rightSide = idx == 1, nowNs = now, dtSeconds = dt)
@@ -827,6 +832,8 @@ class XrEngine(
 
     // ---------------------------------------------------------------- activity hooks
     fun onTouch(e: MotionEvent): Boolean {
+        // a remote's mouse click is already its A button (JoyConManager): not a second, screen tap
+        if (joyCons.isController(e.deviceId)) return true
         if (!settings.controllers.screenTapSelects) return false
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> tap.onDown()

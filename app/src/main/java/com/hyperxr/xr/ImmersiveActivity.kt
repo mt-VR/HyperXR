@@ -108,7 +108,8 @@ abstract class ImmersiveActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (::engine.isInitialized && event.keyCode != KeyEvent.KEYCODE_BACK && engine.onKey(event)) return true
+        // Back from a controller (a VR Box remote's button) is a button press in HyperXR, not "close the app"
+        if (::engine.isInitialized && (event.keyCode != KeyEvent.KEYCODE_BACK || engine.joyCons.isController(event.deviceId)) && engine.onKey(event)) return true
         return super.dispatchKeyEvent(event)
     }
 

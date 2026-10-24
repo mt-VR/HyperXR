@@ -62,7 +62,7 @@ fun HomeSection(a: MainActivity) {
         CapabilityRow("ARCore", caps.arCore)
         CapabilityRow("Runtime OpenXR", caps.openXrRuntime)
         CapabilityRow("NNAPI", caps.nnapi)
-        KeyValue("Joy-Cons conectados", caps.joyConsConnected.toString())
+        KeyValue("Controles conectados", caps.joyConsConnected.toString())
     }
 }
 
@@ -259,15 +259,15 @@ fun HandsSection(a: MainActivity) {
 fun ControlsSection(a: MainActivity) {
     val c = a.settingsState.controllers
     val connected = remember(a.refresh) { JoyConManager.connectedJoyCons() }
-    SectionCard("Joy-Cons e controles", "Pareie os Joy-Cons nas configurações de Bluetooth do Android; o HyperXR os detecta automaticamente.") {
-        ToggleRow("Usar Joy-Cons", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
-        if (connected.isEmpty()) Note("Nenhum Joy-Con conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
+    SectionCard("Controles", "Qualquer controle: Joy-Con, DualShock 4, DualSense, Xbox, 8BitDo, gamepads Bluetooth/USB e o controle do VR Box (em modo jogo, teclado ou mouse). Pareie no Bluetooth do Android; o HyperXR detecta sozinho.") {
+        ToggleRow("Usar controles", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
+        if (connected.isEmpty()) Note("Nenhum controle conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
-        Note("O apontamento do Joy-Con vem da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão.")
+        Note("Para onde o controle aponta vem sempre da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão. O giroscópio do controle nunca é usado (é instável), mesmo quando ele tem um.")
         SliderRow("Velocidade do cursor (analógico)", c.stickCursorSpeed, 30f..160f, { "%.0f°/s".format(it) }) { v ->
             a.update { it.copy(controllers = it.controllers.copy(stickCursorSpeed = v)) }
         }
-        Note("Joy-Con: o analógico move o cursor, A clica (segure e mova para arrastar), B volta/fecha. R ou ZR + analógico rola a página. Os sensores de movimento do controle não são usados.")
+        Note("Em todos: o analógico (ou o direcional, ou o mouse do controle do VR Box) move o cursor, A / X do PlayStation clica (segure e mova para arrastar), B / Círculo volta e fecha. R ou ZR + analógico rola a página; o analógico esquerdo dos controles de dois analógicos também rola.")
         val actions = ControllerAction.entries
         fun name(x: ControllerAction) = when (x) {
             ControllerAction.SELECT -> "Selecionar"; ControllerAction.BACK -> "Voltar"; ControllerAction.MENU -> "Menu"
