@@ -15,6 +15,18 @@ com vibrações: o controle vibra quando o ponteiro chega num botão e a cada to
 
 ## Como usar
 
+Nas configurações 2D há uma aba **HyperController** com tudo em ordem:
+- os passos (enviar o app, parear, conectar);
+- o estado do Bluetooth e da permissão;
+- os celulares pareados e os botões para ficar visível e abrir o Bluetooth;
+- as opções;
+- um teste de conexão ao vivo, que mostra o celular conectado, a bateria e os botões apertados.
+
+O teste para sozinho ao sair da tela ou abrir o modo VR, onde o HyperXR espera a conexão por conta
+própria.
+
+Pelo modo VR:
+
 1. No HyperXR: Ajustes > Mãos e controles > **Enviar o app HyperConnect**. Escolha como enviar
    (Nearby Share, Bluetooth, mensageiro) e instale no outro celular.
 2. Pareie os dois celulares nas configurações de Bluetooth do Android (uma vez só).

@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
 
 enum class Section(val title: String) {
     HOME("Início"), LAUNCHER("Launcher"), GRAPHICS("Gráficos"), PERFORMANCE("Desempenho"),
-    HEAD("Head tracking"), HANDS("Hand tracking"), CONTROLS("Controles"), PERMISSIONS("Permissões e pacotes"),
+    HEAD("Head tracking"), HANDS("Hand tracking"), CONTROLS("Controles"), HYPERCONTROLLER("HyperController"), PERMISSIONS("Permissões e pacotes"),
     RUNTIME("OpenXR, Monado e Broker"), ENVIRONMENTS("Ambientes 3D"), APPS("Apps XR e Web"), AUDIO("Áudio"),
     DEVICE("Dispositivo e diagnóstico"), ACCESSIBILITY("Acessibilidade"), NETWORK("Rede"),
 }
@@ -157,6 +157,7 @@ private fun Root(a: MainActivity) {
                     Section.HEAD -> HeadSection(a)
                     Section.HANDS -> HandsSection(a)
                     Section.CONTROLS -> ControlsSection(a)
+                    Section.HYPERCONTROLLER -> HyperControllerSection(a)
                     Section.PERMISSIONS -> PermissionsSection(a)
                     Section.RUNTIME -> RuntimeSection(a)
                     Section.ENVIRONMENTS -> EnvironmentsSection(a)

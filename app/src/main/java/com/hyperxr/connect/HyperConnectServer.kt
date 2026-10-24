@@ -28,12 +28,12 @@ class HyperConnectServer(private val context: Context) {
     /** Connected and heard from in the last half second. */
     val connected get() = client != null && state != null && System.nanoTime() - receivedNs < 500_000_000L
 
-    @SuppressLint("MissingPermission")
     /** Bluetooth writes can block for a while: never on the render thread. */
     private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hyperconnect-write").apply { isDaemon = true } }
     /** Each start gets a number: a server thread left from before a quick stop/start ends itself. */
     @Volatile private var generation = 0
 
+    @SuppressLint("MissingPermission")
     fun start() {
         if (running) return
         running = true

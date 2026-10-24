@@ -30,7 +30,7 @@ import com.hyperxr.settings.InferenceBackend
 import com.hyperxr.settings.LauncherMode
 import com.hyperxr.settings.XrModePreference
 
-private fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.settings.update(f) }
+internal fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.settings.update(f) }
 
 @Composable
 fun HomeSection(a: MainActivity) {
