@@ -146,6 +146,8 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Ponte JNI LuaJIT | ✅ no host · 🟡 no Android |
 | Scene/Window, UI, física, áudio, rede, arquivos | ✅ em Lua · 🟡 host Android |
 | Jogos antigos (STILLSHOT, FORGE LAB, PRIMAL RUSH) | removidos a pedido; desinstalados automaticamente |
+| **HyperGuardian**: Manual (área desenhada com a pinça no chão, laços cortados, contorno simplificado) e Automático (paredes pelo ARCore Depth; proteção para o próprio corpo, chão/teto, ruído, coisas que se mexem, cama/sofá como móvel baixo); grade e câmera por cima em todos os apps do motor | ✅ lógica (9 testes) + build + lint · 🟡 aparelho · ver GUARDIAN.md |
+| Aviso "SE VOCÊ PAGOU POR ESSE APP, VOCÊ FOI ROUBADO. ELE É GRATUITO." no topo das configurações 2D e na frente ao abrir o modo VR | ✅ build · 🟡 aparelho |
 | **Oceano** (sala medida pelo ARCore Depth afunda no mar; ondas Gerstner, céu, chuva, raios e trovões, som sintetizado, menu estilo painel rápido do Android) | ✅ modelo, céu e som (testes) + shaders compilados no WebGL2 com prévia · 🟡 aparelho · ver OCEAN.md |
 | Previsão da cabeça presa ao vsync (tempo real do fóton pelo Choreographer e o tempo medido da GPU) e motor de mãos RTMPose mais rápido (detector em outra thread, entradas/saídas diretas) | ✅ testes (`PhotonClockTest`) · 🟡 ganho real no aparelho |
 | **Hand Physics Lab** (bancada em MR junto da UI, física de corpos rígidos, mãos colisoras, pegar/arremessar, sombras) | ✅ física (11 testes) · 🟡 aparelho · ver HAND_PHYSICS_LAB.md |

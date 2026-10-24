@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -125,7 +126,9 @@ enum class Section(val title: String) {
 @Composable
 private fun Root(a: MainActivity) {
     var section by remember { mutableStateOf(Section.HOME) }
-    Row(Modifier.fillMaxSize().background(HxColors.bg)) {
+    Column(Modifier.fillMaxSize().background(HxColors.bg)) {
+    FreeAppBanner()
+    Row(Modifier.fillMaxSize()) {
         Column(
             Modifier.width(250.dp).fillMaxHeight().background(Color(0xFF101020)).verticalScroll(rememberScrollState()).padding(12.dp),
         ) {
@@ -167,4 +170,18 @@ private fun Root(a: MainActivity) {
             Dialogs(a)
         }
     }
+    }
 }
+
+/** The warning against people selling HyperXR: at the top of every settings page. */
+@Composable
+private fun FreeAppBanner() {
+    Text(
+        FREE_APP_NOTICE,
+        modifier = Modifier.fillMaxWidth().background(Color(0xFFC62828)).padding(horizontal = 16.dp, vertical = 12.dp),
+        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    )
+}
+
+const val FREE_APP_NOTICE = "SE VOCÊ PAGOU POR ESSE APP, VOCÊ FOI ROUBADO. ELE É GRATUITO."
+

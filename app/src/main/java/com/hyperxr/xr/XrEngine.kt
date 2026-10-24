@@ -104,6 +104,8 @@ class XrContext(
     var hands: com.hyperxr.handtracking.HandTrackingService? = null
     /** HyperConnect (controller phone over Bluetooth). */
     var hyperConnect: com.hyperxr.connect.HyperConnectServer? = null
+    /** HyperGuardian (play area / wall protection), for every app on this engine. */
+    var guardian: com.hyperxr.guardian.HyperGuardian? = null
 }
 
 /** Takes raw controller/keyboard input (emulators); return false to let HyperXR handle the event. */
@@ -171,6 +173,7 @@ class XrEngine(
     private var passthrough: CameraPassthrough? = null
     private var tracker: HeadTracker? = null
     val hands = HandTrackingService(activity)
+    val guardian = com.hyperxr.guardian.HyperGuardian(activity)
     val joyCons = JoyConManager(activity)
     private val fusions = arrayOf(ControllerPoseFusion(), ControllerPoseFusion())
 
@@ -242,6 +245,7 @@ class XrEngine(
         ctx.share = share
         ctx.hands = hands
         ctx.hyperConnect = hyperConnect
+        ctx.guardian = guardian
         ctx.requestRecenter = { tracker?.recenter(); recenterControllers() }
         ctx.handStatus = {
             if (!input.handsAvailable) "Mãos: desligadas (sem câmera, sem permissão ou hand tracking desativado)"
@@ -285,10 +289,11 @@ class XrEngine(
                 val caps = app.capabilities.last
                 val cameraOk = caps.cameraPermission && caps.hasBackCamera
                 // The boundary warning needs depth: ARCore then also provides 6DoF and hand frames.
-                if (cameraOk && settings.graphics.vrBoundary && caps.arCore.ok && !forced3Dof) {
+                // HyperGuardian needs ARCore's position too (Auto also its depth)
+                if (cameraOk && (settings.graphics.vrBoundary || guardian.needsTracking) && caps.arCore.ok && !forced3Dof) {
                     val ar = ArCoreSession(activity).also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }.also { it.gyro = gyroHistory(); it.displayRotation = displayRotation() }
                     ar.create(useDepth = true)
-                    if (ar.session != null && ar.depthEnabled) {
+                    if (ar.session != null && (ar.depthEnabled || guardian.mode == com.hyperxr.guardian.HyperGuardian.Mode.MANUAL)) {
                         arCore = ar; tracker = ar; ar.start()
                     } else {
                         ar.close()
@@ -400,6 +405,8 @@ class XrEngine(
 
         updateBoundary(dt)
         updateHandMask()
+        guardian.update(dt, input.head, input.hands, arCore, openXrSession == 0L && tracker?.sixDof == true)
+        guardian.submit(scene, input.head)
 
 
         // 4. render
@@ -519,6 +526,10 @@ class XrEngine(
         renderer.renderScene(scene, eye)
         scene.painter?.let { it.afterScene(eye); renderer.restoreState() }
         renderer.renderPanels(scene, eye, overlayPass = false)
+        // HyperGuardian: the real room shows through as you near a wall or leave the area
+        // (under the grid and your hands, drawn next)
+        val gc = guardian.cameraAmount
+        if (gc > 0.02f && camera != null && camera.hasFrame && scene.background != Background.PASSTHROUGH) renderer.drawCameraOverlay(eye, camera, gc)
         renderer.renderLate(scene, eye)
         if (boundaryActive && camera != null) {
             val ar = arCore!!
@@ -857,6 +868,7 @@ class XrEngine(
     /** GL thread teardown (queueEvent from the activity before finishing). */
     fun releaseGl() {
         content.onGlRelease()
+        guardian.release()
         images.clear()
         compositor.release()
         share.release()

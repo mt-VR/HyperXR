@@ -169,6 +169,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val head = ctx.input.head
         if (!anchored && ctx.frameIndex > 5) {
             anchorTo(head); anchored = true
+            // the free-app notice, in front of you at every start of the VR mode
+            FreeNoticePanel {}.also { n -> n.placeInFront(head, 1.15f, 0.12f); windows += n }
             if (!restored) { restored = true; restoreSession() }
         }
         if (ctx.frameIndex % 90 == 0L) saveSession()
@@ -646,6 +648,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "capture" -> { capture(); return }
             "handlab" -> { toggleLab(); return }
             "ocean" -> { toggleOcean(); return }
+            "guardian" -> ctx.guardian?.let { com.hyperxr.guardian.GuardianPanel(it) } ?: InfoPanel("HyperGuardian", "Indisponível")
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)

@@ -417,6 +417,28 @@ class SceneRenderer {
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
     }
 
+    /** The camera image over everything drawn so far, at [alpha] (HyperGuardian's safety view). */
+    fun drawCameraOverlay(eye: EyeView, camera: CameraImageSource, alpha: Float) {
+        val (cropU, cropV) = fillCrop(eye.proj[5] / eye.proj[0], camera)
+        GLES30.glUseProgram(oesFullProg.id)
+        GLES30.glUniformMatrix4fv(oesFullProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
+        GLES30.glUniform2f(oesFullProg.u("uCrop"), cropU, cropV)
+        GLES30.glUniform1f(oesFullProg.u("uAlpha"), alpha.coerceIn(0f, 1f))
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
+        GLES30.glUniform1i(oesFullProg.u("uTex"), 0)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthMask(false)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glBindVertexArray(fullVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        GLES30.glBindVertexArray(0)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+    }
+
     /**
      * Boundary warning over the VR scene: blends the camera in where depth says an obstacle is
      * closer than [warnM], and everywhere by [global] (0..1) as the nearest obstacle approaches.

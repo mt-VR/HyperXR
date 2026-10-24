@@ -56,7 +56,7 @@ object IconLibrary {
      */
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
-        "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean",
+        "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -104,6 +104,9 @@ object BuiltinApps {
         AppEntry("game:ocean", "Oceano", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "ocean", "ocean",
             runtime = "HyperXR (nativo)", compatibility = "Realidade mista (ARCore Depth para medir a sala) ou VR",
             limitations = "Sua sala afunda e vira mar aberto; chuva, trovões, luz e volume num menu rápido. Sem sensor de profundidade, o chão é estimado pela altura"),
+        AppEntry("hx:guardian", "HyperGuardian", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "guardian", "guardian",
+            runtime = "HyperXR", compatibility = "ARCore com posição (6DoF); o modo automático também precisa do ARCore Depth",
+            limitations = "Manual: desenhe a área com a mão. Automático: paredes pela profundidade, com proteção para cama, móveis e o próprio corpo"),
         AppEntry("hx:appworld", "App-to-World", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "appworld", "appworld",
             runtime = "HyperXR", compatibility = "Apps Android como objetos no espaço",
             limitations = "Música e notificações precisam do acesso às notificações; arquivos, do acesso ao armazenamento"),
