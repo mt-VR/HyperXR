@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application>
+        <!-- Minecraft runs in its own process: the JVM installs signal handlers and ends the
+             process when the game quits, so it must never share one with HyperMagic. -->
+        <activity
+            android:name="com.hypermagic.minecraft.MinecraftActivity"
+            android:process=":minecraft"
+            android:exported="false"
+            android:label="Minecraft"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.hypermagic.minecraft"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+    </application>
+</manifest>

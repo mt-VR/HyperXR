@@ -678,6 +678,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
+            "mc_questcraft", "mc_gorillacraft" -> { openMinecraft(target); return }
             else -> InfoPanel("HyperMagic", "Painel '$target' indisponível")
         }
         placeAboveDock(w, yawOffsetDeg = (windows.size % 3 - 1) * 8f)
@@ -950,6 +951,21 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         try {
             game = com.hyperxr.questgames.GameHost(ctx, id) { glTasks += { game?.let { runCatching { it.release() } }; game = null } }.also { it.start(ctx.input.head) }
         } catch (t: Throwable) { gameFailed(t, id) }
+    }
+
+    /**
+     * QuestCraft / GorillaCraft: real Minecraft Java in its own process (MinecraftActivity). Not
+     * installed yet or no account: the 2D settings open on the Minecraft page instead.
+     */
+    private fun openMinecraft(target: String) {
+        val p = if (target == "mc_gorillacraft") com.hypermagic.minecraft.McProfiles.Profile.GORILLACRAFT else com.hypermagic.minecraft.McProfiles.Profile.QUESTCRAFT
+        libraryShown = false
+        ctx.ui {
+            val ready = com.hypermagic.minecraft.McProfiles.accountUuid(activity) != null && com.hypermagic.minecraft.McProfiles.installed(activity, p)
+            if (ready) com.hypermagic.minecraft.McProfiles.play(activity, p)
+            else activity.startActivity(Intent(activity, com.hyperxr.ui2d.MainActivity::class.java)
+                .putExtra(com.hyperxr.ui2d.MainActivity.EXTRA_SECTION, "MINECRAFT").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     private fun gameFailed(t: Throwable, id: String? = null) {

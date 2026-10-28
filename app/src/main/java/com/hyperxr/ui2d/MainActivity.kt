@@ -115,19 +115,24 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() { super.onResume(); refresh++ }
+
+    companion object {
+        /** Section name (Section.name) to open, e.g. from the XR library. */
+        const val EXTRA_SECTION = "section"
+    }
     override fun onDestroy() { io.shutdown(); super.onDestroy() }
 }
 
 enum class Section(val title: String) {
     HOME("Início"), LAUNCHER("Launcher"), GRAPHICS("Gráficos"), PERFORMANCE("Desempenho"),
     REALITY_LENSES("RealityLenses"), HEAD("Head tracking"), HANDS("Hand tracking"), CONTROLS("Controles"), HYPERCONTROLLER("HyperController"), PERMISSIONS("Permissões e pacotes"),
-    RUNTIME("OpenXR, Monado e Broker"), ENVIRONMENTS("Ambientes 3D"), APPS("Apps XR e Web"), AUDIO("Áudio"),
+    RUNTIME("OpenXR, Monado e Broker"), ENVIRONMENTS("Ambientes 3D"), APPS("Apps XR e Web"), MINECRAFT("Minecraft"), AUDIO("Áudio"),
     DEVICE("Dispositivo e diagnóstico"), ACCESSIBILITY("Acessibilidade"), NETWORK("Rede"),
 }
 
 @Composable
 private fun Root(a: MainActivity) {
-    var section by remember { mutableStateOf(Section.HOME) }
+    var section by remember { mutableStateOf(a.intent?.getStringExtra(MainActivity.EXTRA_SECTION)?.let { n -> Section.entries.firstOrNull { it.name == n } } ?: Section.HOME) }
     Column(Modifier.fillMaxSize().background(HxColors.bg)) {
     FreeAppBanner()
     CrashBanner(a)
@@ -166,6 +171,7 @@ private fun Root(a: MainActivity) {
                     Section.RUNTIME -> RuntimeSection(a)
                     Section.ENVIRONMENTS -> EnvironmentsSection(a)
                     Section.APPS -> AppsSection(a)
+                    Section.MINECRAFT -> MinecraftSection(a)
                     Section.AUDIO -> AudioSection(a)
                     Section.DEVICE -> DeviceSection(a)
                     Section.ACCESSIBILITY -> AccessibilitySection(a)

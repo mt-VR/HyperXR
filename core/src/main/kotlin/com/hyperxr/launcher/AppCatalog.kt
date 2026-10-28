@@ -58,6 +58,7 @@ object IconLibrary {
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
         "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb",
+        "mc_questcraft", "mc_gorillacraft",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -126,6 +127,12 @@ object BuiltinApps {
         AppEntry("game:catgame", "Gato vs. Vovó", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "catgame", "catgame",
             runtime = "HyperMagic (nativo)", compatibility = "VR com Joy-Cons",
             limitations = "Você é um gato na casa da vovó: atrapalhe as tarefas e acerte-a com objetos antes que ela termine"),
+        AppEntry("game:questcraft", "QuestCraft", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "mc_questcraft", "mc_questcraft",
+            runtime = "Minecraft Java Edition (launcher do QuestCraft portado)", compatibility = "Mãos ou controle, pelo runtime OpenXR do HyperMagic",
+            limitations = "Precisa de uma conta Microsoft com o Minecraft Java; instale e entre na conta em Configurações 2D > Minecraft"),
+        AppEntry("game:gorillacraft", "GorillaCraft", AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "mc_gorillacraft", "mc_gorillacraft",
+            runtime = "Minecraft Java Edition + ViveMonkeCraft", compatibility = "Movimento de gorila com as mãos, ajustado para VR Box",
+            limitations = "Precisa de uma conta Microsoft com o Minecraft Java; instale e entre na conta em Configurações 2D > Minecraft"),
     ) + com.hyperxr.questgames.QuestGameCatalog.games.map { g ->
         AppEntry("game:${g.id}", g.title, AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "qg_${g.id}", g.id,
             runtime = "HyperMagic (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id == "climb") "Mãos ou controle" else "Só as mãos (hand tracking)",

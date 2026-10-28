@@ -114,6 +114,8 @@ android.sourceSets["main"].assets.srcDir(daydreamAssets)
 
 dependencies {
     implementation(project(":core"))
+    // Minecraft Java Edition (QuestCraft / GorillaCraft): Pojlib port, see minecraft/
+    implementation(project(":minecraft"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

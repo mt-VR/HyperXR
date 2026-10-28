@@ -27,9 +27,15 @@ class HyperXRApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // the Minecraft process belongs to its JVM (own signal handlers, exits by itself)
+        if (processName().endsWith(":minecraft")) return
         com.hyperxr.diagnostics.CrashReporter.install(this)
         com.hyperxr.diagnostics.NativeCrashGuard.init(this)
     }
+
+    private fun processName(): String =
+        if (android.os.Build.VERSION.SDK_INT >= 28) getProcessName()
+        else runCatching { File("/proc/self/cmdline").readText().trimEnd('\u0000') }.getOrDefault("")
 
     companion object {
         lateinit var instance: HyperXRApp

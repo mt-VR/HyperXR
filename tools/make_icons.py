@@ -33,7 +33,12 @@ icons = {
     "qg_fishing":  ("phishing.svg",       "#5fd0e0", "#14608a", 0.54),
     "qg_diorama":  ("cruelty_free.svg",   "#b6e388", "#4f8a3a", 0.54),
     "qg_climb":    ("hiking.svg",         "#ffb35c", "#6a4a8c", 0.54),
+    "mc_questcraft":   ("deployed_code.svg", "#6fcf4a", "#3a6b2a", 0.54),
+    "mc_gorillacraft": ("front_hand.svg",    "#8b6a4a", "#2f2a26", 0.52),
 }
+# optional: only these keys (python3 make_icons.py SRC OUT key1 key2)
+ONLY = sys.argv[3:]
+if ONLY: icons = {k: v for k, v in icons.items() if k in ONLY}
 def hexc(h): return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
 def gradient(a, b):
     a = hexc(a); b = hexc(b)

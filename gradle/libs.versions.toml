@@ -48,9 +48,14 @@ openxr-loader = { module = "org.khronos.openxr:openxr_loader_for_android", versi
 webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 browser = { module = "androidx.browser:browser", version.ref = "browser" }
 junit = { module = "junit:junit", version.ref = "junit" }
+gson = { module = "com.google.code.gson:gson", version = "2.12.1" }
+commons-io = { module = "commons-io:commons-io", version = "2.13.0" }
+commons-codec = { module = "commons-codec:commons-codec", version = "1.15" }
+androidx-annotation = { module = "androidx.annotation:annotation", version = "1.9.1" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

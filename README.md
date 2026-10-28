@@ -19,6 +19,7 @@ realidade mista) e um SDK próprio em **LuaJIT 5.1** (pacotes `.hyperx`).
 | `app/` | App Android: UI 2D (Compose), engine XR (GLES 3), ARCore/Camera2, hand tracking (MediaPipe), Joy-Con, áudio, web apps, launcher espacial, runtime de jogos |
 | `app/src/main/cpp/` | JNI: ponte LuaJIT, OpenXR (loader Khronos), enumeração NNAPI |
 | `app/src/main/assets/hxsdk/` | SDK Lua confiável: `bootstrap.lua` (sandbox + API `hx`), `physics.lua`, `ui.lua`, `vmath.lua` |
+| `minecraft/` | Launcher do Minecraft Java Edition (QuestCraft e GorillaCraft), portado do Pojlib do QuestCraft; veja [minecraft/README.md](minecraft/README.md) |
 | `games/` | Fontes dos pacotes `.hyperx` embutidos: Relógio, Calculadora, Calendário |
 | `native/luajit/` | LuaJIT 2.1 estático (arm64-v8a, x86_64) + cabeçalhos; reproduzível com `tools/build_luajit_android.sh` |
 | `sdk/tests/` | Testes do SDK rodando o `bootstrap.lua` real no LuaJIT de desktop |
@@ -92,6 +93,21 @@ Joy-Cons/gamepad e o toque na tela viram os controles do jogo (perfil Touch); a 
 Jogos feitos só para o Quest geralmente exigem recursos que um celular não tem, então espere
 muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tempo.
 
+### Minecraft: QuestCraft e GorillaCraft
+
+O Minecraft Java Edition de verdade dentro do HyperMagic. O launcher do QuestCraft (Pojlib) foi
+portado para o app, sem Unity: o jogo roda num processo próprio e abre direto no runtime OpenXR do
+HyperMagic com o Vivecraft. Em **Configurações 2D > Minecraft**: entre com a conta Microsoft (código
+em microsoft.com/link), escolha a versão (1.19.2 a 1.21.11), instale e jogue; depois os dois
+aparecem na Biblioteca do XR.
+
+- **QuestCraft**: como o QuestCraft entrega, com Sodium e os mods de desempenho dele.
+- **GorillaCraft**: com o ViveMonkeCraft (movimento de Gorilla Tag) ajustado para VR Box: sem
+  pernas, sem voar (impulso limitado, sem prancha nem teleporte) e tolerante ao tremor das mãos.
+
+Precisa de um celular ARM 64 bits e de uma conta que tenha o Minecraft Java (sem o jogo, modo
+demonstração). Detalhes e créditos em [minecraft/README.md](minecraft/README.md).
+
 ### Apps Android em janelas (Shizuku)
 
 1. Instale e inicie o [Shizuku](https://shizuku.rikka.app/) (depuração sem fio ou root).
@@ -137,6 +153,9 @@ ser útil, mas SEM NENHUMA GARANTIA. Veja o arquivo [LICENSE](LICENSE).
 - Cabeçalhos OpenXR (`native/openxr-runtime/include`) — Apache-2.0 OR MIT, Khronos Group
 - Khronos OpenXR loader — Apache-2.0 (dependência Maven `org.khronos.openxr:openxr_loader_for_android`)
 - ARCore SDK, MediaPipe Tasks Vision, AndroidX, Jetpack Compose — Apache-2.0
+- Pojlib / QuestCraft (`minecraft/`) — LGPL-3.0 (`minecraft/LICENSE-LGPL3-Pojlib.txt`); em tempo de execução o
+  app baixa o Java 22 do QuestCraft, LWJGL (BSD-3), MobileGlues (LGPL-2.1), OpenAL Soft (LGPL), JNA e SQLite JDBC
+- ViveMonkeCraft (baixado do Modrinth no perfil GorillaCraft) — MIT
 - GeckoView (Mozilla) — MPL-2.0 (dependência Maven `org.mozilla.geckoview:geckoview-arm64-v8a`)
 - Shizuku API — Apache-2.0
 - `openvr_driver.h` (Valve) — BSD-3-Clause (`pc/third_party/openvr/LICENSE`)
