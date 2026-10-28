@@ -79,6 +79,7 @@
 
     <application
         android:name=".HyperXRApp"
+        android:allowNativeHeapPointerTagging="false"
         android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_launcher"
