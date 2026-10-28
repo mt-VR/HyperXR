@@ -237,7 +237,9 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
             // the light comes from the sun
             dirToWorld(lv.set(-l.sunDir[0], -l.sunDir[1], -l.sunDir[2]).normalize(), lw)
             sc.lightDir[0] = lw.x; sc.lightDir[1] = lw.y; sc.lightDir[2] = lw.z
-            l.light.copyInto(sc.lightColor); l.ambient.copyInto(sc.ambient)
+            // a look may give RGBA colours: only RGB is used
+            l.light.copyInto(sc.lightColor, 0, 0, minOf(3, l.light.size, sc.lightColor.size))
+            l.ambient.copyInto(sc.ambient, 0, 0, minOf(3, l.ambient.size, sc.ambient.size))
             sc.fog[0] = l.horizon[0]; sc.fog[1] = l.horizon[1]; sc.fog[2] = l.horizon[2]; sc.fog[3] = l.objectFog
         }
         if (g.shadowRadius > 0f && !safeMode) { toWorld(0f, 0f, g.shadowZ, sc.shadowCenter); sc.shadowRadius = g.shadowRadius }
