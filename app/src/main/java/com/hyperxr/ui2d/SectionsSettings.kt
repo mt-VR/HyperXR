@@ -48,6 +48,9 @@ fun HomeSection(a: MainActivity) {
             Text("Iniciar experiência XR", fontSize = 18.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
         }
         Note("Coloque o celular no VR Box após iniciar. Toque na tela (ou no botão do visor) para selecionar.")
+        OutlinedButton(onClick = { a.update { it.copy(onboarding = com.hyperxr.settings.OnboardingSettings()) } }, modifier = Modifier.padding(top = 6.dp)) {
+            Text("Refazer a configuração inicial e o tutorial")
+        }
     }
     SteamVrCard(a)
     SectionCard("Resumo do aparelho") {

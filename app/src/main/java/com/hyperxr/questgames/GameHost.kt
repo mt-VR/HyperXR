@@ -213,20 +213,34 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
     }
 
     private val lv = Vec3(); private val lw = Vec3()
+    /**
+     * The first seconds of a game run under the native crash guard: if the GPU driver brought the
+     * app down while drawing it (shadows, the sky shader), the game opens in safe mode next time,
+     * plain sky and no shadows, instead of crashing again.
+     */
+    private val renderStep = "game-render:$id"
+    val safeMode = com.hyperxr.diagnostics.NativeCrashGuard.blocked(renderStep)
+    private var frames = 0
+
     fun draw() {
         val g = game ?: return
         val sc = ctx.scene
+        if (!safeMode) {
+            if (frames == 0) com.hyperxr.diagnostics.NativeCrashGuard.begin(renderStep)
+            if (frames == GUARDED_FRAMES) com.hyperxr.diagnostics.NativeCrashGuard.end(renderStep)
+        }
+        frames++
         g.look?.let { l ->
             sky.look = l
             sc.background = com.hyperxr.rendering.Background.COLOR
-            sc.painter = sky
+            if (safeMode) { sc.clear[0] = l.horizon[0]; sc.clear[1] = l.horizon[1]; sc.clear[2] = l.horizon[2] } else sc.painter = sky
             // the light comes from the sun
             dirToWorld(lv.set(-l.sunDir[0], -l.sunDir[1], -l.sunDir[2]).normalize(), lw)
             sc.lightDir[0] = lw.x; sc.lightDir[1] = lw.y; sc.lightDir[2] = lw.z
             l.light.copyInto(sc.lightColor); l.ambient.copyInto(sc.ambient)
             sc.fog[0] = l.horizon[0]; sc.fog[1] = l.horizon[1]; sc.fog[2] = l.horizon[2]; sc.fog[3] = l.objectFog
         }
-        if (g.shadowRadius > 0f) { toWorld(0f, 0f, g.shadowZ, sc.shadowCenter); sc.shadowRadius = g.shadowRadius }
+        if (g.shadowRadius > 0f && !safeMode) { toWorld(0f, 0f, g.shadowZ, sc.shadowCenter); sc.shadowRadius = g.shadowRadius }
         g.draw()
         particles.draw()
         hud.submit(sc)
@@ -384,7 +398,8 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
     }
 
     fun release() {
-        game?.release(); game = null
+        com.hyperxr.diagnostics.NativeCrashGuard.end(renderStep)
+        runCatching { game?.release() }; game = null
         models.values.forEach { it?.release() }; models.clear()
         textures.values.forEach { com.hyperxr.rendering.Gl.deleteTexture(it) }; textures.clear()
         painter.shutdownNow(); painting.clear()
@@ -397,6 +412,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
 
     companion object {
         val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
+        private const val GUARDED_FRAMES = 300
         private val GLOW_LAYERS = arrayOf(2.6f to 0.55f, 6f to 0.22f)
     }
 }

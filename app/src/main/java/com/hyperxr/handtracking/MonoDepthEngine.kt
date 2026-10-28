@@ -87,6 +87,8 @@ class MonoDepthEngine(private val context: Context) {
             add("CPU" to null)
         }
         for ((label, name) in tries) {
+            val step = "depth:$label"
+            if (com.hyperxr.diagnostics.NativeCrashGuard.blocked(step)) continue
             try {
                 val opts = Interpreter.Options()
                 if (name != null) {
@@ -99,8 +101,8 @@ class MonoDepthEngine(private val context: Context) {
                     opts.setNumThreads(2)
                 } else { opts.setNumThreads(4); opts.setUseXNNPACK(true) }
                 buf.rewind()
-                val i = Interpreter(buf, opts)
-                input.rewind(); output.rewind(); i.run(input, output)  // a delegate can fail on the first run
+                // a delegate can fail on the first run
+                val i = com.hyperxr.diagnostics.NativeCrashGuard.run(step) { Interpreter(buf, opts).also { input.rewind(); output.rewind(); it.run(input, output) } }
                 interpreter = i; device = label
                 status = "pronto ($label)"
                 Diagnostics.log("AI depth on $label")

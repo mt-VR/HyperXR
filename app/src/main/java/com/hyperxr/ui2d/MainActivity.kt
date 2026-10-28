@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
                 }
                 var booting by remember { mutableStateOf(!bootSplashPlayed && app.settings.current.graphics.bootAnimation) }
                 androidx.compose.foundation.layout.Box {
-                    Root(this@MainActivity)
+                    if (settingsState.onboarding.wizardDone) Root(this@MainActivity) else SetupWizard(this@MainActivity)
                     if (booting) BootSplash { bootSplashPlayed = true; booting = false }
                 }
             }

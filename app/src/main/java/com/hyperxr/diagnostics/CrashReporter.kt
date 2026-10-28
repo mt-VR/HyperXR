@@ -138,6 +138,14 @@ object CrashReporter {
         sb.toString()
     }.getOrElse { "Não consegui ler a pilha nativa: ${it.message}" }
 
+    /** An error that was caught (a game that failed and was closed), kept like a crash so it can be sent. */
+    fun record(context: Context, what: String, error: Throwable) = runCatching {
+        val sw = StringWriter()
+        error.printStackTrace(PrintWriter(sw))
+        write(context.applicationContext, "caught", "Tipo: erro capturado (o app continuou)\nOnde: $what\n\n" + sw.toString().take(12000) +
+            "\nÚltimos eventos:\n" + Diagnostics.recentEvents().takeLast(30).joinToString("\n"))
+    }
+
     private fun write(app: Context, tag: String, body: String, time: Long = System.currentTimeMillis()) {
         val d = dir(app)
         val head = "HyperXR ${versionName(app)} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}\n" +

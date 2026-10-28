@@ -69,6 +69,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var ocean: com.hyperxr.ocean.OceanApp? = null
     /** One of the ten games, played in the launcher's space. */
     private var game: com.hyperxr.questgames.GameHost? = null
+    /** The gesture tutorial, the first time in XR (until it is finished or skipped). */
+    private var tutorial: XrTutorialPanel? = null
     private val cursorRay = Ray()
     private var cursorRayValid = false
     private var cursorLabDown = false
@@ -201,6 +203,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         lab?.let { surfaces += it.panel }
         ocean?.let { surfaces += it.panel }
         game?.let { surfaces += it.hud }
+        if (tutorial == null && !app.settings.current.onboarding.xrTutorialDone)
+            tutorial = XrTutorialPanel(ctx) { app.settings.update { it.copy(onboarding = it.onboarding.copy(xrTutorialDone = true)) } }
+        tutorial?.let { t -> if (t.visible) surfaces += t else { t.release(); tutorial = null } }
         if (ctx.input.handsAvailable && !immersiveMedia) handTools.update(ctx.input.hands, head, dt)
         surfaces += handTools.surfaces()
         // App-to-World objects (hidden inside a 360 photo/video, like the library)
@@ -215,7 +220,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (showLibrary) { library.update(dt); library.submit(ctx.scene) }
         lab?.submit()
         ocean?.let { it.update(dt, head); it.submit(ctx.scene) }
-        game?.let { it.update(dt); it.draw() }
+        game?.let { g ->
+            // a failing game closes by itself (with a report) instead of taking HyperXR down
+            try { g.update(dt); g.draw() } catch (t: Throwable) { gameFailed(t) }
+        }
+        tutorial?.let { it.update(dt); it.submit(ctx.scene) }
         if (!immersiveMedia) { appWorld.update(dt); appWorld.submit() }
         taskbar.update(dt); taskbar.submit(ctx.scene)
         windows.removeAll { w -> if (!w.visible) { w.release(); true } else false }
@@ -925,9 +934,21 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     // ---------------------------------------------------------------- games
     private fun startGame(id: String) {
-        game?.release()
+        game?.let { runCatching { it.release() } }
+        game = null
         libraryShown = false
-        game = com.hyperxr.questgames.GameHost(ctx, id) { glTasks += { game?.release(); game = null } }.also { it.start(ctx.input.head) }
+        try {
+            game = com.hyperxr.questgames.GameHost(ctx, id) { glTasks += { game?.let { runCatching { it.release() } }; game = null } }.also { it.start(ctx.input.head) }
+        } catch (t: Throwable) { gameFailed(t, id) }
+    }
+
+    private fun gameFailed(t: Throwable, id: String? = null) {
+        val title = game?.game?.title ?: id ?: "jogo"
+        Diagnostics.log("Game $title failed: $t")
+        com.hyperxr.diagnostics.CrashReporter.record(activity, "jogo $title", t)
+        game?.let { runCatching { it.release() } }
+        game = null
+        openWindow(InfoPanel("Erro no jogo", "$title teve um erro e foi fechado (o HyperXR continua). O relatório está nas configurações 2D: Ver relatório.").apply { placeInFront(ctx.input.head) })
     }
 
     // ---------------------------------------------------------------- Ocean

@@ -28,6 +28,7 @@ class HyperXRApp : Application() {
         super.onCreate()
         instance = this
         com.hyperxr.diagnostics.CrashReporter.install(this)
+        com.hyperxr.diagnostics.NativeCrashGuard.init(this)
     }
 
     companion object {

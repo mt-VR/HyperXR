@@ -106,11 +106,16 @@ class NpuHandEngine(private val context: Context) : HandEngine {
             add("CPU (XNNPACK)" to null)
         }
         for ((label, name) in tries) {
+            val step = "npuhands:${if (name == null) "CPU" else if (name.isEmpty()) "NNAPI" else "NPU:$name"}"
+            if (com.hyperxr.diagnostics.NativeCrashGuard.blocked(step)) continue
             try {
-                val d = build(det, name, "palm")
-                val l = build(lm, name, "landmark")
-                // a delegate can accept the graph and still fail on the first run: run once now
-                warmUp(d, l)
+                val (d, l) = com.hyperxr.diagnostics.NativeCrashGuard.run(step) {
+                    val d = build(det, name, "palm")
+                    val l = build(lm, name, "landmark")
+                    // a delegate can accept the graph and still fail on the first run: run once now
+                    warmUp(d, l)
+                    d to l
+                }
                 // and an accelerator can run it with too little precision: compare with the CPU
                 if (name != null) agreesWithCpu(l, lm)?.let { problem -> throw IllegalStateException(problem) }
                 detector = d; landmarks = l; device = label

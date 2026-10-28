@@ -45,6 +45,8 @@ class HandMaskEngine(private val context: Context) {
             add("NNAPI" to ""); add("CPU" to null)
         }
         for ((label, name) in tries) {
+            val step = "handmask:$label"
+            if (com.hyperxr.diagnostics.NativeCrashGuard.blocked(step)) continue
             try {
                 val opts = Interpreter.Options()
                 if (name == GPU) {
@@ -58,8 +60,7 @@ class HandMaskEngine(private val context: Context) {
                     delegate = NnApiDelegate(nn); opts.addDelegate(delegate); opts.setNumThreads(2)
                 } else { opts.setNumThreads(2); opts.setUseXNNPACK(true) }
                 model.rewind()
-                val i = Interpreter(model, opts)
-                input.rewind(); output.rewind(); i.run(input, output)
+                val i = com.hyperxr.diagnostics.NativeCrashGuard.run(step) { Interpreter(model, opts).also { input.rewind(); output.rewind(); it.run(input, output) } }
                 interpreter = i; device = label
                 Diagnostics.log("Hand occlusion mask on $label")
                 return true

@@ -87,6 +87,8 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             }
         }
         for ((label, name) in tries) {
+            val step = "rtmpose:$label"
+            if (com.hyperxr.diagnostics.NativeCrashGuard.blocked(step)) { Diagnostics.log("RTMPose: $label skipped (it crashed this phone before)"); continue }
             try {
                 val opts = Interpreter.Options()
                 when (name) {
@@ -98,8 +100,9 @@ class RtmHandEngine(private val context: Context) : HandEngine {
                         .setCacheDir(context.cacheDir.absolutePath).setModelToken("hxrtmpose-hand-v1")).also { nnapi = it; opts.addDelegate(it) }
                 }
                 model.rewind()
-                val i = Interpreter(model, opts)
-                poseIn.rewind(); outX.rewind(); outY.rewind(); i.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to outX, 1 to outY))
+                val i = com.hyperxr.diagnostics.NativeCrashGuard.run(step) {
+                    Interpreter(model, opts).also { poseIn.rewind(); outX.rewind(); outY.rewind(); it.runForMultipleInputsOutputs(arrayOf(poseIn), mapOf(0 to outX, 1 to outY)) }
+                }
                 pose = i; device = label
                 break
             } catch (t: Throwable) {

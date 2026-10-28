@@ -189,6 +189,13 @@ data class LauncherSettings(
     }
 }
 
+/** First run: the setup assistant (2D) and the gesture tutorial (inside XR), each shown once. */
+@Serializable
+data class OnboardingSettings(
+    val wizardDone: Boolean = false,
+    val xrTutorialDone: Boolean = false,
+)
+
 @Serializable
 data class HyperSettings(
     val version: Int = CURRENT_VERSION,
@@ -203,6 +210,7 @@ data class HyperSettings(
     val accessibility: AccessibilitySettings = AccessibilitySettings(),
     val network: NetworkSettings = NetworkSettings(),
     val runtime: RuntimeSettings = RuntimeSettings(),
+    val onboarding: OnboardingSettings = OnboardingSettings(),
 ) {
     companion object {
         const val CURRENT_VERSION = 5
