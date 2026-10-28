@@ -58,7 +58,7 @@ object IconLibrary {
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
         "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb",
-        "mc_questcraft", "mc_gorillacraft",
+        "mc_questcraft", "mc_gorillacraft", "shop", "people", "missions",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -69,7 +69,15 @@ object BuiltinApps {
     val RETIRED_PACKAGES = listOf("com.hyperxr.stillshot", "com.hyperxr.forgelab", "com.hyperxr.primalrush")
 
     val all: List<AppEntry> = listOf(
+        AppEntry("hx:loja", "Loja", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "shop", "loja",
+            runtime = "HyperMagic", compatibility = "Jogos HyperMagic, OpenXR, Cardboard, Minecraft e apps",
+            limitations = "Jogos OpenXR vêm das páginas dos autores e passam pelo Corrigir APK"),
         AppEntry("hx:browser", "Navegador", AppKind.WEB, AppCategory.SYSTEM, "browser", com.hyperxr.browser.UrlInput.HOME),
+        AppEntry("hx:people", "Pessoas", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "people", "people",
+            runtime = "HyperMagic + Supabase", compatibility = "Amigos, mensagens, chamadas de voz e mostrar a tela",
+            limitations = "Precisa de internet e de uma conta (Configurações 2D > Pessoas)"),
+        AppEntry("hx:missions", "Missões", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "missions", "missions",
+            runtime = "HyperMagic", compatibility = "Nível, XP, missões diárias, sequência de dias e conquistas"),
         AppEntry("hx:settings", "Configurações", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "settings", "settings"),
         AppEntry("hx:files", "Arquivos", AppKind.SYSTEM_PANEL, AppCategory.SYSTEM, "files", "files",
             limitations = "Lists HyperMagic storage (.hyperx packages, environments, captures)"),

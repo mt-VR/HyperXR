@@ -35,6 +35,9 @@ icons = {
     "qg_climb":    ("hiking.svg",         "#ffb35c", "#6a4a8c", 0.54),
     "mc_questcraft":   ("deployed_code.svg", "#6fcf4a", "#3a6b2a", 0.54),
     "mc_gorillacraft": ("front_hand.svg",    "#8b6a4a", "#2f2a26", 0.52),
+    "shop":        ("storefront.svg",     "#4f8dff", "#7a3cf0", 0.52),
+    "people":      ("group.svg",          "#36c2a0", "#1f6fb8", 0.54),
+    "missions":    ("emoji_events.svg",   "#ffc23c", "#e0642c", 0.54),
 }
 # optional: only these keys (python3 make_icons.py SRC OUT key1 key2)
 ONLY = sys.argv[3:]

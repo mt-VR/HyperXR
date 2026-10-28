@@ -77,7 +77,7 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
             sy += 68f
         }
         c.button("store", "Ambientes", c.pad, sy + 20f, 230f, 60f) { a.openTarget("environments") }
-        c.button("files", "Arquivos", c.pad, sy + 88f, 230f, 60f) { a.openTarget("files") }
+        c.button("loja", "Loja", c.pad, sy + 88f, 230f, 60f, accent = true) { a.openTarget("loja") }
         // grid
         val apps = a.allApps().filter(::matches)
         val cols = 5; val rows = 3

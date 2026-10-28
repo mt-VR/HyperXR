@@ -31,6 +31,8 @@ class HyperXRApp : Application() {
         if (processName().endsWith(":minecraft")) return
         com.hyperxr.diagnostics.CrashReporter.install(this)
         com.hyperxr.diagnostics.NativeCrashGuard.init(this)
+        // Pessoas: friends, messages and calls stay live while the app runs
+        if (!processName().contains(':')) { com.hyperxr.social.Social.init(this); com.hyperxr.social.Social.start() }
     }
 
     private fun processName(): String =

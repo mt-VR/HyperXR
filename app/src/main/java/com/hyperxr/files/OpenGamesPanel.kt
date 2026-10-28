@@ -101,32 +101,44 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
     /** Latest release with an APK -> download and patch/install; otherwise the source page. */
     private fun get(g: OpenGame) {
         if (busy != null) return
-        busy = g.repo; status = "Procurando APK em ${g.repo}…"; dirty = true
-        mediaIo.execute {
-            try {
-                val apk: ApkAsset? = runCatching { OpenGames.parseRelease(get(OpenGames.latestReleaseUrl(g.repo))).firstOrNull() }.getOrNull()
-                if (apk == null) {
-                    status = "${g.name}: sem APK pronto na última versão; abrindo o código-fonte"
-                    host.onGl { openUrl(g.url) }
-                    return@execute
-                }
-                status = "Baixando ${apk.name} (${FileKinds.formatSize(apk.bytes)})…"; dirty = true
-                val dir = ApkImports.dir(host.activity)
-                dir.listFiles()?.forEach { it.delete() }
-                val out = File(dir, apk.name.replace('/', '_'))
-                download(apk.url, out)
-                Diagnostics.log("Open-source game downloaded: ${g.repo} ${apk.tag} ${apk.name} (${g.license})")
-                status = "${g.name} ${apk.tag} baixado: confira e instale"
-                host.onGl { host.openPanel(ApkPanel(host, out), 1.25f) }
-            } catch (t: Throwable) {
-                status = "Falha: ${t.message}"
-            } finally {
-                busy = null; dirty = true
-            }
-        }
+        busy = g.repo; dirty = true
+        downloadOpenGame(host, g, openUrl, { status = it; dirty = true }) { busy = null; dirty = true }
     }
 
-    private fun get(url: String): String = (URL(url).openConnection() as HttpURLConnection).run {
+    private fun get(url: String): String = githubGet(url)
+}
+
+/**
+ * Downloads an open-source game's latest release APK and opens it in the check/patch/install
+ * panel (the Store and the Jogos VR panel both use it); without an APK, its source page opens.
+ */
+fun downloadOpenGame(host: MediaHost, g: OpenGame, openUrl: (String) -> Unit, status: (String) -> Unit, done: () -> Unit) {
+    status("Procurando APK em ${g.repo}…")
+    mediaIo.execute {
+        try {
+            val apk: ApkAsset? = runCatching { OpenGames.parseRelease(githubGet(OpenGames.latestReleaseUrl(g.repo))).firstOrNull() }.getOrNull()
+            if (apk == null) {
+                status("${g.name}: sem APK pronto na última versão; abrindo o código-fonte")
+                host.onGl { openUrl(g.url) }
+                return@execute
+            }
+            status("Baixando ${apk.name} (${FileKinds.formatSize(apk.bytes)})…")
+            val dir = ApkImports.dir(host.activity)
+            dir.listFiles()?.forEach { it.delete() }
+            val out = File(dir, apk.name.replace('/', '_'))
+            downloadFile(apk.url, out)
+            Diagnostics.log("Open-source game downloaded: ${g.repo} ${apk.tag} ${apk.name} (${g.license})")
+            status("${g.name} ${apk.tag} baixado: confira e instale")
+            host.onGl { host.openPanel(ApkPanel(host, out), 1.25f) }
+        } catch (t: Throwable) {
+            status("Falha: ${t.message}")
+        } finally {
+            done()
+        }
+    }
+}
+
+internal fun githubGet(url: String): String = (URL(url).openConnection() as HttpURLConnection).run {
         setRequestProperty("Accept", "application/vnd.github+json")
         setRequestProperty("User-Agent", "HyperMagic")
         connectTimeout = 15000; readTimeout = 30000
@@ -135,7 +147,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
         inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
     }
 
-    private fun download(url: String, out: File) {
+internal fun downloadFile(url: String, out: File) {
         (URL(url).openConnection() as HttpURLConnection).run {
             setRequestProperty("User-Agent", "HyperMagic")
             instanceFollowRedirects = true
@@ -144,4 +156,3 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
             inputStream.use { i -> out.outputStream().use { i.copyTo(it, 1 shl 16) } }
         }
     }
-}

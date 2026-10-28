@@ -136,6 +136,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         val env = app.environments.installed().firstOrNull { it.id == app.settings.current.launcher.environmentId } ?: PolyHavenCatalog.STUDIO
         loadEnvironment(env)
         File(app.filesDir, "crash").listFiles()?.forEach { Diagnostics.log("Package crash report: ${it.nameWithoutExtension}: ${it.readText().take(160)}") }
+        Thread { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.OpenedXr) }.start()
+        com.hyperxr.progress.ProgressStore.addListener { out -> progressNotices += out }
+        // screen sharing in calls: the 16:9 spectator view also drawn into WebRTC's surface
+        com.hyperxr.social.Calls.screenOutput = object : com.hyperxr.social.Calls.ScreenOutput {
+            override fun attach(surface: android.view.Surface, width: Int, height: Int) { glTasks += { ctx.share.addSink(surface, width, height, recordable = false) } }
+            override fun detach(surface: android.view.Surface) { glTasks += { ctx.share.removeSink(surface) } }
+        }
     }
 
     override fun onResume() { if (::ctx.isInitialized) activity.runOnUiThread { refreshInstalled() }; ocean?.onResume() }
@@ -168,6 +175,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- per frame
     override fun onFrame(ctx: XrContext, dt: Float) {
         while (true) { val t = glTasks.poll() ?: break; t() }
+        followSocial(dt)
         deliverPhoneTyping()
         followClock()
         processPendingCloses()
@@ -674,6 +682,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
             "opengames" -> com.hyperxr.files.OpenGamesPanel(this) { url -> openBrowser(url, false) }
+            "loja" -> StorePanel(this, this) { url -> openBrowser(url, false) }
+            "people" -> PeoplePanel(this, this)
+            "missions" -> MissionsPanel()
             "youtube" -> com.hyperxr.ytxr.YouTubePanel(this)
             "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
@@ -950,6 +961,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         libraryShown = false
         try {
             game = com.hyperxr.questgames.GameHost(ctx, id) { glTasks += { game?.let { runCatching { it.release() } }; game = null } }.also { it.start(ctx.input.head) }
+            Thread { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.StartedGame(id)) }.start()
         } catch (t: Throwable) { gameFailed(t, id) }
     }
 
@@ -965,6 +977,66 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             if (ready) com.hypermagic.minecraft.McProfiles.play(activity, p)
             else activity.startActivity(Intent(activity, com.hyperxr.ui2d.MainActivity::class.java)
                 .putExtra(com.hyperxr.ui2d.MainActivity.EXTRA_SECTION, "MINECRAFT").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    // ---------------------------------------------------------------- Pessoas: calls and messages
+    private var callPanel: CallPanel? = null
+    private var callIdleTime = 0f
+    private var lastToastMessage = -1L
+    private var lastPlaying = ""
+    private var playSeconds = 0f
+    private var lastOver = false
+    private val progressNotices = java.util.concurrent.ConcurrentLinkedQueue<com.hyperxr.progress.Outcome>()
+
+    /** Opens the call window when a call starts or rings, closes it after it ends; message toasts. */
+    private fun followSocial(dt: Float) {
+        val calls = com.hyperxr.social.Calls
+        val social = com.hyperxr.social.Social
+        if (calls.state != com.hyperxr.social.Calls.State.IDLE) {
+            callIdleTime = 0f
+            val open = callPanel
+            if (open == null || !windows.contains(open)) {
+                callPanel = CallPanel().also { p -> p.placeInFront(ctx.input.head, 1.2f, 0.05f); p.onClose = { callPanel = null }; windows += p }
+            }
+        } else callPanel?.let { p ->
+            callIdleTime += dt
+            if (callIdleTime > 3f) { windows.remove(p); p.release(); callPanel = null }
+        }
+        val m = social.lastIncoming
+        if (m != null && m.id != lastToastMessage) {
+            lastToastMessage = m.id
+            if (social.openChat != m.sender) {
+                val who = social.profile(m.sender)
+                val name = who?.name ?: "Amigo"
+                windows.removeAll { (it is ToastPanel).also { t -> if (t) it.release() } }
+                windows += ToastPanel("$name: ${m.body.take(90)}", "Responder") {
+                    who?.let { openPanel(ChatPanel(this, this, it), 1.2f) }
+                }.also { t -> t.placeInFront(ctx.input.head, 1.0f, 0.28f); t.onClose = { glTasks += { windows.remove(t); t.release() } } }
+            }
+        }
+        // friends see what you are playing
+        val playing = game?.game?.title ?: if (lab != null) "Hand Physics Lab" else if (ocean != null) "Oceano" else ""
+        if (playing != lastPlaying) { lastPlaying = playing; social.setPlaying(playing); playSeconds = 0f }
+        // XP: each minute played, and the score when a round ends
+        if (playing.isNotEmpty()) {
+            playSeconds += dt
+            if (playSeconds >= 60f) { playSeconds -= 60f; val id = playing; Thread { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.PlayedMinute(id)) }.start() }
+        }
+        val g = game?.game
+        val over = g?.over == true
+        if (over && !lastOver && g != null) { val sc = g.score; val id = g.title; Thread { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.Score(id, sc)) }.start() }
+        lastOver = over
+        // level ups, missions and achievements: one notice at a time
+        if (windows.none { it is ToastPanel }) progressNotices.poll()?.let { out ->
+            val text = when {
+                out.levelUp != null -> "Você subiu para o nível ${out.levelUp}!"
+                out.achievements.isNotEmpty() -> "Conquista: ${out.achievements.first().title} (+${out.achievements.first().xp} XP)"
+                out.missionsDone.isNotEmpty() -> "Missão feita: ${out.missionsDone.first().title} (+${out.missionsDone.first().xp} XP)"
+                else -> null
+            }
+            if (text != null) windows += ToastPanel(text, "Missões") { openSystem("missions") }
+                .also { t -> t.ttl = 5f; t.placeInFront(ctx.input.head, 1.0f, 0.3f); t.onClose = { glTasks += { windows.remove(t); t.release() } } }
         }
     }
 

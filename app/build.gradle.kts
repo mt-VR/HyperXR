@@ -116,6 +116,9 @@ dependencies {
     implementation(project(":core"))
     // Minecraft Java Edition (QuestCraft / GorillaCraft): Pojlib port, see minecraft/
     implementation(project(":minecraft"))
+    // Pessoas (Supabase): REST + Realtime websocket, and WebRTC for calls and screen sharing
+    implementation(libs.okhttp)
+    implementation(libs.webrtc)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
