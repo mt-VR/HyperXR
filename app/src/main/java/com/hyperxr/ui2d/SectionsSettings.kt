@@ -262,6 +262,13 @@ fun ControlsSection(a: MainActivity) {
         if (connected.isEmpty()) Note("Nenhum controle conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
         Note("Para onde o controle aponta vem sempre da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão. O giroscópio do controle nunca é usado (é instável), mesmo quando ele tem um.")
+        ToggleRow("Modelo de controle VR na mão", c.controllerModel, "Com a mão vista pela câmera, o controle aparece como um controle VR onde a mão está") { v ->
+            a.update { it.copy(controllers = it.controllers.copy(controllerModel = v)) }
+        }
+        ToggleRow("Mostrar a mão segurando o controle", c.showHandsWithController, "Desligado: só o controle aparece. O hand tracking continua rodando para dar a posição do controle") { v ->
+            a.update { it.copy(controllers = it.controllers.copy(showHandsWithController = v)) }
+        }
+        Note("Com a mão segurando o controle, ele aponta para onde a mão aponta e o gatilho / A clica no lugar da pinça. Sem a mão na câmera, o analógico volta a mover o cursor.")
         SliderRow("Velocidade do cursor (analógico)", c.stickCursorSpeed, 30f..160f, { "%.0f°/s".format(it) }) { v ->
             a.update { it.copy(controllers = it.controllers.copy(stickCursorSpeed = v)) }
         }

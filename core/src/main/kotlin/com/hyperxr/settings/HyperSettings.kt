@@ -134,6 +134,10 @@ data class ControllerSettings(
     val hyperConnect: Boolean = true,
     /** HyperConnect: buzz the controller phone when the pointer reaches a button. */
     val hyperConnectHaptics: Boolean = true,
+    /** A held controller shows as a VR controller model in the hand. */
+    val controllerModel: Boolean = true,
+    /** The hand stays drawn (closed around the controller) while it holds one. */
+    val showHandsWithController: Boolean = true,
 )
 
 @Serializable

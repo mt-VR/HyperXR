@@ -71,6 +71,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var game: com.hyperxr.questgames.GameHost? = null
     /** The gesture tutorial, the first time in XR (until it is finished or skipped). */
     private var tutorial: XrTutorialPanel? = null
+    private val notPointing = arrayOf(com.hyperxr.handtracking.HandState(com.hyperxr.handtracking.Handedness.LEFT), com.hyperxr.handtracking.HandState(com.hyperxr.handtracking.Handedness.RIGHT))
     private val cursorRay = Ray()
     private var cursorRayValid = false
     private var cursorLabDown = false
@@ -360,9 +361,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             if (!bDown && bWasDown && bDownNs != 0L) { bDownNs = 0L; backOrClose() }
             bWasDown = bDown
         } else { ctrlPointers[0].update(null, false, surfaces, now); cursorRayValid = false; cursorLabDown = false }
-        // hands: far rays clicked with a pinch, plus direct touch with the fingertip
+        // hands: far rays clicked with a pinch, plus direct touch with the fingertip; a hand holding
+        // a controller points and clicks through the controller instead
         for (i in 0..1) {
-            val h = input.hands[i]
+            val h = if (input.holding[i]) notPointing[i] else input.hands[i]
             // pinch-and-hold away from any target opens the radial menu around this hand
             val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
             val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active ||

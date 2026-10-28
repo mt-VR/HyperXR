@@ -64,6 +64,8 @@ class XrInput {
     val head = Pose()
     val hands = arrayOf(HandState(Handedness.LEFT), HandState(Handedness.RIGHT))
     val controllers = arrayOf(ControllerState(), ControllerState())
+    /** This hand is holding a controller: it points and clicks through it, its own pointer is off. */
+    val holding = BooleanArray(2)
     var tapDown = false
     var handsAvailable = false
     /** Set by recenter: content puts the Joy-Con stick cursor back in the middle of the view. */
@@ -406,6 +408,7 @@ class XrEngine(
         updateBoundary(dt)
         guardian.update(dt, input.head, input.hands, arCore, openXrSession == 0L && tracker?.sixDof == true)
         guardian.submit(scene, input.head)
+        submitHeldControllers()
 
 
         // 4. render
@@ -421,6 +424,11 @@ class XrEngine(
         // the hands drawn this frame are carried forward again to right now (fresher than the copy
         // taken before the content ran, which interaction keeps using)
         if (input.handsAvailable) hands.snapshot(drawnHands[0], drawnHands[1])
+        // a hand holding a controller is drawn closed around it, or not at all
+        for (i in 0..1) if (input.holding[i]) {
+            if (settings.controllers.showHandsWithController) held.holdingHand(input.controllers[i].pose, i == 1, drawnHands[i])
+            else drawnHands[i].state = com.hyperxr.handtracking.TrackingState.NOT_TRACKED
+        }
         if (bootActive) {
             val handsReady = !input.handsAvailable || hands.backendInUse != "-"
             boot.readiness = if (handsReady && ctx.frameIndex > 30) 1f else 0.4f
@@ -737,8 +745,11 @@ class XrEngine(
     private var phoneMenu = false
     private var phoneWasConnected = false
 
+    private val heldRays = arrayOf(com.hyperxr.math.Ray(), com.hyperxr.math.Ray())
+    private val held = HeldController()
+
     private fun updateControllers(dt: Float) {
-        for (i in 0..1) { val c = input.controllers[i]; c.connected = false; c.aim = null; c.haptics = null; c.buttons = 0; c.stickX = 0f; c.stickY = 0f; c.stick2X = 0f; c.stick2Y = 0f }
+        for (i in 0..1) { val c = input.controllers[i]; c.connected = false; c.aim = null; c.haptics = null; c.buttons = 0; c.stickX = 0f; c.stickY = 0f; c.stick2X = 0f; c.stick2Y = 0f; input.holding[i] = false }
         val now = System.nanoTime()
         joyCons.tick(now)
         for (jc in joyCons.controllers.values) {
@@ -758,6 +769,24 @@ class XrEngine(
             c.pose.orientation.set(fusions[idx].worldOrientation)
             c.pose.position.set(fusions[idx].gripPosition)
             c.positionFromHand = fusions[idx].positionFromHand
+            if (c.positionFromHand) {
+                // held: it points where the hand holding it points, and its buttons click for the hand
+                c.aim = fusions[idx].ray(heldRays[idx])
+                input.holding[idx] = true
+            }
+        }
+        for (i in 0..1) if (input.holding[i] && input.controllers[i].buttons and SELECT_BITS != 0) {
+            input.hands[i].gesture = com.hyperxr.handtracking.Gesture.PINCH
+            input.hands[i].pinchStrength = 1f
+        }
+    }
+
+    /** The held controllers as VR controller models (after the content drew its scene). */
+    private fun submitHeldControllers() {
+        if (!settings.controllers.controllerModel) return
+        for (i in 0..1) {
+            val c = input.controllers[i]
+            if (input.holding[i]) held.submit(scene, renderer, c.pose, i == 1, c.buttons and SELECT_BITS != 0)
         }
     }
 
@@ -837,6 +866,7 @@ class XrEngine(
     /** GL thread teardown (queueEvent from the activity before finishing). */
     fun releaseGl() {
         content.onGlRelease()
+        held.release()
         guardian.release()
         images.clear()
         compositor.release()
@@ -846,6 +876,8 @@ class XrEngine(
     }
 
     companion object {
+        /** Trigger-like buttons (R, ZR, A): the select of a held controller. */
+        private const val SELECT_BITS = 128 or 1 or 4
         private val DEPTH_ATTACHMENT = intArrayOf(GLES30.GL_DEPTH_ATTACHMENT)
         /** Distance at which the boundary warning shows the camera fully. */
         private const val BOUNDARY_FULL_M = 0.35f
