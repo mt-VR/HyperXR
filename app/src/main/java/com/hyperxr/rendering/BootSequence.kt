@@ -17,7 +17,7 @@ import kotlin.math.sqrt
  * HyperXR's boot, drawn around the user in the headset like an OS starting up:
  *  1. hyperspace - stars stream past from straight ahead, slowing down;
  *  2. the HX logo is drawn by a sweep of light, with a soft glow;
- *  3. "HyperXR" comes into focus and a thin bar fills as the system gets ready;
+ *  3. "HyperMagic" comes into focus and a thin bar fills as the system gets ready;
  *  4. the logo flares, everything opens up and the home environment shows through.
  * Everything is procedural except the logo texture; the scene is skipped while the boot covers it.
  */

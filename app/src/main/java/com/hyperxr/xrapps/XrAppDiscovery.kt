@@ -30,12 +30,12 @@ class XrAppDiscovery(private val context: Context) {
 
     private val categories = listOf(
         Category("com.google.intent.category.CARDBOARD", AppCategory.CARDBOARD, "Google Cardboard SDK",
-            "Runs its own stereo renderer; HyperXR hands over the display and sensors."),
+            "Runs its own stereo renderer; HyperMagic hands over the display and sensors."),
         Category("com.google.intent.category.DAYDREAM", AppCategory.CARDBOARD, "Google VR (Daydream)",
-            "Daydream-only apps need Google VR Services; patch them in Files (Corrigir e instalar) to run them as Cardboard apps, and install HyperXR Daydream for the controller."),
+            "Daydream-only apps need Google VR Services; patch them in Files (Corrigir e instalar) to run them as Cardboard apps, and install HyperMagic Daydream for the controller."),
         Category("org.khronos.openxr.intent.category.IMMERSIVE_HMD", AppCategory.OPENXR, "OpenXR runtime (via broker)",
             "Needs an installed OpenXR runtime (e.g. Monado) set as active in the runtime broker."),
-        Category("com.oculus.intent.category.VR", AppCategory.OPENXR, "Quest app (OpenXR via HyperXR runtime)",
+        Category("com.oculus.intent.category.VR", AppCategory.OPENXR, "Quest app (OpenXR via HyperMagic runtime)",
             "Built for Meta Quest: runs only if it uses the standard OpenXR loader and OpenGL ES (see the analysis in Files)."),
     )
 

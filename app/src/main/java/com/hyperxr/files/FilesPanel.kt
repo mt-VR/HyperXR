@@ -53,7 +53,7 @@ class FilesPanel(private val host: MediaHost) : XrPanel(1.6f, 1.1f, title = "Arq
             val root = d.path.substringBefore("/Android/")
             add((if (i == 0) "Cartão SD" else "Cartão SD ${i + 1}") to File(root))
         }
-        add("HyperXR (interno)" to app.filesDir)
+        add("HyperMagic (interno)" to app.filesDir)
     }
 
     private var cwd: File = external
@@ -289,7 +289,7 @@ class FilesPanel(private val host: MediaHost) : XrPanel(1.6f, 1.1f, title = "Arq
     private fun displayPath(f: File): String {
         val p = f.path
         return when {
-            p.startsWith(app.filesDir.path) -> "HyperXR" + p.removePrefix(app.filesDir.path)
+            p.startsWith(app.filesDir.path) -> "HyperMagic" + p.removePrefix(app.filesDir.path)
             p.startsWith(external.path) -> "Armazenamento" + p.removePrefix(external.path)
             else -> p
         }

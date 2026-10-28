@@ -126,6 +126,8 @@ class InputAndTrackingTest {
         t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 33_000_000L, 0.45f)
         assertEquals("hysteresis keeps it closed between on and off", Gesture.PINCH, t.state.gesture)
         t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 66_000_000L, 0.67f)
+        assertEquals("one open frame does not drop the pinch (latch)", Gesture.PINCH, t.state.gesture)
+        t.update(openHand(Vec3(0f, 0f, -0.4f)), 0.9f, DepthSource.HAND_SIZE_PRIOR, 99_000_000L, 0.67f)
         assertTrue(t.state.gesture != Gesture.PINCH)
     }
 

@@ -127,7 +127,7 @@ class HyperGuardian(private val activity: Activity) {
             warning.update(dt, Float.NaN, Float.NaN, Float.NaN)
             status = when {
                 mode == Mode.OFF -> "Desligado"
-                ar == null -> "Precisa do ARCore com posição (6DoF). Se acabou de ligar, saia e entre de novo no HyperXR para o ARCore iniciar"
+                ar == null -> "Precisa do ARCore com posição (6DoF). Se acabou de ligar, saia e entre de novo no HyperMagic para o ARCore iniciar"
                 else -> "Sem posição do celular agora (o ARCore perdeu o rastreio): mova o celular devagar"
             }
             return

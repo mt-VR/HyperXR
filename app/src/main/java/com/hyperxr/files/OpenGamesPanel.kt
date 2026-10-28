@@ -35,7 +35,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
         status?.let { c.paragraph(it, 24f, XrTheme.accent2) }
         when (tab) {
             Tab.PARTNERS -> {
-                c.paragraph("Jogos que os autores deixaram o HyperXR oferecer, sem modificação: o APK original vem da página do autor e é conferido byte a byte antes de instalar. Eles rodam como foram feitos (não passam pelo Corrigir APK).", 22f)
+                c.paragraph("Jogos que os autores deixaram o HyperMagic oferecer, sem modificação: o APK original vem da página do autor e é conferido byte a byte antes de instalar. Eles rodam como foram feitos (não passam pelo Corrigir APK).", 22f)
                 val ctx = com.hyperxr.HyperXRApp.instance
                 for (g in com.hyperxr.xrapps.PartnerGames.ALL) {
                     val inst = com.hyperxr.compat.PartnerGameInstaller.installed(ctx, g)
@@ -62,7 +62,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
         val list = if (tab == Tab.CURATED) OpenGames.CURATED else results
         if (list == null) { c.paragraph("Buscando no GitHub…", 26f); return }
         if (list.isEmpty()) { c.paragraph("Nada encontrado com licença open source.", 26f); return }
-        if (tab == Tab.CURATED) c.paragraph("Licença conferida em cada repositório. Ainda não testados no HyperXR: jogos feitos para o Quest passam pelo Corrigir APK.", 22f)
+        if (tab == Tab.CURATED) c.paragraph("Licença conferida em cada repositório. Ainda não testados no HyperMagic: jogos feitos para o Quest passam pelo Corrigir APK.", 22f)
         val per = 5
         val pages = (list.size + per - 1) / per
         page = page.coerceIn(0, pages - 1)
@@ -128,7 +128,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
 
     private fun get(url: String): String = (URL(url).openConnection() as HttpURLConnection).run {
         setRequestProperty("Accept", "application/vnd.github+json")
-        setRequestProperty("User-Agent", "HyperXR")
+        setRequestProperty("User-Agent", "HyperMagic")
         connectTimeout = 15000; readTimeout = 30000
         if (responseCode == 403) error("limite de buscas do GitHub atingido; tente em alguns minutos")
         require(responseCode == 200) { "HTTP $responseCode" }
@@ -137,7 +137,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
 
     private fun download(url: String, out: File) {
         (URL(url).openConnection() as HttpURLConnection).run {
-            setRequestProperty("User-Agent", "HyperXR")
+            setRequestProperty("User-Agent", "HyperMagic")
             instanceFollowRedirects = true
             connectTimeout = 15000; readTimeout = 60000
             require(responseCode == 200) { "HTTP $responseCode" }

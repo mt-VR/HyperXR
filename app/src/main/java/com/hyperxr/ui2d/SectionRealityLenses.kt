@@ -41,7 +41,7 @@ fun RealityLensesSection(a: MainActivity) {
     var query by remember { mutableStateOf("") }
     var brand by remember { mutableStateOf<String?>(null) }
 
-    SectionCard("RealityLenses", "Escolha o óculos VR em que você coloca o celular. O HyperXR ajusta as lentes (campo de visão, distância entre elas e a distorção) para esse modelo, também nos apps OpenXR, Cardboard e Daydream.") {
+    SectionCard("RealityLenses", "Escolha o óculos VR em que você coloca o celular. O HyperMagic ajusta as lentes (campo de visão, distância entre elas e a distorção) para esse modelo, também nos apps OpenXR, Cardboard e Daydream.") {
         if (current != null) {
             KeyValue("Óculos atual", current.title)
             val tuned = tunedAway(g, current)

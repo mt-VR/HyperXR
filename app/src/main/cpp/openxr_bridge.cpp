@@ -16,7 +16,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-#define LOG_TAG "HyperXR-OpenXR"
+#define LOG_TAG "HyperMagic-OpenXR"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
@@ -72,9 +72,9 @@ XrResult createInstance(JNIEnv* env, jobject activity, const std::vector<std::st
     android.applicationActivity = activity;
     XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
     ci.next = &android;
-    strncpy(ci.applicationInfo.applicationName, "HyperXR", XR_MAX_APPLICATION_NAME_SIZE - 1);
+    strncpy(ci.applicationInfo.applicationName, "HyperMagic", XR_MAX_APPLICATION_NAME_SIZE - 1);
     ci.applicationInfo.applicationVersion = 1;
-    strncpy(ci.applicationInfo.engineName, "HyperXR Engine", XR_MAX_ENGINE_NAME_SIZE - 1);
+    strncpy(ci.applicationInfo.engineName, "HyperMagic Engine", XR_MAX_ENGINE_NAME_SIZE - 1);
     ci.applicationInfo.engineVersion = 1;
     ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 34);
     ci.enabledExtensionCount = static_cast<uint32_t>(enabled.size());

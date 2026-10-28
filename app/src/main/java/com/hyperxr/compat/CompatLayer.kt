@@ -28,7 +28,7 @@ import javax.security.auth.x500.X500Principal
  */
 object CompatLayer {
     private const val KEY_ALIAS = "hyperxr-game-signing"
-    const val BROKER_PACKAGE = "com.hyperxr.broker"
+    const val BROKER_PACKAGE = "com.hypermagic.broker"
 
     /** Copies the bundled Khronos loaders out of the APK (once per app update). */
     fun libraries(ctx: Context): CompatLibraries {
@@ -62,7 +62,7 @@ object CompatLayer {
         ApkSigner.Builder(listOf(ApkSigner.SignerConfig.Builder("hyperxr", key, listOf(cert)).build()))
             .setInputApk(unsigned).setOutputApk(signed)
             .setLibraryPageAlignmentBytes(16384)
-            .setCreatedBy("HyperXR")
+            .setCreatedBy("HyperMagic")
             .build().sign()
         unsigned.delete()
         Diagnostics.log("Patched ${report.packageName}: ${report.changes.joinToString("; ")}")
@@ -79,7 +79,7 @@ object CompatLayer {
                     .setKeySize(2048)
                     .setDigests(KeyProperties.DIGEST_SHA1, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
                     .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                    .setCertificateSubject(X500Principal("CN=HyperXR patched game"))
+                    .setCertificateSubject(X500Principal("CN=HyperMagic patched game"))
                     .setCertificateSerialNumber(BigInteger.valueOf(System.currentTimeMillis()))
                     .setCertificateNotAfter(end.time)
                     .build())
@@ -99,7 +99,7 @@ object CompatLayer {
         // Cardboard button types: 0 none, 1 magnet, 2 touch, 3 indirect touch
         val button = when (vw?.button) { com.hyperxr.viewers.ViewerCatalog.Button.MAGNET -> 1; com.hyperxr.viewers.ViewerCatalog.Button.NONE -> 0; else -> 3 }
         val v = com.hyperxr.xrapps.CardboardParams.fromSettings(g.lensSeparationMm, g.fovDegrees, g.distortionK1, g.distortionK2,
-            vendor = vw?.brand ?: "HyperXR", model = vw?.name ?: "VR Box", screenToLensMm = g.screenToLensMm, trayToLensMm = g.trayToLensMm, button = button)
+            vendor = vw?.brand ?: "HyperMagic", model = vw?.name ?: "VR Box", screenToLensMm = g.screenToLensMm, trayToLensMm = g.trayToLensMm, button = button)
         val f = File(android.os.Environment.getExternalStorageDirectory(), com.hyperxr.xrapps.CardboardParams.FILE_PATH)
         f.parentFile?.mkdirs()
         f.writeBytes(com.hyperxr.xrapps.CardboardParams.fileBytes(v))
@@ -123,8 +123,8 @@ object CompatLayer {
     } catch (_: Throwable) { DaydreamState.NOT_INSTALLED }
 
     fun daydreamStatus(ctx: Context): String = when (daydreamState(ctx)) {
-        DaydreamState.HYPERXR -> "HyperXR Daydream instalado: controle Daydream pelo Joy-Con e calibração do VR Box nos apps GVR"
-        DaydreamState.GOOGLE -> "O Google VR Services ocupa o lugar: desinstale-o para usar o HyperXR Daydream"
+        DaydreamState.HYPERXR -> "HyperMagic Daydream instalado: controle Daydream pelo Joy-Con e calibração do VR Box nos apps GVR"
+        DaydreamState.GOOGLE -> "O Google VR Services ocupa o lugar: desinstale-o para usar o HyperMagic Daydream"
         DaydreamState.NOT_INSTALLED -> "Não instalado: apps Daydream ficam sem controle"
     }
 
@@ -133,8 +133,8 @@ object CompatLayer {
         if (daydreamState(ctx) == DaydreamState.GOOGLE) { done("Desinstale o Google VR Services primeiro"); return }
         val apk = File(ctx.cacheDir, "hyperxr-daydream.apk")
         try { ctx.assets.open("compat/hyperxr-daydream.apk").use { i -> apk.outputStream().use { i.copyTo(it) } } }
-        catch (t: Throwable) { done("APK do HyperXR Daydream ausente: ${t.message}"); return }
-        installApkFile(ctx, apk) { ok, msg -> done(if (ok) "HyperXR Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else msg) }
+        catch (t: Throwable) { done("APK do HyperMagic Daydream ausente: ${t.message}"); return }
+        installApkFile(ctx, apk) { ok, msg -> done(if (ok) "HyperMagic Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else msg) }
     }
 
     /**
@@ -184,12 +184,12 @@ object CompatLayer {
      */
     fun launchGame(ctx: Context, pkg: String, activity: String) {
         val uris = buildList {
-            add(Uri.parse("content://com.hyperxr.runtime/visibility/$pkg"))
+            add(Uri.parse("content://com.hypermagic.runtime/visibility/$pkg"))
             if (installed(ctx, BROKER_PACKAGE)) add(Uri.parse("content://org.khronos.openxr.runtime_broker/visibility/$pkg"))
             // GVR apps made for Android 11+ must see HyperXR Daydream to find its controller service
             if (daydreamState(ctx) == DaydreamState.HYPERXR) add(Uri.parse("content://com.google.vr.vrcore.settings/visibility/$pkg"))
         }
-        val clip = ClipData.newRawUri("HyperXR", uris[0])
+        val clip = ClipData.newRawUri("HyperMagic", uris[0])
         for (u in uris.drop(1)) clip.addItem(ClipData.Item(u))
         val intent = Intent(Intent.ACTION_MAIN).setClassName(pkg, activity)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)

@@ -88,7 +88,7 @@ class ApkImportState(private val a: MainActivity) {
                     val err = svc?.let { s -> ParcelFileDescriptor.open(apk, ParcelFileDescriptor.MODE_READ_ONLY).use { s.installApk(it, apk.length()) } } ?: "Shizuku não respondeu"
                     a.runOnUiThread {
                         status = when {
-                            err.isEmpty() -> "Instalado. Abra pelo HyperXR (Apps XR)."
+                            err.isEmpty() -> "Instalado. Abra pelo HyperMagic (Apps XR)."
                             err.contains("UPDATE_INCOMPATIBLE") || err.contains("signatures do not match", true) ->
                                 "Já existe uma versão com outra assinatura: desinstale-a e tente de novo (os dados do jogo serão apagados)."
                             else -> "Falha: $err"
@@ -102,7 +102,7 @@ class ApkImportState(private val a: MainActivity) {
         a.runOnUiThread {
             if (!a.packageManager.canRequestPackageInstalls()) {
                 a.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${a.packageName}")))
-                status = "Permita \"instalar apps desconhecidos\" para o HyperXR e toque em instalar de novo."
+                status = "Permita \"instalar apps desconhecidos\" para o HyperMagic e toque em instalar de novo."
                 busy = false
                 return@runOnUiThread
             }
@@ -119,7 +119,7 @@ class ApkImportState(private val a: MainActivity) {
 
 @Composable
 fun ApkImportCard(a: MainActivity) {
-    SectionCard("Corrigir APK: OpenXR, Quest e Daydream", "Escolha o APK de um jogo OpenXR, de Quest ou de um app Daydream/Cardboard. O HyperXR diz se ele pode rodar, corrige para o runtime HyperXR (OpenXR da Khronos; Daydream vira Cardboard), assina e instala.") {
+    SectionCard("Corrigir APK: OpenXR, Quest e Daydream", "Escolha o APK de um jogo OpenXR, de Quest ou de um app Daydream/Cardboard. O HyperMagic diz se ele pode rodar, corrige para o runtime HyperMagic (OpenXR da Khronos; Daydream vira Cardboard), assina e instala.") {
         Button(onClick = { a.pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed", "application/xapk-package-archive", "application/vnd.apkm")) },
             colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
         Note("Também no XR: Apps XR > Importar APK para corrigir.")

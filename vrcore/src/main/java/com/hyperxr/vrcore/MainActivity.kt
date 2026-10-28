@@ -32,8 +32,8 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 48, 48, 48) }
         fun text(size: Float, s: String = "") = TextView(this).apply { textSize = size; setTextColor(Color.WHITE); text = s; setPadding(0, 12, 0, 12) }
         fun button(label: String, onClick: () -> Unit) = Button(this).apply { text = label; setOnClickListener { onClick() } }.also { col.addView(it) }
-        col.addView(text(22f, "HyperXR Daydream"))
-        col.addView(text(14f, "Faz apps Daydream e Cardboard (GVR) receberem um controle Daydream feito do seu Joy-Con ou gamepad, e a calibração do VR Box do HyperXR. " +
+        col.addView(text(22f, "HyperMagic Daydream"))
+        col.addView(text(14f, "Faz apps Daydream e Cardboard (GVR) receberem um controle Daydream feito do seu Joy-Con ou gamepad, e a calibração do VR Box do HyperMagic. " +
             "Toque no stick = touchpad, A = clique, X/Y = app, ZR = gatilho, R = grip, +/- = volume, HOME = home (segure para recentralizar)."))
         status = text(15f).also { col.addView(it) }
         button("Permitir acesso ao controle (Shizuku)") {

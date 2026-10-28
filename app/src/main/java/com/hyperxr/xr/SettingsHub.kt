@@ -81,7 +81,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Action("Apps XR", "Apps OpenXR instalados") { open("xrapps") },
         )),
         Category("notifications", "notifications", "Notificações", "Mensagens do sistema", listOf(
-            Item.Action("Mensagens do sistema", "Avisos do HyperXR") { open("messages") },
+            Item.Action("Mensagens do sistema", "Avisos do HyperMagic") { open("messages") },
         )),
         Category("hands", "back_hand", "Mãos e controles", "Hand tracking, opções do controle", listOf(
             Item.Info("Mãos") { a.handStatus },
@@ -97,12 +97,12 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
                 hyperConnectMessage = CompatLayer.shareHyperConnect(HyperXRApp.instance)
             },
             Item.Info("Controle Daydream") { daydreamMessage.ifEmpty { CompatLayer.daydreamStatus(HyperXRApp.instance) } },
-            Item.Action("Instalar HyperXR Daydream", "Joy-Con como controle Daydream nos apps GVR") {
+            Item.Action("Instalar HyperMagic Daydream", "Joy-Con como controle Daydream nos apps GVR") {
                 daydreamMessage = "Instalando..."
-                CompatLayer.installDaydream(HyperXRApp.instance) { msg -> daydreamMessage = msg; Diagnostics.log("HyperXR Daydream: $msg") }
+                CompatLayer.installDaydream(HyperXRApp.instance) { msg -> daydreamMessage = msg; Diagnostics.log("HyperMagic Daydream: $msg") }
             },
             Item.Action("Configurar controle Daydream", "Permissão do Joy-Con, eixos e teste ao vivo") {
-                daydreamMessage = if (CompatLayer.openDaydream(HyperXRApp.instance)) "Aberto na tela do celular" else "Instale o HyperXR Daydream primeiro"
+                daydreamMessage = if (CompatLayer.openDaydream(HyperXRApp.instance)) "Aberto na tela do celular" else "Instale o HyperMagic Daydream primeiro"
             },
             Item.Toggle("Joy-Con", "Usar Joy-Cons como controles", { it.controllers.joyConEnabled }) { s, v -> s.copy(controllers = s.controllers.copy(joyConEnabled = v)) },
         )),

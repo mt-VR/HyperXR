@@ -20,7 +20,7 @@
 #include <openxr/openxr_platform.h>
 #include <openxr/openxr_loader_negotiation.h>
 
-#define LOG_TAG "HyperXR-RuntimeTest"
+#define LOG_TAG "HyperMagic-RuntimeTest"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 namespace {
@@ -148,7 +148,7 @@ std::string runTest(JNIEnv* env, jobject activity, int seconds) {
         android.applicationActivity = activity;
         XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
         ci.next = &android;
-        strcpy(ci.applicationInfo.applicationName, "HyperXR runtime test");
+        strcpy(ci.applicationInfo.applicationName, "HyperMagic runtime test");
         ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
         ci.enabledExtensionCount = 2;
         ci.enabledExtensionNames = exts;

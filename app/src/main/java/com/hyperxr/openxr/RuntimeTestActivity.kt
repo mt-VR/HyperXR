@@ -21,13 +21,13 @@ class RuntimeTestActivity : Activity() {
             textSize = 16f
             gravity = Gravity.CENTER_VERTICAL
             setPadding(48, 48, 48, 48)
-            text = "Iniciando o runtime HyperXR… coloque o celular no visor: marcadores coloridos ficam fixos no espaço ao redor."
+            text = "Iniciando o runtime HyperMagic… coloque o celular no visor: marcadores coloridos ficam fixos no espaço ao redor."
         }
         setContentView(text)
         val seconds = intent.getIntExtra(EXTRA_SECONDS, 15)
         Thread({
             val report = try { OpenXrNative.nativeRuntimeSelfTest(this, seconds) } catch (t: Throwable) { "Falha: ${t.message}" }
-            runOnUiThread { text.text = "Teste do runtime HyperXR\n\n$report\n\nToque em voltar para sair." }
+            runOnUiThread { text.text = "Teste do runtime HyperMagic\n\n$report\n\nToque em voltar para sair." }
         }, "hx-runtime-test").start()
     }
 

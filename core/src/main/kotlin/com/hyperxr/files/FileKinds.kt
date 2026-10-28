@@ -37,7 +37,7 @@ object FileKinds {
     /** Short label for a kind (Portuguese, like the rest of the UI). */
     fun label(kind: FileKind): String = when (kind) {
         FileKind.FOLDER -> "Pasta"; FileKind.TEXT -> "Texto"; FileKind.IMAGE -> "Imagem"; FileKind.VIDEO -> "Vídeo"
-        FileKind.AUDIO -> "Áudio"; FileKind.APK -> "App Android"; FileKind.HYPERX -> "Pacote HyperXR"; FileKind.OBB -> "Dados de jogo (OBB)"
+        FileKind.AUDIO -> "Áudio"; FileKind.APK -> "App Android"; FileKind.HYPERX -> "Pacote HyperMagic"; FileKind.OBB -> "Dados de jogo (OBB)"
         FileKind.ARCHIVE -> "Arquivo compactado"; FileKind.PDF -> "PDF"; FileKind.OTHER -> "Arquivo"
     }
 

@@ -94,7 +94,7 @@ class RoomCapturePanel(private val host: MediaHost, private val hands: HandTrack
                 val jpg = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
                 bmp.recycle()
                 val name = "Minha sala " + SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
-                HyperXRApp.instance.environments.importPanorama(name, ByteArrayInputStream(jpg), source = "Capturado com a câmera do HyperXR")
+                HyperXRApp.instance.environments.importPanorama(name, ByteArrayInputStream(jpg), source = "Capturado com a câmera do HyperMagic")
             } catch (t: Throwable) { status = "Falha: ${t.message}"; dirty = true; null }
             if (entry != null) host.onGl { host.selectEnvironment(entry); status = "Salvo em Ambientes e aplicado: ${entry.name}"; dirty = true }
         }

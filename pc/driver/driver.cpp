@@ -161,7 +161,7 @@ private:
             if (s == INVALID_SOCKET) { std::this_thread::sleep_for(std::chrono::milliseconds(300)); continue; }
             Tune(s);
             { std::lock_guard<std::mutex> l(sendMutex_); sock_ = s; }
-            Log("HyperXR: phone connected\n");
+            Log("HyperMagic: phone connected\n");
             if (onConnected) onConnected();
             std::vector<uint8_t> buf;
             while (running_) {
@@ -180,7 +180,7 @@ private:
             CloseSocket();
             { std::lock_guard<std::mutex> l(g_status.m); g_status.phone = "desconectado"; }
             g_status.Write();
-            Log("HyperXR: phone disconnected\n");
+            Log("HyperMagic: phone disconnected\n");
         }
     }
 
@@ -294,8 +294,8 @@ public:
         id_ = id;
         auto* props = VRProperties();
         PropertyContainerHandle_t c = props->TrackedDeviceToPropertyContainer(id);
-        props->SetStringProperty(c, Prop_ModelNumber_String, "HyperXR (celular)");
-        props->SetStringProperty(c, Prop_ManufacturerName_String, "HyperXR");
+        props->SetStringProperty(c, Prop_ModelNumber_String, "HyperMagic (celular)");
+        props->SetStringProperty(c, Prop_ManufacturerName_String, "HyperMagic");
         props->SetStringProperty(c, Prop_TrackingSystemName_String, "hyperxr");
         props->SetStringProperty(c, Prop_SerialNumber_String, "HXR-HMD");
         props->SetFloatProperty(c, Prop_UserIpdMeters_Float, cfg_.ipd);
@@ -544,7 +544,7 @@ private:
     }
 
     void SetError(const std::string& e) {
-        Log("HyperXR: %s\n", e.c_str());
+        Log("HyperMagic: %s\n", e.c_str());
         { std::lock_guard<std::mutex> l(g_status.m); g_status.error = e; }
         g_status.Write();
     }
@@ -640,7 +640,7 @@ public:
         link_.onKeyFrameRequest = [this] { hmd_->RequestKeyFrameAsync(); };
         link_.Start(cfg_.phoneIp);
         g_status.Write();
-        Log("HyperXR driver started (phone %s, eye %dx%d @ %d Hz)\n", cfg_.phoneIp.c_str(), cfg_.eyeWidth, cfg_.eyeHeight, cfg_.refreshHz);
+        Log("HyperMagic driver started (phone %s, eye %dx%d @ %d Hz)\n", cfg_.phoneIp.c_str(), cfg_.eyeWidth, cfg_.eyeHeight, cfg_.refreshHz);
         return VRInitError_None;
     }
 
@@ -712,8 +712,8 @@ private:
         saved.eyeWidth = cfg_.eyeWidth; saved.eyeHeight = cfg_.eyeHeight; saved.refreshHz = cfg_.refreshHz;
         saved.tanLeft = cfg_.tanLeft; saved.tanRight = cfg_.tanRight; saved.tanUp = cfg_.tanUp; saved.tanDown = cfg_.tanDown; saved.ipd = cfg_.ipd;
         saved.Save();
-        Log("HyperXR: phone %dx%d @ %d Hz -> rendering %dx%d @ %d fps; restarting SteamVR\n", h.eyeWidth, h.eyeHeight, h.refreshHz, eyeW, eyeH, fps);
-        VRServerDriverHost()->RequestRestart("O HyperXR ajustou o SteamVR para a tela do seu celular.", nullptr, nullptr, nullptr);
+        Log("HyperMagic: phone %dx%d @ %d Hz -> rendering %dx%d @ %d fps; restarting SteamVR\n", h.eyeWidth, h.eyeHeight, h.refreshHz, eyeW, eyeH, fps);
+        VRServerDriverHost()->RequestRestart("O HyperMagic ajustou o SteamVR para a tela do seu celular.", nullptr, nullptr, nullptr);
     }
 
     hxvr::Config cfg_;

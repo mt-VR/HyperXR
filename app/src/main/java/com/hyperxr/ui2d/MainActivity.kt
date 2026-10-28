@@ -135,7 +135,7 @@ private fun Root(a: MainActivity) {
         Column(
             Modifier.width(250.dp).fillMaxHeight().background(Color(0xFF101020)).verticalScroll(rememberScrollState()).padding(12.dp),
         ) {
-            Text("HyperXR", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = HxColors.text, modifier = Modifier.padding(8.dp))
+            Text("HyperMagic", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = HxColors.text, modifier = Modifier.padding(8.dp))
             Text("Configurações e gerenciamento", fontSize = 12.sp, color = HxColors.dim, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
             Section.entries.forEach { s ->
                 val sel = s == section
@@ -186,7 +186,7 @@ private fun CrashBanner(a: MainActivity) {
     if (reports.isEmpty()) return
     var open by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().background(Color(0xFF3A2A10)).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("O HyperXR fechou sozinho ${reports.size} vez(es). O relatório mostra o motivo.", color = Color(0xFFFFD27A), fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text("O HyperMagic fechou sozinho ${reports.size} vez(es). O relatório mostra o motivo.", color = Color(0xFFFFD27A), fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text("Ver relatório", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickableNoRipple { open = true }.padding(8.dp))
     }
     if (open) {
@@ -199,7 +199,7 @@ private fun CrashBanner(a: MainActivity) {
                 Row {
                     androidx.compose.material3.TextButton(onClick = {
                         val cm = a.getSystemService(android.content.ClipboardManager::class.java)
-                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("HyperXR crash", text))
+                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("HyperMagic crash", text))
                     }) { Text("Copiar") }
                     androidx.compose.material3.TextButton(onClick = {
                         val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text)

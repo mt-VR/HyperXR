@@ -132,9 +132,9 @@ object PolyHavenCatalog {
 
     /** Built-in procedural environment that needs no download (own work). */
     val STUDIO = EnvironmentEntry(
-        id = "builtin:studio", name = "HyperXR Studio", kind = EnvironmentKind.PROCEDURAL,
-        author = "HyperXR", source = "Built-in", sourceUrl = "builtin", license = "MIT", licenseUrl = "LICENSE",
-        format = "Procedural", downloadBytes = 0, attribution = "HyperXR contributors",
+        id = "builtin:studio", name = "HyperMagic Studio", kind = EnvironmentKind.PROCEDURAL,
+        author = "HyperMagic", source = "Built-in", sourceUrl = "builtin", license = "MIT", licenseUrl = "LICENSE",
+        format = "Procedural", downloadBytes = 0, attribution = "HyperMagic contributors",
         compatibility = "All devices",
     )
 }

@@ -23,7 +23,7 @@ import java.util.List;
  *      -> _id, function_name, symbol_name (empty: the library exports the standard symbols)
  */
 public final class SystemBrokerProvider extends ContentProvider {
-    private static final String RUNTIME_PACKAGE = "com.hyperxr";
+    private static final String RUNTIME_PACKAGE = "com.hypermagic";
     private static final String SO_NAME = "libhyperxr_openxr.so";
 
     @Override public boolean onCreate() { return true; }

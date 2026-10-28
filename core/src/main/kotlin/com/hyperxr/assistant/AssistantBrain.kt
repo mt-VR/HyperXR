@@ -83,7 +83,7 @@ object AssistantBrain {
         val topics = AssistantKnowledge.relevant(question, if (compact) 2 else 4)
         val apps = pickApps(s.apps, question, if (compact) 12 else 30)
         return buildString {
-            appendLine("Você é o assistente do HyperXR, sistema de realidade virtual e mista para celular num óculos VR Box. Fale português do Brasil, curto e direto.")
+            appendLine("Você é o assistente do HyperMagic, sistema de realidade virtual e mista para celular num óculos VR Box. Fale português do Brasil, curto e direto.")
             appendLine("Responda SÓ com JSON: {\"resposta\":\"texto ao usuário\",\"acoes\":[...]}")
             appendLine("Perguntas e problemas: explique os passos com base em SOBRE O HYPERXR e no ESTADO, sem inventar, e use \"acoes\":[].")
             appendLine("Ações (só quando o pedido mandar fazer algo):")
@@ -177,7 +177,7 @@ object AssistantBrain {
         VoiceCommand.ShowWindows -> "Mostrando as janelas."
         VoiceCommand.Library -> "Biblioteca."
         VoiceCommand.RealityWindow -> "Abrindo a janela do mundo real."
-        is VoiceCommand.Record -> if (c.start) "Gravando em 16:9." else "Gravação salva em Filmes/HyperXR."
+        is VoiceCommand.Record -> if (c.start) "Gravando em 16:9." else "Gravação salva em Filmes/HyperMagic."
         is VoiceCommand.Unknown -> "Não entendi: ${c.heard}"
     }
 

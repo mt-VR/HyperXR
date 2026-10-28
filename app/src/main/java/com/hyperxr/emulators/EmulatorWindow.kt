@@ -41,7 +41,7 @@ class EmulatorWindow(val session: EmulatorSession, private val focus: (EmulatorW
     fun setCaptured(on: Boolean) {
         captured = on
         if (!on) { keyMask = 0; axisMask = 0; push() }
-        status = if (on) "Controle no jogo (HOME devolve ao HyperXR)" else "Clique na tela para jogar com o controle"
+        status = if (on) "Controle no jogo (HOME devolve ao HyperMagic)" else "Clique na tela para jogar com o controle"
     }
 
     override fun injectTouch(action: Int, x: Float, y: Float, downTimeMs: Long, eventTimeMs: Long) {

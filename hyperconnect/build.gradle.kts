@@ -13,7 +13,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.hyperxr.connect"
+        applicationId = "com.hypermagic.connect"
         minSdk = 23
         targetSdk = 35
         versionCode = 1

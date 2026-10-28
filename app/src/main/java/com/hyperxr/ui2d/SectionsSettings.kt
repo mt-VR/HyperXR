@@ -36,7 +36,7 @@ internal fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.sett
 fun HomeSection(a: MainActivity) {
     val caps = a.app.capabilities.last
     val decision = XrModeResolver.resolve(caps, XrModePreference.AUTO)
-    SectionCard("Experiência imersiva", "O HyperXR sempre começa em realidade mista (a câmera mostra o seu ambiente). Dentro dele, o botão Modo VR na dock liga o ambiente virtual, escolhido no app Ambientes.") {
+    SectionCard("Experiência imersiva", "O HyperMagic sempre começa em realidade mista (a câmera mostra o seu ambiente). Dentro dele, o botão Modo VR na dock liga o ambiente virtual, escolhido no app Ambientes.") {
         KeyValue("Rastreamento de cabeça", decision.headTracking)
         if (decision.mode == com.hyperxr.capabilities.XrMode.VR_SBS) Note("Sem câmera utilizável agora: o modo VR fica sempre ligado.", HxColors.warn)
         decision.reasons.forEach { Note("• $it") }
@@ -51,6 +51,9 @@ fun HomeSection(a: MainActivity) {
         OutlinedButton(onClick = { a.update { it.copy(onboarding = com.hyperxr.settings.OnboardingSettings()) } }, modifier = Modifier.padding(top = 6.dp)) {
             Text("Refazer a configuração inicial e o tutorial")
         }
+    }
+    SectionCard("Parceria", "O HyperMagic é feito em parceria com Samrat Beketov, criador do MagicXR, que autorizou o uso do código do MagicXR neste app. Obrigado, Samrat!") {
+        Note("HyperMagic é software livre (GPLv3). Créditos completos no README do projeto.")
     }
     SteamVrCard(a)
     SectionCard("Resumo do aparelho") {
@@ -187,10 +190,10 @@ fun HandsSection(a: MainActivity) {
         val npuDevices = remember { runCatching { com.hyperxr.diagnostics.NnapiNative.devices() }.getOrDefault(emptyList()).filter { it.contains("|accelerator|") }.map { it.substringBefore('|') } }
         ChoiceRow("Motor de hand tracking", listOf(InferenceBackend.NNAPI, InferenceBackend.GPU, InferenceBackend.CPU),
             when (h.backend) { InferenceBackend.CPU -> InferenceBackend.CPU; InferenceBackend.NNAPI -> InferenceBackend.NNAPI; else -> InferenceBackend.GPU }, {
-            when (it) { InferenceBackend.NNAPI -> "NPU (HyperXR)"; InferenceBackend.CPU -> "CPU (MediaPipe)"; else -> "GPU (MediaPipe)" } }) { v ->
+            when (it) { InferenceBackend.NNAPI -> "NPU (HyperMagic)"; InferenceBackend.CPU -> "CPU (MediaPipe)"; else -> "GPU (MediaPipe)" } }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(backend = v)) }
         }
-        Note("NPU: o rastreador próprio do HyperXR roda na NPU do celular via NNAPI " +
+        Note("NPU: o rastreador próprio do HyperMagic roda na NPU do celular via NNAPI " +
             (if (npuDevices.isEmpty()) "(nenhum acelerador NNAPI encontrado neste celular: ele usaria a CPU)" else "(acelerador: ${npuDevices.joinToString()})") +
             ", deixando a GPU livre para o VR. GPU: MediaPipe. Os dois passam pelo verificador que descarta pés, cortinas e outras pessoas.")
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
@@ -257,7 +260,7 @@ fun HandsSection(a: MainActivity) {
 fun ControlsSection(a: MainActivity) {
     val c = a.settingsState.controllers
     val connected = remember(a.refresh) { JoyConManager.connectedJoyCons() }
-    SectionCard("Controles", "Qualquer controle: Joy-Con, DualShock 4, DualSense, Xbox, 8BitDo, gamepads Bluetooth/USB e o controle do VR Box (em modo jogo, teclado ou mouse). Pareie no Bluetooth do Android; o HyperXR detecta sozinho.") {
+    SectionCard("Controles", "Qualquer controle: Joy-Con, DualShock 4, DualSense, Xbox, 8BitDo, gamepads Bluetooth/USB e o controle do VR Box (em modo jogo, teclado ou mouse). Pareie no Bluetooth do Android; o HyperMagic detecta sozinho.") {
         ToggleRow("Usar controles", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
         if (connected.isEmpty()) Note("Nenhum controle conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
@@ -334,7 +337,7 @@ fun NetworkSection(a: MainActivity) {
 private fun SteamVrCard(a: MainActivity) {
     val prefs = com.hyperxr.steamvr.SteamVrActivity.prefs(a)
     var ip by remember { mutableStateOf(prefs.getString("pc_ip", "") ?: "") }
-    SectionCard("SteamVR", "Jogue jogos do SteamVR do PC no celular. No PC: HyperXR PC.exe (pasta pc/ do projeto) com o IP deste celular.") {
+    SectionCard("SteamVR", "Jogue jogos do SteamVR do PC no celular. No PC: HyperMagic PC.exe (pasta pc/ do projeto) com o IP deste celular.") {
         KeyValue("IP deste celular", com.hyperxr.steamvr.SteamVrContent.localIp() ?: "conecte o Wi-Fi")
         var profile by remember { mutableStateOf(com.hyperxr.steamvr.SteamVrPlanner.profile(a)) }
         Segmented(com.hyperxr.steamvr.SteamVrProfiles.Profile.entries.map { it.name to it.label }, profile.name) { k ->

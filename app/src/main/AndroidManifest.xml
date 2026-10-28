@@ -161,7 +161,7 @@
         <service
             android:name=".appworld.HxNotificationListener"
             android:exported="true"
-            android:label="HyperXR App-to-World"
+            android:label="HyperMagic App-to-World"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
@@ -189,7 +189,7 @@
         <service
             android:name=".openxr.RuntimeService"
             android:exported="true"
-            android:label="HyperXR Runtime"
+            android:label="HyperMagic Runtime"
             tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
@@ -201,7 +201,7 @@
         <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps. Read-only numbers. -->
         <provider
             android:name=".openxr.RuntimeConfigProvider"
-            android:authorities="com.hyperxr.runtime"
+            android:authorities="com.hypermagic.runtime"
             android:exported="true"
             android:grantUriPermissions="true"
             tools:ignore="ExportedContentProvider" />

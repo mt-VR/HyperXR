@@ -35,7 +35,7 @@ enum class HyperPermission(val key: String, val policy: GrantPolicy, val descrip
         "Access camera frames. Privacy sensitive; requires the Android camera permission too (hx.camera)."),
     UNSAFE("unsafe", GrantPolicy.EXPLICIT_DANGEROUS,
         "Disables sandbox protections: LuaJIT FFI (native memory/code access), debug library, bytecode loading and " +
-            "execution budgets. The package can then do anything the HyperXR game process can do.");
+            "execution budgets. The package can then do anything the HyperMagic game process can do.");
 
     companion object {
         private val byKey = entries.associateBy { it.key }

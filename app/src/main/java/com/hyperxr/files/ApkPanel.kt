@@ -93,7 +93,7 @@ class ApkPanel(private val host: MediaHost, private val source: File) : XrPanel(
         if (obbs.isNotEmpty()) c.paragraph("OBB encontrado: ${obbs.joinToString { it.name }} (${FileKinds.formatSize(obbs.sumOf { it.length() })})", 24f, XrTheme.textDim)
         else if (r.questApp) c.paragraph("Nenhum OBB ao lado do APK (muitos jogos de Quest não usam).", 24f, XrTheme.textDim)
         plan?.let { p ->
-            if (p.changes.isNotEmpty()) c.paragraph("Patch HyperXR: " + p.changes.joinToString("; "), 22f, XrTheme.accent2)
+            if (p.changes.isNotEmpty()) c.paragraph("Patch HyperMagic: " + p.changes.joinToString("; "), 22f, XrTheme.accent2)
             for (w in p.warnings) c.paragraph("! $w", 22f, Color.rgb(214, 160, 40))
             for (b in p.blockers) c.paragraph("✕ $b", 22f, XrTheme.danger)
         }
@@ -184,7 +184,7 @@ class ApkPanel(private val host: MediaHost, private val source: File) : XrPanel(
         val act = host.activity
         if (!act.packageManager.canRequestPackageInstalls()) {
             act.runOnUiThread { act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${act.packageName}"))) }
-            busy = false; status = "Permita \"instalar apps desconhecidos\" para o HyperXR na tela do celular e toque em Instalar de novo"; dirty = true
+            busy = false; status = "Permita \"instalar apps desconhecidos\" para o HyperMagic na tela do celular e toque em Instalar de novo"; dirty = true
             return
         }
         mediaIo.execute {

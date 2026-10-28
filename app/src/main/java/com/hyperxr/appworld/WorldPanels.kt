@@ -94,7 +94,7 @@ class AppWorldPanel(private val world: AppWorld, private val a: LauncherActions)
             }
             1 -> {
                 val manifests = SpatialRegistry.also { it.invalidate() }.discover(act)
-                if (manifests.isEmpty()) c.paragraph("Nenhum app instalado declara objetos para o HyperXR ainda. Desenvolvedores: docs/APP_TO_WORLD.md.", 24f)
+                if (manifests.isEmpty()) c.paragraph("Nenhum app instalado declara objetos para o HyperMagic ainda. Desenvolvedores: docs/APP_TO_WORLD.md.", 24f)
                 for (m in manifests) for (o in m.objects) {
                     val key = "app:${m.packageName}:${o.id}"
                     c.toggle(key, "${o.label} (${m.packageName})", world.has(key)) { world.toggle(key); dirty = true }

@@ -69,7 +69,7 @@ class ControllerActivity : Activity(), SensorEventListener {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) showDevices()
-        else message("O HyperConnect precisa da permissão de Bluetooth para falar com o HyperXR.")
+        else message("O HyperConnect precisa da permissão de Bluetooth para falar com o HyperMagic.")
     }
 
     // ------------------------------------------------------------------ choose the HyperXR phone
@@ -83,10 +83,10 @@ class ControllerActivity : Activity(), SensorEventListener {
         if (!bt.isEnabled) { message("Ligue o Bluetooth e abra o HyperConnect de novo."); return }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 72, 48, 48) }
         col.addView(text("HyperConnect", 26f, true))
-        col.addView(text("Este celular vira o controle do HyperXR. No celular do HyperXR, deixe \"HyperConnect\" ligado em Ajustes > Mãos e controles. " +
-            "Os dois precisam estar pareados nas configurações de Bluetooth. Escolha o celular do HyperXR:", 16f, false))
+        col.addView(text("Este celular vira o controle do HyperMagic. No celular do HyperMagic, deixe \"HyperConnect\" ligado em Ajustes > Mãos e controles. " +
+            "Os dois precisam estar pareados nas configurações de Bluetooth. Escolha o celular do HyperMagic:", 16f, false))
         val devices = bt.bondedDevices.orEmpty().sortedBy { it.name ?: "" }
-        if (devices.isEmpty()) col.addView(text("Nenhum aparelho pareado. Pareie com o celular do HyperXR nas configurações de Bluetooth.", 16f, false))
+        if (devices.isEmpty()) col.addView(text("Nenhum aparelho pareado. Pareie com o celular do HyperMagic nas configurações de Bluetooth.", 16f, false))
         val last = getPreferences(0).getString("last", null)
         for (d in devices.sortedByDescending { it.address == last }) col.addView(Button(this).apply {
             text = (d.name ?: d.address) + if (d.address == last) "  (último usado)" else ""
@@ -106,7 +106,10 @@ class ControllerActivity : Activity(), SensorEventListener {
         message("Conectando a ${d.name ?: d.address}...")
         Thread {
             try {
-                BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
+                // a running discovery slows the connection down; stopping it needs BLUETOOTH_SCAN on
+                // Android 12+, which this app does not ask for (it only connects to a paired phone)
+                if (Build.VERSION.SDK_INT < 31 || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED)
+                    runCatching { BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery() }
                 val s = d.createInsecureRfcommSocketToServiceRecord(UUID.fromString(P.SERVICE_UUID))
                 s.connect()
                 socket = s; deviceName = d.name ?: d.address
@@ -115,7 +118,7 @@ class ControllerActivity : Activity(), SensorEventListener {
                 ui.post { showController(); startStreaming(s) }
             } catch (t: Throwable) {
                 ui.post {
-                    message("Não conectou: ${t.message}\n\nConfira se o HyperXR está aberto no outro celular com o HyperConnect ligado.")
+                    message("Não conectou: ${t.message}\n\nConfira se o HyperMagic está aberto no outro celular com o HyperConnect ligado.")
                     ui.postDelayed({ showDevices() }, 3500)
                 }
             }
@@ -132,7 +135,7 @@ class ControllerActivity : Activity(), SensorEventListener {
     private fun typingBar(): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(24, 8, 24, 8); visibility = View.GONE }
         val edit = android.widget.EditText(this).apply {
-            hint = "Digite aqui: vai para o campo aberto no HyperXR"
+            hint = "Digite aqui: vai para o campo aberto no HyperMagic"
             setTextColor(Color.WHITE); setHintTextColor(Color.rgb(140, 142, 150)); isSingleLine = true
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
             addTextChangedListener(object : android.text.TextWatcher {

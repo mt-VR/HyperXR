@@ -12,7 +12,7 @@ import java.nio.IntBuffer
 
 /** Small GLES 3.0 helpers. All calls must happen on the GL thread. */
 object Gl {
-    private const val TAG = "HyperXR-GL"
+    private const val TAG = "HyperMagic-GL"
 
     fun compile(vs: String, fs: String, name: String): Int {
         fun shader(type: Int, src: String): Int {

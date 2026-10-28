@@ -111,14 +111,14 @@ object ApkPatcher {
                     "Código nativo ARM não pode ser convertido de 32 para 64 bits com segurança: procure a versão 64 bits (arm64-v8a) do app"
                 only32 && daydreamOrCardboard(manifestBytes) -> changes += "App 32 bits: roda como está (o SDK de VR do Google vem dentro do app)" +
                     if (device32Bit == true) "; este celular executa código 32 bits" else ""
-                only32 -> warnings += "Jogo OpenXR 32 bits: o runtime HyperXR é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
+                only32 -> warnings += "Jogo OpenXR 32 bits: o runtime HyperMagic é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
             }
             val libNames = names.filter { it.startsWith("lib/") }.map { it.substringAfterLast('/') }.toSet()
             ENTITLEMENT.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
                 warnings += "Verificação de compra da Meta (${it.joinToString()}): se o jogo exigir, ele fecha ao iniciar"
             }
             if (abiDirs.any { "lib/$it/libvrapi.so" in names })
-                blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperXR roda só OpenXR"
+                blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperMagic roda só OpenXR"
 
             // what replaces what
             val replace = HashMap<String, File>()

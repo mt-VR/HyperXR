@@ -14,7 +14,7 @@ inline std::wstring DataDir() {
     wchar_t* base = nullptr;
     std::wstring dir;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &base))) { dir = base; CoTaskMemFree(base); }
-    dir += L"\\HyperXR";
+    dir += L"\\HyperMagic";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir;
 }

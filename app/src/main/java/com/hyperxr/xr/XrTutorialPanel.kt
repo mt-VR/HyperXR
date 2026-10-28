@@ -16,7 +16,7 @@ import com.hyperxr.spatialui.XrTheme
  */
 class XrTutorialPanel(private val ctx: XrContext, private val onDone: () -> Unit) : XrPanel(1.15f, 0.66f, title = "Tutorial") {
     private enum class Step(val title: String) {
-        WELCOME("Bem-vindo ao HyperXR"), HANDS("Mostre as mãos"), PINCH("Pinça"), PALM("Menu na palma"),
+        WELCOME("Bem-vindo ao HyperMagic"), HANDS("Mostre as mãos"), PINCH("Pinça"), PALM("Menu na palma"),
         FIST("Mão fechada"), DOCK("Dock e Modo VR"), DONE("Tudo pronto"),
     }
     private var step = Step.WELCOME
@@ -87,7 +87,7 @@ class XrTutorialPanel(private val ctx: XrContext, private val onDone: () -> Unit
         c.y = c.pad + 76f
         val text = when (step) {
             Step.WELCOME -> "Este tutorial curto ensina os gestos na prática. Cada passo avança sozinho quando você acerta o gesto.\n\nPara começar: aponte para o botão abaixo e junte o polegar com o indicador (pinça). Perto do painel, também dá para tocar o botão com a ponta do dedo."
-            Step.HANDS -> "Levante as duas mãos abertas na frente do celular, a uns 40 cm do rosto, e deixe-as paradas um instante. O HyperXR mede o tamanho delas para desenhar e acertar a pinça." +
+            Step.HANDS -> "Levante as duas mãos abertas na frente do celular, a uns 40 cm do rosto, e deixe-as paradas um instante. O HyperMagic mede o tamanho delas para desenhar e acertar a pinça." +
                 (ctx.hands?.calibrationProgress?.takeIf { it < 0.99f }?.let { "\n\nMedindo as mãos: ${(it * 100).toInt()}%" } ?: "")
             Step.PINCH -> "Junte e solte as pontas do polegar e do indicador três vezes. É assim que você clica à distância, onde a bolinha do ponteiro estiver.\n\nPinças: $pinches de 3"
             Step.PALM -> "Vire a palma de uma mão para cima, na sua frente, e faça a pinça. Abre o menu em círculo: voltar, recentralizar, teclado, voz, captura, biblioteca e janelas. Mova a mão até a opção e solte."

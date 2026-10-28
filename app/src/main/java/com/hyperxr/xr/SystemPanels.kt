@@ -224,15 +224,15 @@ class HelpPanel : XrPanel(1.3f, 1.0f, title = "Central de ajuda") {
         c.paragraph("Mãos: toque diretamente nos botões com o indicador (Direct Touch). Pinça para selecionar à distância nos jogos.")
         c.paragraph("Joy-Con: aponte e pressione R para selecionar, L para voltar. Segure em um ícone (modo New) para movê-lo. HOME recentraliza.")
         c.heading("Modos")
-        c.paragraph("O HyperXR sempre começa em realidade mista: a câmera mostra o seu ambiente. O botão Modo VR na dock troca a câmera por um ambiente virtual, escolhido no app Ambientes. A imagem da câmera é mono (não estéreo).")
+        c.paragraph("O HyperMagic sempre começa em realidade mista: a câmera mostra o seu ambiente. O botão Modo VR na dock troca a câmera por um ambiente virtual, escolhido no app Ambientes. A imagem da câmera é mono (não estéreo).")
         c.heading("Privacidade")
-        c.paragraph("Imagens da câmera são processadas no aparelho e nunca são enviadas para a rede pelo HyperXR.")
+        c.paragraph("Imagens da câmera são processadas no aparelho e nunca são enviadas para a rede pelo HyperMagic.")
     }
 }
 
 class TvPanel(private val a: LauncherActions) : XrPanel(1.0f, 0.7f, title = "TV") {
     override fun draw(c: PanelCanvas) {
-        c.paragraph("Vídeo na web dentro do HyperXR:")
+        c.paragraph("Vídeo na web dentro do HyperMagic:")
         for (id in listOf("web:youtube", "web:twitch", "web:tiktok")) {
             val app = a.allApps().firstOrNull { it.id == id } ?: continue
             c.row("tv:$id", app.title, icon = a.icons().icon(app.iconKey, 96), detail = app.target) { a.launch(app) }
@@ -245,7 +245,7 @@ class XrAppsPanel(private val a: LauncherActions, private val host: com.hyperxr.
     override fun draw(c: PanelCanvas) {
         // importing comes first: patching is how OpenXR / Quest / Daydream APKs get here
         c.row("import", "Importar APK para corrigir (OpenXR, Quest, Daydream)", accent = true,
-            detail = "Escolha um APK do celular: o HyperXR diz se roda e oferece Corrigir e instalar") {
+            detail = "Escolha um APK do celular: o HyperMagic diz se roda e oferece Corrigir e instalar") {
             host.openPanel(com.hyperxr.files.ApkPickerPanel(host), 1.25f)
         }
         if (apps.isEmpty()) {
@@ -367,12 +367,12 @@ class AndroidAppsPanel(
         when (com.hyperxr.shell.ShellBridge.state(activity)) {
             com.hyperxr.shell.ShizukuState.NOT_INSTALLED -> {
                 c.paragraph("Para abrir apps Android em janelas no XR, instale o Shizuku e inicie-o (depuração sem fio ou root).", 28f, XrTheme.text)
-                c.paragraph("O Shizuku permite ao HyperXR criar uma tela virtual e abrir o app nela, como o scrcpy faz.")
+                c.paragraph("O Shizuku permite ao HyperMagic criar uma tela virtual e abrir o app nela, como o scrcpy faz.")
                 return
             }
             com.hyperxr.shell.ShizukuState.NOT_RUNNING -> { c.paragraph("O Shizuku está instalado mas não está rodando. Abra o app Shizuku e inicie o serviço.", 28f, XrTheme.text); return }
             com.hyperxr.shell.ShizukuState.NO_PERMISSION -> {
-                c.paragraph("Conceda ao HyperXR a permissão do Shizuku.", 28f, XrTheme.text)
+                c.paragraph("Conceda ao HyperMagic a permissão do Shizuku.", 28f, XrTheme.text)
                 c.row("grant", "Conceder permissão do Shizuku", accent = true) {
                     activity.runOnUiThread { com.hyperxr.shell.ShellBridge.requestPermission { ok -> message = if (ok) null else "Permissão negada"; dirty = true } }
                 }

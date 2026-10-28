@@ -38,7 +38,7 @@ fun HyperControllerSection(a: MainActivity) {
     val permOk = Build.VERSION.SDK_INT < 31 || a.hasPermission(Manifest.permission.BLUETOOTH_CONNECT)
     var note by remember { mutableStateOf("") }
 
-    SectionCard("HyperController", "Transforme outro celular no controle do HyperXR: a orientação dele aponta, a tela vira touchpad e botões, o volume vira gatilho e grip. Ele vibra quando o ponteiro chega num botão e abre o teclado dele quando um campo de texto abre no HyperXR.") {
+    SectionCard("HyperController", "Transforme outro celular no controle do HyperMagic: a orientação dele aponta, a tela vira touchpad e botões, o volume vira gatilho e grip. Ele vibra quando o ponteiro chega num botão e abre o teclado dele quando um campo de texto abre no HyperMagic.") {
         ToggleRow("Usar o HyperController", c.hyperConnect) { v -> a.update { it.copy(controllers = it.controllers.copy(hyperConnect = v)) } }
         ToggleRow("Vibração", c.hyperConnectHaptics, detail = "O celular controle vibra ao apontar um botão e a cada toque") { v ->
             a.update { it.copy(controllers = it.controllers.copy(hyperConnectHaptics = v)) }
@@ -46,7 +46,7 @@ fun HyperControllerSection(a: MainActivity) {
         if (note.isNotEmpty()) Note(note, HxColors.accent)
     }
 
-    SectionCard("1. Instale o app no outro celular", "O app do controle já vem dentro do HyperXR: envie por Nearby Share, Bluetooth ou um mensageiro e instale no outro celular.") {
+    SectionCard("1. Instale o app no outro celular", "O app do controle já vem dentro do HyperMagic: envie por Nearby Share, Bluetooth ou um mensageiro e instale no outro celular.") {
         Button(onClick = { note = CompatLayer.shareHyperConnect(a) }) { Text("Enviar o app HyperController") }
     }
 
@@ -70,7 +70,7 @@ fun HyperControllerSection(a: MainActivity) {
         if (paired.isEmpty()) Note("Nenhum aparelho pareado ainda.") else paired.forEach { KeyValue("Pareado", it) }
     }
 
-    SectionCard("3. Conecte", "Abra o app no celular controle e escolha este celular na lista. No modo VR o HyperXR espera a conexão sozinho; aqui você pode testar agora.") {
+    SectionCard("3. Conecte", "Abra o app no celular controle e escolha este celular na lista. No modo VR o HyperMagic espera a conexão sozinho; aqui você pode testar agora.") {
         ConnectionTest(a, permOk && bt?.isEnabled == true)
         Note("Segure como um controle remoto: tela para cima, ponta para a frente. Ao conectar, a direção é alinhada com a sua cabeça; segure Home para realinhar e toque em Home para recentralizar a visão.")
     }

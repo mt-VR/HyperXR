@@ -91,8 +91,9 @@ fun SetupWizard(a: MainActivity) {
 @Composable
 private fun Welcome() {
     Text(FREE_APP_NOTICE, color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
-    Para("O HyperXR transforma o celular num óculos de realidade mista e VR: janelas e apps flutuando no seu quarto, controlados com as mãos pela câmera ou com qualquer controle.")
+    Para("O HyperMagic transforma o celular num óculos de realidade mista e VR: janelas e apps flutuando no seu quarto, controlados com as mãos pela câmera ou com qualquer controle.")
     Para("Em poucos passos você escolhe o seu óculos VR, ajusta a imagem aos seus olhos, prepara as mãos e, se quiser, os apps Android em janelas. Dá para pular qualquer passo e refazer tudo depois em Início.")
+    Para("HyperMagic é feito em parceria com Samrat Beketov, criador do MagicXR.")
     Para("Dentro do XR, um tutorial curto ensina os gestos na prática: pinça, menu na palma e mão fechada.")
 }
 
@@ -117,7 +118,7 @@ private fun EyesAndHands(a: MainActivity) {
         SliderRow("Distância entre as pupilas", g.ipdMm, 54f..74f, { "%.1f mm".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(ipdMm = v)) } }
         if (viewer?.adjustableIpd == true) Note("O ${viewer.title} tem ajuste das lentes: gire o botão de cima até as duas imagens virarem uma só, nítida.")
     }
-    SectionCard("Mãos", "O HyperXR mede a sua mão na primeira vez que ela aparece na câmera, para desenhá-la do tamanho certo e acertar a pinça.") {
+    SectionCard("Mãos", "O HyperMagic mede a sua mão na primeira vez que ela aparece na câmera, para desenhá-la do tamanho certo e acertar a pinça.") {
         SliderRow("Comprimento da mão (punho à ponta do dedo médio)", h.handLengthCm, 15f..23f, { "%.1f cm".format(it) }) { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(handLengthCm = v)) }
         }
@@ -138,11 +139,11 @@ private fun EyesAndHands(a: MainActivity) {
 private fun ShizukuStep(a: MainActivity) {
     @Suppress("UNUSED_EXPRESSION") a.refresh
     val state = remember(a.refresh) { runCatching { ShellBridge.state(a) }.getOrDefault(ShizukuState.NOT_INSTALLED) }
-    Para("Opcional. Para abrir os seus apps Android (WhatsApp, Instagram, jogos...) em janelas dentro do XR, o HyperXR usa o Shizuku, um app gratuito que dá essa permissão sem root.")
+    Para("Opcional. Para abrir os seus apps Android (WhatsApp, Instagram, jogos...) em janelas dentro do XR, o HyperMagic usa o Shizuku, um app gratuito que dá essa permissão sem root.")
     Status("Shizuku", state == ShizukuState.READY, when (state) {
         ShizukuState.NOT_INSTALLED -> "não instalado"
         ShizukuState.NOT_RUNNING -> "instalado, mas parado: abra o Shizuku e inicie pela depuração sem fio"
-        ShizukuState.NO_PERMISSION -> "rodando, falta permitir o HyperXR"
+        ShizukuState.NO_PERMISSION -> "rodando, falta permitir o HyperMagic"
         ShizukuState.READY -> "pronto"
     })
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 10.dp)) {
@@ -155,7 +156,7 @@ private fun ShizukuStep(a: MainActivity) {
                 a.packageManager.getLaunchIntentForPackage(ShellBridge.SHIZUKU_PACKAGE)?.let { runCatching { a.startActivity(it) } }
             }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Abrir o Shizuku") }
             ShizukuState.NO_PERMISSION -> Button(onClick = { ShellBridge.requestPermission { a.runOnUiThread { a.refresh++ } } },
-                colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Permitir o HyperXR") }
+                colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Permitir o HyperMagic") }
             ShizukuState.READY -> Unit
         }
         OutlinedButton(onClick = { a.refresh++ }) { Text("Verificar de novo") }

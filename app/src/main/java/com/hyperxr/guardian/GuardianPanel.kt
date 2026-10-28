@@ -41,7 +41,7 @@ class GuardianPanel(private val g: HyperGuardian) : XrPanel(1.15f, 1.05f, title 
         c.y += 108f
 
         when (g.mode) {
-            HyperGuardian.Mode.OFF -> c.paragraph("Ligue um modo para o HyperGuardian proteger você em todos os apps do HyperXR. " +
+            HyperGuardian.Mode.OFF -> c.paragraph("Ligue um modo para o HyperGuardian proteger você em todos os apps do HyperMagic. " +
                 "Ele precisa da posição do celular pelo ARCore (6DoF).", 24f)
             HyperGuardian.Mode.MANUAL -> {
                 c.paragraph("Manual: você desenha a sua área no chão. Aponte para o chão com a mão e faça a pinça; contorne a área " +
@@ -60,7 +60,7 @@ class GuardianPanel(private val g: HyperGuardian) : XrPanel(1.15f, 1.05f, title 
                     }
                     if (g.area.valid) c.button("clear", "Apagar área", c.pad + 376f, c.y, 300f, 84f, icon = icon("delete")) { g.clearArea(); note = "Área apagada."; dirty = true }
                     c.y += 100f
-                    if (g.area.valid) c.paragraph("A área fica salva. Ela vale a partir de onde o HyperXR começou: comece no mesmo lugar, olhando para a mesma direção (ou desenhe de novo).", 22f)
+                    if (g.area.valid) c.paragraph("A área fica salva. Ela vale a partir de onde o HyperMagic começou: comece no mesmo lugar, olhando para a mesma direção (ou desenhe de novo).", 22f)
                 }
             }
             HyperGuardian.Mode.AUTO -> {

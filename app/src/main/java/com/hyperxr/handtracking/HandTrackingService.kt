@@ -736,8 +736,8 @@ class HandTrackingService(private val context: Context) {
                     }
                     out += stats.snapshot().format()
                 } finally { e.close() }
-            } else out += "HyperXR NPU: indisponível"
-        } catch (t: Throwable) { out += "HyperXR NPU: indisponível (${t.message})" }
+            } else out += "HyperMagic NPU: indisponível"
+        } catch (t: Throwable) { out += "HyperMagic NPU: indisponível (${t.message})" }
         return out
     }
 

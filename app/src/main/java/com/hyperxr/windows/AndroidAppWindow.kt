@@ -28,7 +28,7 @@ class AndroidAppWindow(
         status = "Abrindo…"
         screen.onSurface = { surface ->
             ShellBridge.withService(context) { s ->
-                if (s == null) { status = "Shizuku indisponível: abra o Shizuku e conceda permissão ao HyperXR"; return@withService }
+                if (s == null) { status = "Shizuku indisponível: abra o Shizuku e conceda permissão ao HyperMagic"; return@withService }
                 io.execute {
                     try {
                         val id = s.createDisplay(surface, screen.widthPx, screen.heightPx, DPI, "hyperxr-$packageName")

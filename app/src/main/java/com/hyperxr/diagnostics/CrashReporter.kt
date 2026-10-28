@@ -148,7 +148,7 @@ object CrashReporter {
 
     private fun write(app: Context, tag: String, body: String, time: Long = System.currentTimeMillis()) {
         val d = dir(app)
-        val head = "HyperXR ${versionName(app)} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}\n" +
+        val head = "HyperMagic ${versionName(app)} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}\n" +
             "Data: ${fmt(time)}\n"
         File(d, "$time-$tag.txt").writeText(head + body)
         d.listFiles()?.sortedByDescending { it.name }?.drop(MAX_REPORTS)?.forEach { it.delete() }

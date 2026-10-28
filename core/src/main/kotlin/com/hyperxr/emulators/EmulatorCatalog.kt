@@ -67,7 +67,7 @@ object EmulatorCatalog {
             "Código-fonte: ${c.sourceUrl} (commit ${c.commit.take(12)})"
     } + listOf(
         "API libretro (libretro.h) — Copyright (C) 2010-2024 The RetroArch team, licença MIT.",
-        "Os núcleos são programas separados, carregados pelo HyperXR em tempo de execução; cada um mantém a sua licença. " +
+        "Os núcleos são programas separados, carregados pelo HyperMagic em tempo de execução; cada um mantém a sua licença. " +
             "O código-fonte exato está nos links acima e o script de compilação em tools/build_libretro_cores.sh. " +
             "Nenhum jogo vem incluído: use apenas ROMs que você tem o direito de usar.",
     )

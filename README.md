@@ -1,4 +1,7 @@
-# HyperXR
+# HyperMagic
+
+**HyperMagic** (antes HyperXR), em parceria com **Samrat Beketov**, criador do **MagicXR**.
+
 Plataforma XR para celulares Android em VR Box, headsets móveis e realidade mista: launcher espacial
 (modos **Dock** e **New**), realidade mista com câmera, VR estereoscópico SBS, um **runtime OpenXR
 próprio**, hand tracking com esqueleto (Kalman + One Euro), Joy-Cons, navegador GeckoView, apps
@@ -112,6 +115,13 @@ muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tem
 - [Status das funcionalidades](docs/STATUS.md)
 - [SteamVR no HyperXR](docs/STEAMVR.md) e [HyperXR PC](pc/README.md)
 - [Emuladores embutidos](docs/EMULATORS.md)
+
+## Parceria e créditos
+
+O HyperMagic é feito em parceria com **Samrat Beketov**, autor do **MagicXR**, que autorizou o uso
+do código do MagicXR neste projeto, publicado sob a GPLv3. Partes vindas do MagicXR estão marcadas
+no código com "MagicXR (Samrat Beketov)". Até agora: a trava da pinça (a pinça só solta depois de
+dois quadros abertos seguidos e nunca vale com a mão fechada).
 
 ## Licença
 

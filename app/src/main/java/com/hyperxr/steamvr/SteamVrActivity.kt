@@ -295,7 +295,7 @@ class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles
         override fun update(dt: Float) { t += dt; if (t > 1f) { t = 0f; dirty = true } }
         override fun draw(c: PanelCanvas) {
             c.paragraph(state, 32f, XrTheme.text, bold = true)
-            c.paragraph("IP deste celular (digite no HyperXR PC): " + (localIp() ?: "sem Wi-Fi"), 26f, XrTheme.accent2)
+            c.paragraph("IP deste celular (digite no HyperMagic PC): " + (localIp() ?: "sem Wi-Fi"), 26f, XrTheme.accent2)
             c.paragraph("PC: " + pcIp.ifBlank { "o PC é que vai se conectar" }, 26f)
             c.paragraph("Perfil ${plan.profile.label}: ${plan.eyeWidth * 2}x${plan.eyeHeight} a ${plan.refreshHz} Hz, " +
                 (if (plan.codecs and SteamVrProfiles.CODEC_HEVC != 0) "HEVC" else "H.264") + ", até ${plan.maxMbps} Mb/s", 22f)

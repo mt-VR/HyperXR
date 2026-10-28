@@ -115,7 +115,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private fun refreshInstalled() {
         val pkgs = app.packages.list().filter { p -> BuiltinApps.all.none { it.target == p.manifest.id } }.map { p ->
             AppEntry("pkg:${p.manifest.id}", p.manifest.name, AppKind.HYPERX_PACKAGE, AppCategory.HYPERXR_GAME, "hyperx_package", p.manifest.id,
-                runtime = "HyperXR SDK ${p.manifest.sdk}", compatibility = p.manifest.mode)
+                runtime = "HyperMagic SDK ${p.manifest.sdk}", compatibility = p.manifest.mode)
         }
         val xr = try { app.xrApps.discover().map { it.entry } } catch (t: Throwable) { emptyList() }
         installedApps = pkgs + xr
@@ -678,7 +678,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "emulators" -> com.hyperxr.emulators.EmulatorPanel(this) { core, rom -> playRom(core, rom) }
             "assistant" -> com.hyperxr.assistant.AssistantPanel(assistant, { startVoice() }, { openKeyboard(it) }, { closeKeyboard() })
             "catgame" -> { ctx.ui { activity.startActivity(Intent(activity, com.hyperxr.catgame.CatGameActivity::class.java)) }; return }
-            else -> InfoPanel("HyperXR", "Painel '$target' indisponível")
+            else -> InfoPanel("HyperMagic", "Painel '$target' indisponível")
         }
         placeAboveDock(w, yawOffsetDeg = (windows.size % 3 - 1) * 8f)
         openWindow(w)
@@ -958,7 +958,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         com.hyperxr.diagnostics.CrashReporter.record(activity, "jogo $title", t)
         game?.let { runCatching { it.release() } }
         game = null
-        openWindow(InfoPanel("Erro no jogo", "$title teve um erro e foi fechado (o HyperXR continua). O relatório está nas configurações 2D: Ver relatório.").apply { placeInFront(ctx.input.head) })
+        openWindow(InfoPanel("Erro no jogo", "$title teve um erro e foi fechado (o HyperMagic continua). O relatório está nas configurações 2D: Ver relatório.").apply { placeInFront(ctx.input.head) })
     }
 
     // ---------------------------------------------------------------- Ocean

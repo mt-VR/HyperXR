@@ -383,8 +383,15 @@ class GestureRecognizer {
     var pinchOn = 0.38f
     var pinchOff = 0.55f
     private val pinch = Hysteresis(pinchOn, pinchOff, activeWhenBelow = true)
+    /**
+     * Pinch latch, after MagicXR's (Samrat Beketov, in partnership): a pinch ends only after two
+     * open frames in a row, so one bad frame does not drop a click or a drag, and a curled hand
+     * (a fist) is never a pinch.
+     */
+    private var pinching = false
+    private var openFrames = 0
 
-    fun reset() = pinch.reset()
+    fun reset() { pinch.reset(); pinching = false; openFrames = 0 }
 
     fun update(s: HandState, rawRatio: Float = Float.NaN) {
         val j = s.joints
@@ -401,8 +408,14 @@ class GestureRecognizer {
         val pinky = extended(j, HandJoint.PINKY_MCP, HandJoint.PINKY_PIP, HandJoint.PINKY_TIP)
         val extendedCount = listOf(index, middle, ring, pinky).count { it }
 
+        val curled = extendedCount == 0 && j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.MIDDLE_PIP]) < 0.05f
+        if (!pinching) { pinching = pinch.active && !curled; openFrames = 0 }
+        else if (curled) { pinching = false; openFrames = 0 }
+        else if (!pinch.active) { if (++openFrames >= 2) { pinching = false; openFrames = 0 } }
+        else openFrames = 0
+
         s.gesture = when {
-            pinch.active -> Gesture.PINCH
+            pinching -> Gesture.PINCH
             index && !middle && !ring && !pinky -> Gesture.POINT
             extendedCount == 0 -> if (j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.MIDDLE_PIP]) < 0.05f) Gesture.FIST else Gesture.GRAB
             extendedCount == 4 -> Gesture.OPEN_PALM

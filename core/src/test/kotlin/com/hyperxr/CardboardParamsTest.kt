@@ -34,7 +34,7 @@ class CardboardParamsTest {
         val len = bb.int
         assertEquals(file.size - 8, len)
         val f = decode(file.copyOfRange(8, file.size))
-        assertEquals("HyperXR", String(f[1]!![0] as ByteArray))
+        assertEquals("HyperMagic", String(f[1]!![0] as ByteArray))
         assertEquals(0.062f, f[4]!![0] as Float, 1e-6f)
         val fov = ByteBuffer.wrap(f[5]!![0] as ByteArray).order(ByteOrder.LITTLE_ENDIAN)
         repeat(4) { assertEquals(50f, fov.float, 1e-6f) }

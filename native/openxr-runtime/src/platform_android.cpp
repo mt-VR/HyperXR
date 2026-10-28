@@ -18,7 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define LOG_TAG "HyperXR-Runtime"
+#define LOG_TAG "HyperMagic-Runtime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
@@ -168,12 +168,12 @@ void queryProvider(HxConfig* c) {
     if (clearException(e) || !cr) return;
     jclass uriCls = e->FindClass("android/net/Uri");
     jmethodID parse = e->GetStaticMethodID(uriCls, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
-    jstring s = e->NewStringUTF("content://com.hyperxr.runtime/viewer");
+    jstring s = e->NewStringUTF("content://com.hypermagic.runtime/viewer");
     jobject uri = e->CallStaticObjectMethod(uriCls, parse, s);
     jclass crCls = e->GetObjectClass(cr);
     jmethodID query = e->GetMethodID(crCls, "query", "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;");
     jobject cur = e->CallObjectMethod(cr, query, uri, nullptr, nullptr, nullptr, nullptr);
-    if (clearException(e) || !cur) { LOGI("HyperXR settings not reachable: using default viewer values"); return; }
+    if (clearException(e) || !cur) { LOGI("HyperMagic settings not reachable: using default viewer values"); return; }
     jclass curCls = e->GetObjectClass(cur);
     jmethodID moveToFirst = e->GetMethodID(curCls, "moveToFirst", "()Z");
     jmethodID getFloat = e->GetMethodID(curCls, "getFloat", "(I)F");
@@ -185,7 +185,7 @@ void queryProvider(HxConfig* c) {
         c->k1 = e->CallFloatMethod(cur, getFloat, 2);
         c->k2 = e->CallFloatMethod(cur, getFloat, 3);
         c->lensDistortion = e->CallIntMethod(cur, getInt, 4);
-        LOGI("viewer from HyperXR: ipd %.1f mm, fov %.0f, k1 %.2f, k2 %.2f", c->ipdM * 1000, c->fovDeg, c->k1, c->k2);
+        LOGI("viewer from HyperMagic: ipd %.1f mm, fov %.0f, k1 %.2f, k2 %.2f", c->ipdM * 1000, c->fovDeg, c->k1, c->k2);
     }
     e->CallVoidMethod(cur, close);
     clearException(e);

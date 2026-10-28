@@ -410,7 +410,7 @@ class GameRuntimeContent(private val pkg: InstalledPackage, private val onExit: 
             c.requestMethod = method
             c.connectTimeout = 10000; c.readTimeout = 15000
             c.instanceFollowRedirects = false // a redirect could leave the allow-list
-            c.setRequestProperty("User-Agent", "HyperXR-Game/${pkg.manifest.id}")
+            c.setRequestProperty("User-Agent", "HyperMagic-Game/${pkg.manifest.id}")
             if (body.isNotEmpty() && method != "GET") { c.doOutput = true; c.outputStream.use { it.write(body.toByteArray()) } }
             val code = c.responseCode
             val text = (if (code < 400) c.inputStream else c.errorStream)?.use { readBounded(it, MAX_RESPONSE).toString(Charsets.UTF_8) } ?: ""

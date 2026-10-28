@@ -49,7 +49,7 @@ class EnvironmentRepository(private val context: Context) {
                 EnvironmentEntry(
                     id = "bundled:ph_$id", name = o["name"]!!.jsonPrimitive.content, kind = EnvironmentKind.PANORAMA_360,
                     author = o["authors"]?.jsonArray?.joinToString(", ") { it.jsonPrimitive.content } ?: "Poly Haven",
-                    source = "Poly Haven (incluído no HyperXR)", sourceUrl = o["source"]!!.jsonPrimitive.content,
+                    source = "Poly Haven (incluído no HyperMagic)", sourceUrl = o["source"]!!.jsonPrimitive.content,
                     license = "CC0-1.0", licenseUrl = PolyHavenCatalog.LICENSE_URL, format = "Equirectangular JPEG 4096x2048",
                     downloadBytes = 0, compatibility = "360° image only: no geometry, no parallax", mainFile = "environments/ph_$id.jpg",
                     previewUrl = "asset:environments/thumbs/ph_$id.jpg",
@@ -300,10 +300,10 @@ class EnvironmentRepository(private val context: Context) {
 
         private fun bundled(file: String, name: String, width: Int) = EnvironmentEntry(
             id = "bundled:$file", name = name, kind = EnvironmentKind.PANORAMA_360, author = "Enviado pelo dono do projeto",
-            source = "Incluído no HyperXR", sourceUrl = "builtin", license = "Fornecido pelo usuário", licenseUrl = "",
+            source = "Incluído no HyperMagic", sourceUrl = "builtin", license = "Fornecido pelo usuário", licenseUrl = "",
             format = "jpg", downloadBytes = 0, compatibility = "${width}x${width / 2}", mainFile = "environments/$file.jpg",
         )
 
-        const val USER_AGENT = "HyperXR/0.1 (Android; +https://github.com/mt-VR/HyperXR)"
+        const val USER_AGENT = "HyperMagic/0.1 (Android; +https://github.com/mt-VR/HyperMagic)"
     }
 }

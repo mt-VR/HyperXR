@@ -54,7 +54,7 @@ class HyperConnectServer(private val context: Context) {
                     Diagnostics.log("HyperConnect: $deviceName conectado")
                     read(c)
                 } catch (t: SecurityException) {
-                    status = "Permita o Bluetooth para o HyperXR"; sleep(3000)
+                    status = "Permita o Bluetooth para o HyperMagic"; sleep(3000)
                 } catch (t: Throwable) {
                     if (running) { status = "Esperando o celular controle"; sleep(500) }
                 } finally {

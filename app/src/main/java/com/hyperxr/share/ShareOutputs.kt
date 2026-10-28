@@ -184,18 +184,18 @@ class VideoRecorder(private val activity: Activity, private val width: Int, priv
     }
 
     private fun publish(): String {
-        val name = "HyperXR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
+        val name = "HyperMagic_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, name)
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/HyperXR")
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/HyperMagic")
             }
             val uri = activity.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: error("MediaStore refused the video")
             activity.contentResolver.openOutputStream(uri)!!.use { out -> temp.inputStream().use { it.copyTo(out) } }
         } else {
             @Suppress("DEPRECATION")
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "HyperXR").apply { mkdirs() }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "HyperMagic").apply { mkdirs() }
             val f = File(dir, name)
             temp.copyTo(f, overwrite = true)
             android.media.MediaScannerConnection.scanFile(activity, arrayOf(f.absolutePath), arrayOf("video/mp4"), null)
@@ -255,7 +255,7 @@ class MjpegServer {
             val req = sock.getInputStream().bufferedReader().readLine() ?: return
             val out = sock.getOutputStream()
             if (!req.contains("/stream")) {
-                val html = "<!doctype html><html><head><meta name=viewport content='width=device-width'><title>HyperXR</title></head>" +
+                val html = "<!doctype html><html><head><meta name=viewport content='width=device-width'><title>HyperMagic</title></head>" +
                     "<body style='margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh'>" +
                     "<img src='/stream' style='max-width:100%;max-height:100%;aspect-ratio:16/9'></body></html>"
                 val body = html.toByteArray()

@@ -45,7 +45,7 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          cp app/build/outputs/apk/debug/app-debug.apk "HyperXR-$TAG-arm64.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "HyperMagic-$TAG-arm64.apk"
           NOTES="docs/releases/$TAG.md"
           [ -f "$NOTES" ] || NOTES=README.md
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
@@ -53,6 +53,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.names.outputs.tag }}
-          name: HyperXR ${{ steps.names.outputs.tag }}
+          name: HyperMagic ${{ steps.names.outputs.tag }}
           body_path: ${{ steps.names.outputs.notes }}
-          files: HyperXR-${{ steps.names.outputs.tag }}-arm64.apk
+          files: HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk

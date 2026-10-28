@@ -21,7 +21,7 @@ object CardboardParams {
     const val BUTTON_INDIRECT_TOUCH = 3
 
     data class Viewer(
-        val vendor: String = "HyperXR",
+        val vendor: String = "HyperMagic",
         val model: String = "VR Box",
         val screenToLensM: Float = 0.042f,
         val interLensM: Float = 0.060f,
@@ -33,7 +33,7 @@ object CardboardParams {
         val button: Int = BUTTON_INDIRECT_TOUCH,
     )
 
-    fun fromSettings(lensSeparationMm: Float, fovDegrees: Float, k1: Float, k2: Float, vendor: String = "HyperXR", model: String = "VR Box",
+    fun fromSettings(lensSeparationMm: Float, fovDegrees: Float, k1: Float, k2: Float, vendor: String = "HyperMagic", model: String = "VR Box",
                      screenToLensMm: Float = 42f, trayToLensMm: Float = 35f, button: Int = BUTTON_INDIRECT_TOUCH) = Viewer(
         vendor = vendor, model = model, screenToLensM = screenToLensMm / 1000f, trayToLensM = trayToLensMm / 1000f, button = button,
         interLensM = lensSeparationMm / 1000f,

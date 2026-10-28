@@ -19,17 +19,17 @@ class SharePanel(private val share: ScreenShare, private val activity: android.a
     }
 
     override fun draw(c: PanelCanvas) {
-        c.paragraph("Tudo que sai do HyperXR para fora sai numa imagem única em 16:9, sem as duas lentes do Cardboard e sem distorção, em alta resolução.", 24f)
+        c.paragraph("Tudo que sai do HyperMagic para fora sai numa imagem única em 16:9, sem as duas lentes do Cardboard e sem distorção, em alta resolução.", 24f)
         val summary = share.summary
         if (summary.isNotEmpty()) c.paragraph(summary, 28f, XrTheme.accent2, bold = true)
         if (share.error.isNotEmpty()) c.paragraph(share.error, 24f, XrTheme.danger)
         if (saved.isNotEmpty()) c.paragraph(saved, 24f, XrTheme.accent2)
-        else if (share.lastPairedSave.isNotEmpty() && share.recorder == null) c.paragraph("Cópia 16:9 salva em Filmes/HyperXR: ${share.lastPairedSave}", 24f, XrTheme.accent2)
+        else if (share.lastPairedSave.isNotEmpty() && share.recorder == null) c.paragraph("Cópia 16:9 salva em Filmes/HyperMagic: ${share.lastPairedSave}", 24f, XrTheme.accent2)
 
         // record
         val rec = share.recorder != null
         c.button("rec", if (rec) "Parar e salvar" else "Gravar vídeo", c.pad, c.y, 360f, 80f, accent = !rec) {
-            if (rec) share.stopRecording { name -> saved = name?.let { "Salvo em Filmes/HyperXR: $it" } ?: "A gravação falhou"; dirty = true }
+            if (rec) share.stopRecording { name -> saved = name?.let { "Salvo em Filmes/HyperMagic: $it" } ?: "A gravação falhou"; dirty = true }
             else {
                 if (share.microphone && activity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                     activity.runOnUiThread { activity.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 78) }
@@ -51,7 +51,7 @@ class SharePanel(private val share: ScreenShare, private val activity: android.a
         if (streaming) c.paragraph("Abra no PC, TV ou outro celular: " + (share.stream.url() ?: "conecte o Wi-Fi") + "  (720p)", 24f, XrTheme.text)
 
         // external recorders
-        val ext = if (share.externalRecordingDetector.supported) "Ao gravar a tela com outro app, gravar junto uma cópia 16:9 (a tela continua em lentes; a cópia vai para Filmes/HyperXR, sem microfone)"
+        val ext = if (share.externalRecordingDetector.supported) "Ao gravar a tela com outro app, gravar junto uma cópia 16:9 (a tela continua em lentes; a cópia vai para Filmes/HyperMagic, sem microfone)"
         else "Cópia 16:9 da gravação de tela de outro app (precisa do Android 15; neste celular use Gravar vídeo)"
         c.toggle("ext", ext, share.externalRecording16x9) { share.externalRecording16x9 = it }
 

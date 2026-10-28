@@ -140,7 +140,7 @@ object ControllerInput {
     private fun connectGamepad() {
         shizukuState = when {
             !runCatching { Shizuku.pingBinder() }.getOrDefault(false) -> "Shizuku não está rodando"
-            !shizukuReady() -> "Shizuku sem permissão para o HyperXR Daydream"
+            !shizukuReady() -> "Shizuku sem permissão para o HyperMagic Daydream"
             else -> "Shizuku pronto"
         }
         if (!shizukuReady()) return

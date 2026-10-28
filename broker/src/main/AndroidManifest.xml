@@ -4,12 +4,12 @@
 
     <!-- Reads where the HyperXR app installed its runtime library. -->
     <queries>
-        <package android:name="com.hyperxr" />
+        <package android:name="com.hypermagic" />
     </queries>
 
     <application
         android:allowBackup="false"
-        android:label="HyperXR OpenXR Broker"
+        android:label="HyperMagic OpenXR Broker"
         android:hasCode="true">
         <!-- The OpenXR loader's installable runtime broker (asked before the system broker, which
              some phones already declare). Conflicts only with the Khronos "OpenXR Runtime Broker"

@@ -134,7 +134,7 @@ public final class RuntimeSurface implements SurfaceHolder.Callback {
                         | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                 android.graphics.PixelFormat.OPAQUE);
         lp.token = activity.getWindow().getAttributes().token;
-        lp.setTitle("HyperXR Runtime");
+        lp.setTitle("HyperMagic Runtime");
         if (nativeActivity) {
             view.setFocusable(true);
             view.setFocusableInTouchMode(true);

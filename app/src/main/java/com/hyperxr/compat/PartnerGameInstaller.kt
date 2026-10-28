@@ -14,7 +14,7 @@ import java.net.URL
  * button), checks it is byte for byte the published APK, and installs it unchanged.
  */
 object PartnerGameInstaller {
-    private const val UA = "Mozilla/5.0 (Linux; Android) HyperXR"
+    private const val UA = "Mozilla/5.0 (Linux; Android) HyperMagic"
 
     fun installed(ctx: Context, g: PartnerGame) = CompatLayer.installed(ctx, g.packageName)
 

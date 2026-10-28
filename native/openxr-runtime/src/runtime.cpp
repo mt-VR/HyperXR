@@ -613,7 +613,7 @@ XrResult XRAPI_CALL GetInstanceProperties(XrInstance h, XrInstanceProperties* p)
     if (!asInstance(h)) return XR_ERROR_HANDLE_INVALID;
     if (!p || p->type != XR_TYPE_INSTANCE_PROPERTIES) return XR_ERROR_VALIDATION_FAILURE;
     p->runtimeVersion = XR_MAKE_VERSION(0, 1, 0);
-    copyStr(p->runtimeName, XR_MAX_RUNTIME_NAME_SIZE, "HyperXR Runtime");
+    copyStr(p->runtimeName, XR_MAX_RUNTIME_NAME_SIZE, "HyperMagic Runtime");
     return XR_SUCCESS;
 }
 
@@ -682,7 +682,7 @@ XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys, XrSystemPr
     if (!p || p->type != XR_TYPE_SYSTEM_PROPERTIES) return XR_ERROR_VALIDATION_FAILURE;
     p->systemId = SYSTEM_ID;
     p->vendorId = 0x4858;  // "HX"
-    copyStr(p->systemName, XR_MAX_SYSTEM_NAME_SIZE, "HyperXR VR Box (3DoF)");
+    copyStr(p->systemName, XR_MAX_SYSTEM_NAME_SIZE, "HyperMagic VR Box (3DoF)");
     p->graphicsProperties.maxLayerCount = MAX_LAYERS;
     p->graphicsProperties.maxSwapchainImageWidth = 4096;
     p->graphicsProperties.maxSwapchainImageHeight = 4096;

@@ -25,7 +25,7 @@ class SettingsProvider : ContentProvider() {
     /** Reads HyperXR's viewer settings (its runtime config provider); null when HyperXR is not there. */
     private fun viewer(): CardboardParams.Viewer? = try {
         val ctx = context ?: return null
-        ctx.contentResolver.query(Uri.parse("content://com.hyperxr.runtime/viewer"), null, null, null, null)?.use { c ->
+        ctx.contentResolver.query(Uri.parse("content://com.hypermagic.runtime/viewer"), null, null, null, null)?.use { c ->
             if (!c.moveToFirst()) return null
             val sepCol = c.getColumnIndex("lens_separation_mm")
             val sep = if (sepCol >= 0) c.getFloat(sepCol) else c.getFloat(0)

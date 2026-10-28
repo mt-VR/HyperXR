@@ -146,27 +146,27 @@ object QuestApk {
         fun wont(r: String) { verdict = Verdict.WONT_RUN; reasons += r }
         if (abi == null && abis.isNotEmpty()) wont("Bibliotecas só para ${abis.joinToString()}; este celular não as carrega")
         when (xrApi) {
-            XrApi.VRAPI -> wont("Usa a VrApi da Meta (Gear VR / Quest antigo): o HyperXR roda só OpenXR")
+            XrApi.VRAPI -> wont("Usa a VrApi da Meta (Gear VR / Quest antigo): o HyperMagic roda só OpenXR")
             XrApi.DAYDREAM -> wont("App só Daydream: sem o Google VR Services e um celular Daydream-ready ele recusa abrir. \"Corrigir e instalar\" o marca como compatível com Cardboard")
             XrApi.NONE -> reasons += "Não usa OpenXR: abre como app Android comum (tela plana)"
             XrApi.CARDBOARD -> reasons += (if (ApkPatcher.DAYDREAM in categories) "Daydream e Cardboard: " else "App Cardboard: ") +
-                "roda com o próprio renderizador estéreo, usando a calibração do VR Box que o HyperXR grava antes de abrir"
+                "roda com o próprio renderizador estéreo, usando a calibração do VR Box que o HyperMagic grava antes de abrir"
             XrApi.OPENXR -> Unit
         }
         if (xrApi == XrApi.OPENXR) when (loader) {
-            LoaderKind.KHRONOS_BROKER -> reasons += "Loader OpenXR padrão Khronos: encontra o runtime HyperXR pelo broker"
+            LoaderKind.KHRONOS_BROKER -> reasons += "Loader OpenXR padrão Khronos: encontra o runtime HyperMagic pelo broker"
             LoaderKind.META_FORWARD -> wont("Loader OpenXR da Meta que só procura o runtime do Quest (\"Corrigir e instalar\" troca pelo loader da Khronos)")
             LoaderKind.UNKNOWN -> reasons += "Loader OpenXR de origem desconhecida: \"Corrigir e instalar\" troca pelo loader da Khronos"
             LoaderKind.NONE -> reasons += "Sem loader OpenXR embutido (espera o do sistema)"
         }
-        if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperXR aceita OpenGL ES")
-        else if ("Vulkan" in graphics) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperXR só oferece esse)"
+        if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperMagic aceita OpenGL ES")
+        else if ("Vulkan" in graphics) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperMagic só oferece esse)"
         if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
         val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) }.sorted()
-        if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperXR não as implementa, o jogo funciona só se forem opcionais"
+        if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperMagic não as implementa, o jogo funciona só se forem opcionais"
         val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
         if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
-        if (ddController) reasons += "Usa o controle Daydream: instale o HyperXR Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
+        if (ddController) reasons += "Usa o controle Daydream: instale o HyperMagic Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
         if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
 

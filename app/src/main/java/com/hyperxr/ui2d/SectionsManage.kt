@@ -132,14 +132,14 @@ fun RuntimeSection(a: MainActivity) {
     val s = a.settingsState.runtime
     var probe by remember { mutableStateOf<RuntimeProbe?>(broker.lastProbe) }
     var probing by remember { mutableStateOf(false) }
-    SectionCard("HyperXR Runtime (OpenXR próprio)", "Runtime OpenXR do próprio HyperXR: apps OpenXR rodam no VR Box com 3DoF, lente corrigida e timewarp.") {
-        Note("Para apps OpenXR acharem este runtime instale o APK complementar \"HyperXR OpenXR Broker\": ele ocupa o lugar do broker instalável, que o loader consulta antes do broker do sistema. Se o \"OpenXR Runtime Broker\" da Khronos estiver instalado, ele tem prioridade: escolha \"HyperXR Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
+    SectionCard("HyperMagic Runtime (OpenXR próprio)", "Runtime OpenXR do próprio HyperMagic: apps OpenXR rodam no VR Box com 3DoF, lente corrigida e timewarp.") {
+        Note("Para apps OpenXR acharem este runtime instale o APK complementar \"HyperMagic OpenXR Broker\": ele ocupa o lugar do broker instalável, que o loader consulta antes do broker do sistema. Se o \"OpenXR Runtime Broker\" da Khronos estiver instalado, ele tem prioridade: escolha \"HyperMagic Runtime\" nele. O runtime usa o IPD, o FOV e a lente configurados aqui.")
         Note("Controles: Joy-Cons/gamepad e o toque na tela (botão do VR Box) viram as ações do app pelos perfis Touch e simple; os controles acompanham a cabeça (sem 6DoF). Suporta sessões OpenGL ES, camadas de projeção e quad, espaços VIEW/LOCAL/STAGE/LOCAL_FLOOR. Sem Vulkan.")
         Button(onClick = { a.startActivity(android.content.Intent(a, com.hyperxr.openxr.RuntimeTestActivity::class.java)) }) {
-            Text("Testar o runtime HyperXR no visor (15 s)")
+            Text("Testar o runtime HyperMagic no visor (15 s)")
         }
     }
-    SectionCard("Runtime Broker do HyperXR", "Descobre runtimes OpenXR, mostra capacidades reais e evita sessões concorrentes. Não substitui o loader nem o broker da Khronos.") {
+    SectionCard("Runtime Broker do HyperMagic", "Descobre runtimes OpenXR, mostra capacidades reais e evita sessões concorrentes. Não substitui o loader nem o broker da Khronos.") {
         KeyValue("Broker Khronos", if (brokerInstalled) "instalado" else "não encontrado (o loader usa o runtime do sistema, se houver)")
         remember(a.refresh) { broker.brokerOwners() }.forEach { (auth, owner) ->
             KeyValue(if (auth.contains("system")) "Broker do sistema" else "Broker instalável", owner ?: "livre")
@@ -178,7 +178,7 @@ fun RuntimeSection(a: MainActivity) {
         a.app.sessionArbiter.history().takeLast(6).forEach { Mono(it) }
     }
     SectionCard("Monado") {
-        Note("O Monado é um runtime OpenXR de código aberto (Boost Software License 1.0). O HyperXR o integra como runtime externo: " +
+        Note("O Monado é um runtime OpenXR de código aberto (Boost Software License 1.0). O HyperMagic o integra como runtime externo: " +
             "embuti-lo exigiria compilar seus drivers nativos para Android e assumir o papel de runtime do sistema, o que não é possível a partir de um app comum.")
         OutlinedButton(onClick = { a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AndroidRuntimeBroker.MONADO_PROJECT_URL))) }) { Text("Projeto Monado") }
     }
@@ -220,7 +220,7 @@ fun EnvironmentsSection(a: MainActivity) {
             }
         }
     }
-    SectionCard("Catálogo HyperXR Environments", "Fonte: Poly Haven (todas as obras CC0, polyhaven.com/license). Cenas 3D e panoramas 360° são listados separadamente.") {
+    SectionCard("Catálogo HyperMagic Environments", "Fonte: Poly Haven (todas as obras CC0, polyhaven.com/license). Cenas 3D e panoramas 360° são listados separadamente.") {
         if (catalog == null) Button(onClick = {
             status = "Carregando…"
             a.io.execute {
@@ -286,7 +286,7 @@ private fun kindLabel(k: EnvironmentKind) = when (k) {
 fun AppsSection(a: MainActivity) {
     val xr = remember(a.refresh) { a.app.xrApps.discover() }
     ApkImportCard(a)
-    SectionCard("Aplicativos Cardboard e OpenXR", "Detectados pelas categorias de intent que declaram. O HyperXR inicia o app como ele é; não converte Cardboard em OpenXR.") {
+    SectionCard("Aplicativos Cardboard e OpenXR", "Detectados pelas categorias de intent que declaram. O HyperMagic inicia o app como ele é; não converte Cardboard em OpenXR.") {
         if (xr.isEmpty()) Note("Nenhum app XR encontrado.")
         xr.forEach { x ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -299,7 +299,7 @@ fun AppsSection(a: MainActivity) {
             }
         }
     }
-    SectionCard("Jogos e apps HyperXR") {
+    SectionCard("Jogos e apps HyperMagic") {
         BuiltinApps.all.filter { it.kind == AppKind.HYPERX_PACKAGE }.forEach { app ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(app.title, Modifier.weight(1f), color = HxColors.text)

@@ -28,7 +28,7 @@ class RuntimeConfigProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
 
     companion object {
-        const val AUTHORITY = "com.hyperxr.runtime"
+        const val AUTHORITY = "com.hypermagic.runtime"
         val COLUMNS = arrayOf("ipd_mm", "fov_deg", "k1", "k2", "lens_distortion", "lens_separation_mm")
     }
 }

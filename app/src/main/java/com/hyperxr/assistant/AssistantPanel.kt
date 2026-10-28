@@ -38,7 +38,7 @@ class AssistantPanel(
             val color = if (m.fromUser) XrTheme.text else XrTheme.accent2
             y += c.label(m.text, x, y, 26f, color, bold = m.fromUser, maxWidth = c.w * 0.7f - c.pad) + 18f
         }
-        if (shown.isEmpty()) c.paragraph("Pergunte qualquer coisa sobre o HyperXR ou peça: \"abre o YouTube e escurece o fundo\", \"deixa mais fluido\", \"por que minha mão está pequena?\", \"salva este espaço como estudo\".", 26f)
+        if (shown.isEmpty()) c.paragraph("Pergunte qualquer coisa sobre o HyperMagic ou peça: \"abre o YouTube e escurece o fundo\", \"deixa mais fluido\", \"por que minha mão está pequena?\", \"salva este espaço como estudo\".", 26f)
         if (a.status.isNotEmpty()) c.label(a.status, c.pad, bottom - 36f, 24f, XrTheme.accent2)
 
         if (editor.active) {
@@ -54,7 +54,7 @@ class AssistantPanel(
     private fun estimate(text: String) = 34f * (1 + text.length / 46) + 18f
 
     private fun drawModels(c: PanelCanvas, model: AssistantModel?, dl: AssistantModel?) {
-        c.paragraph("A IA roda no próprio celular, sem internet depois do download. A voz vira texto pelo reconhecimento do Google; o texto vai para o modelo junto com o estado do HyperXR (janelas, apps, ambientes, ajustes, rastreamento).", 24f)
+        c.paragraph("A IA roda no próprio celular, sem internet depois do download. A voz vira texto pelo reconhecimento do Google; o texto vai para o modelo junto com o estado do HyperMagic (janelas, apps, ambientes, ajustes, rastreamento).", 24f)
         val suggested = a.suggested()
         for (m in AssistantBrain.MODELS) {
             val y = c.y

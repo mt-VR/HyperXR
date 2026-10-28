@@ -54,19 +54,19 @@ object ViewerCatalog {
     val all: List<Viewer> = listOf(
         // ---- Google
         v("cardboard-v1", "Google", "Cardboard v1", 2014, 80f, 60f, 0.441f, 0.156f, Button.MAGNET, false, 4f, 5.5f, s2l = 42f, source = Source.OFFICIAL,
-            note = "O ímã não clica no HyperXR: use as mãos, um controle ou toque na tela"),
+            note = "O ímã não clica no HyperMagic: use as mãos, um controle ou toque na tela"),
         v("cardboard-v2", "Google", "Cardboard v2 (I/O 2015)", 2015, 100f, 64f, 0.34f, 0.55f, Button.TOUCH, false, 4f, 6f, s2l = 39f, source = Source.OFFICIAL),
         v("daydream-2016", "Google", "Daydream View (2016)", 2016, 90f, 62f, 0.385f, 0.593f, Button.CONTROLLER, false, 5f, 6f, s2l = 39f,
-            note = "O controle Daydream funciona pelo HyperXR Daydream (Joy-Con) nos apps GVR; aqui use as mãos ou outro controle"),
+            note = "O controle Daydream funciona pelo HyperMagic Daydream (Joy-Con) nos apps GVR; aqui use as mãos ou outro controle"),
         v("daydream-2017", "Google", "Daydream View (2017)", 2017, 100f, 62f, 0.385f, 0.593f, Button.CONTROLLER, false, 5f, 6.3f, s2l = 39f),
         v("cardboard-generic", "Genérico", "Óculos de papelão (Cardboard)", 2015, 90f, 62f, 0.34f, 0.55f, Button.TOUCH, false, 4f, 6f, s2l = 39f),
         // ---- Samsung
         v("gearvr-2015", "Samsung", "Gear VR (SM-R322)", 2015, 96f, 62f, 0.28f, 0.22f, Button.TOUCHPAD, false, 5.1f, 5.7f, s2l = 39f,
-            note = "O conector USB do Gear VR não é usado: o touchpad não chega ao HyperXR"),
+            note = "O conector USB do Gear VR não é usado: o touchpad não chega ao HyperMagic"),
         v("gearvr-2016", "Samsung", "Gear VR (SM-R323)", 2016, 101f, 62f, 0.28f, 0.22f, Button.TOUCHPAD, false, 5.1f, 5.7f, s2l = 39f),
         v("gearvr-2017", "Samsung", "Gear VR com controle (SM-R324/R325)", 2017, 101f, 62f, 0.28f, 0.22f, Button.CONTROLLER, false, 5.1f, 6.3f, s2l = 39f),
         // ---- VR Box
-        v("vrbox-1", "VR Box", "VR Box (1.0)", 2015, 85f, 60f, 0.22f, 0.24f, Button.TOUCH, true, 4.7f, 6f, note = "O padrão do HyperXR"),
+        v("vrbox-1", "VR Box", "VR Box (1.0)", 2015, 85f, 60f, 0.22f, 0.24f, Button.TOUCH, true, 4.7f, 6f, note = "O padrão do HyperMagic"),
         v("vrbox-2", "VR Box", "VR Box 2.0", 2016, 90f, 62f, 0.24f, 0.26f, Button.TOUCH, true, 4.7f, 6f),
         v("vrbox-3", "VR Box", "VR Box 3.0 (com fone)", 2017, 95f, 62f, 0.25f, 0.27f, Button.REMOTE, true, 4.7f, 6.2f),
         v("vrbox-remote", "VR Box", "VR Box com controle Bluetooth", 2016, 90f, 62f, 0.24f, 0.26f, Button.REMOTE, true, 4.7f, 6f,
@@ -92,7 +92,7 @@ object ViewerCatalog {
         v("shinecon-g15", "VR Shinecon", "SC-G15", 2021, 110f, 63f, 0.32f, 0.3f, Button.TOUCH, true, 5f, 7.2f),
         // ---- BOBOVR
         v("bobovr-z4", "BOBOVR", "Z4", 2016, 110f, 63f, 0.32f, 0.3f, Button.TOUCH, true, 4.7f, 6.2f),
-        v("bobovr-z5", "BOBOVR", "Z5", 2017, 110f, 63f, 0.33f, 0.31f, Button.REMOTE, true, 4.7f, 6.2f, note = "Anunciado como 120°; o HyperXR usa até 110°"),
+        v("bobovr-z5", "BOBOVR", "Z5", 2017, 110f, 63f, 0.33f, 0.31f, Button.REMOTE, true, 4.7f, 6.2f, note = "Anunciado como 120°; o HyperMagic usa até 110°"),
         v("bobovr-z6", "BOBOVR", "Z6", 2018, 110f, 63f, 0.33f, 0.31f, Button.TOUCH, true, 4.7f, 6.2f),
         // ---- other brands
         v("zeiss-vrone", "Zeiss", "VR One Plus", 2016, 100f, 62f, 0.3f, 0.2f, Button.NONE, false, 4.7f, 5.5f),

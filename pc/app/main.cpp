@@ -139,7 +139,7 @@ void Start() {
     hxvr::Config cfg; cfg.Load();
     std::wstring ip = GetText(g_phoneIp);
     in_addr a;
-    if (inet_pton(AF_INET, Narrow(ip).c_str(), &a) != 1) { SetStatus(L"Digite o IP do celular (aparece no HyperXR do celular, em SteamVR)."); return; }
+    if (inet_pton(AF_INET, Narrow(ip).c_str(), &a) != 1) { SetStatus(L"Digite o IP do celular (aparece no HyperMagic do celular, em SteamVR)."); return; }
     cfg.phoneIp = Narrow(ip);
     int mbps = _wtoi(GetText(g_bitrate).c_str());
     cfg.bitrateMbps = mbps >= 5 && mbps <= 200 ? mbps : 40;
@@ -153,7 +153,7 @@ void Start() {
         return;
     }
     ShellExecuteW(nullptr, L"open", L"steam://rungameid/250820", nullptr, nullptr, SW_SHOWNORMAL);
-    SetStatus(L"Iniciando o SteamVR... No celular: HyperXR > SteamVR > digite o IP deste PC e toque em Conectar.");
+    SetStatus(L"Iniciando o SteamVR... No celular: HyperMagic > SteamVR > digite o IP deste PC e toque em Conectar.");
 }
 
 void Remove() {
@@ -189,8 +189,8 @@ LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
         case WM_CREATE: {
             hxvr::Config cfg; cfg.Load();
-            Label(w, L"HyperXR para SteamVR", 20, 16, 520, 30, g_bold);
-            Label(w, L"1. No celular: abra o HyperXR > SteamVR. 2. Digite aqui o IP do celular e no celular o IP deste PC. 3. Toque em Conectar nos dois.", 20, 52, 520, 40, g_font);
+            Label(w, L"HyperMagic para SteamVR", 20, 16, 520, 30, g_bold);
+            Label(w, L"1. No celular: abra o HyperMagic > SteamVR. 2. Digite aqui o IP do celular e no celular o IP deste PC. 3. Toque em Conectar nos dois.", 20, 52, 520, 40, g_font);
             g_pcIp = Label(w, L"", 20, 100, 520, 22, g_font);
             Label(w, L"IP do celular:", 20, 136, 130, 22, g_font);
             g_phoneIp = CreateWindowW(L"EDIT", Widen(cfg.phoneIp).c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 160, 132, 200, 26, w, (HMENU)ID_PHONE_IP, nullptr, nullptr);
@@ -239,10 +239,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g_font = CreateFontW(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     g_bold = CreateFontW(-18, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     WNDCLASSW wc = {};
-    wc.lpfnWndProc = Proc; wc.hInstance = inst; wc.lpszClassName = L"HyperXRPC";
+    wc.lpfnWndProc = Proc; wc.hInstance = inst; wc.lpszClassName = L"HyperMagicPC";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
     RegisterClassW(&wc);
-    HWND w = CreateWindowW(L"HyperXRPC", L"HyperXR PC", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    HWND w = CreateWindowW(L"HyperMagicPC", L"HyperMagic PC", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                            CW_USEDEFAULT, CW_USEDEFAULT, 580, 490, nullptr, nullptr, inst, nullptr);
     ShowWindow(w, show);
     MSG msg;

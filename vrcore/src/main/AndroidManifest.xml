@@ -3,12 +3,12 @@
 
     <!-- reads the viewer calibration from HyperXR -->
     <queries>
-        <package android:name="com.hyperxr" />
+        <package android:name="com.hypermagic" />
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
     <application
-        android:label="HyperXR Daydream"
+        android:label="HyperMagic Daydream"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
 
