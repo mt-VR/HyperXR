@@ -1,5 +1,4 @@
 # HyperXR
-
 Plataforma XR para celulares Android em VR Box, headsets móveis e realidade mista: launcher espacial
 (modos **Dock** e **New**), realidade mista com câmera, VR estereoscópico SBS, um **runtime OpenXR
 próprio**, hand tracking com esqueleto (Kalman + One Euro), Joy-Cons, navegador GeckoView, apps
