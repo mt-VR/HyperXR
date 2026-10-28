@@ -38,7 +38,6 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Jogos VrApi (Gear VR / Quest antigo) | 🚫 fora do escopo: o HyperXR roda só OpenXR |
 | Camada Daydream: detecção (categoria, libgvr, controle Daydream), patch só-Daydream → Cardboard (tabela de strings do manifesto reescrita) | ✅ testes · 🟡 aparelho |
 | Calibração do VR Box para apps Cardboard/Daydream (`/sdcard/Cardboard/current_device_params`, gravado antes de abrir) | ✅ formato (testes) · 🟡 aparelho |
-| Pessoas atravessam o ambiente virtual (segmentador na NPU/GPU, região crescida do rosto/cabelo; o próprio corpo fica de fora) | ✅ algoritmo (testes) + build · 🟡 aparelho |
 | Capturar a sala em 360° (costura de quadros da câmera pela orientação, salva como ambiente) | ✅ costura (testes: >97% dos pixels na direção certa) + build · 🟡 aparelho |
 | Novo logo HX (ícone) e animação de inicialização estilo sistema operacional: hiperespaço, logo desenhado por luz, "HYPERXR", barra de progresso ligada ao carregamento real; no óculos (3D) e na tela do celular | ✅ shaders validados + prévia renderizada (WebGL2) · 🟡 aparelho |
 | Motor de mãos RTMDet-nano + RTMPose-m (OpenMMLab, Apache-2.0): pose fp16 na NPU/GPU/CPU, detector em ONNX Runtime só quando falta mão, profundidade pelas proporções dos ossos, lado pelo giro da palma; MediaPipe como reserva. Mão real por cima da interface removida | ✅ conversão conferida (fp32 5e-6; fp16 95-100% dos pontos iguais numa foto) + testes (`RtmHandTest`) + build · 🟡 aparelho (velocidade e qualidade real desconhecidas) |

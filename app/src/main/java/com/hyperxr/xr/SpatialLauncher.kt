@@ -246,7 +246,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         anchorYaw = kotlin.math.atan2(-f.x, -f.z)
         placeLibraryHome(head)
         appWorld.anchorTo(head, anchorYaw)
-        taskbar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f, head.position.y - 0.5f, head.position.z - cos(anchorYaw) * 1.2f)
+        val k = uiFar()
+        taskbar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f * k, head.position.y - 0.5f * k, head.position.z - cos(anchorYaw) * 1.2f * k)
         Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, taskbar.pose.orientation)
         // tilt the taskbar up towards the eyes
         taskbar.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), taskbar.pose.orientation)
@@ -263,7 +264,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     /** The library as New mode's home: straight ahead of the launcher anchor, a little above the taskbar. */
     private fun placeLibraryHome(head: Pose) {
-        library.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f, head.position.y + 0.06f, head.position.z - cos(anchorYaw) * 1.55f)
+        val k = uiFar()
+        library.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f * k, head.position.y + 0.06f * k, head.position.z - cos(anchorYaw) * 1.55f * k)
         Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, library.pose.orientation)
     }
 
@@ -682,8 +684,14 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     // Windows sit above the dock row: the bar's centre is BAR_Y below the eyes at WIN_DIST, so its
     // bottom edge stays above the dock icons; in New mode they are nearer than the floating icons.
-    private val WIN_DIST = 1.45f
-    private val BAR_Y = -0.17f
+    private val WIN_DIST get() = 1.45f * uiFar()
+    private val BAR_Y get() = -0.17f * uiFar()
+
+    /**
+     * In mixed reality the UI sits further away (real furniture is close around you); in VR the
+     * usual distance. The heights scale with it, so everything keeps its angle in the view.
+     */
+    private fun uiFar() = if (::ctx.isInitialized && !vrOn()) 1.35f else 1f
 
     /** The bar is the window's handle: dragging it moves the window placed right above it. */
     private fun placeAbove(w: SpatialWindow, c: XrPanel) {
@@ -967,7 +975,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun toggleWindows() { windowsMinimized = !windowsMinimized; if (windowsMinimized) closeKeyboard() }
 
     /** Places a system panel so its bottom edge stays above the dock row. */
-    private fun placeAboveDock(p: XrPanel, yawOffsetDeg: Float, distance: Float = 1.35f) {
+    private fun placeAboveDock(p: XrPanel, yawOffsetDeg: Float, distance: Float = 1.35f * uiFar()) {
         val bottom = BAR_Y * distance / WIN_DIST - 0.06f
         p.placeInFront(ctx.input.head, distance, bottom + p.heightMeters / 2, yawOffsetDeg)
     }
@@ -1221,7 +1229,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
 
     /** Camera (optionally darkened behind the UI) or the chosen 3D environment. */
+    private var lastVr: Boolean? = null
     private fun applyBackground() {
+        // switching between MR and VR: the UI moves to that mode's distance
+        val vr = vrOn()
+        if (lastVr != null && lastVr != vr) anchored = false
+        lastVr = vr
         val choice = backgroundChoice()
         val camera = ctx.passthroughAvailable && (choice == "camera" || choice == "dim")
         ctx.scene.background = if (camera) Background.PASSTHROUGH else Background.ENVIRONMENT

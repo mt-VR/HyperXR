@@ -379,17 +379,10 @@ painéis e janelas. A máscara tem até um quadro de atraso em movimentos rápid
   com ícone, nome e resumo; cada um abre sua página de chaves e ações; faixa de baixo com fechar,
   minimizar e o nome. Todas as chaves são configurações reais do HyperXR.
 
-## Pessoas atravessam o ambiente
+## Pessoas atravessam o ambiente (removido)
 
-Dentro de um ambiente virtual (com a câmera ligada para o hand tracking), quem chegar perto
-aparece por cima do ambiente, recortado da imagem real, sem você precisar sair do VR. O mesmo
-segmentador que recorta as mãos (MediaPipe selfie multiclass, na NPU/GPU) classifica cada pixel
-em cabelo, pele, rosto, roupa e fundo. `PersonBreakthrough` (core) cresce a região da pessoa a
-partir dos pixels de rosto e cabelo, passando por pele e roupa. Como você nunca vê o próprio
-rosto, seu próprio corpo e suas mãos, quando olha para baixo, não aparecem. A pessoa só aparece
-depois de 2 análises seguidas, para não piscar, e continua visível por 0,7 s depois de sumir
-(alguém virando de costas). Sem mãos na frente, a análise roda cerca de 8 vezes por segundo.
-Fica em Ajustes > Limite > "Pessoas atravessam o ambiente".
+Removido na 0.3.0 junto com o segmentador de pele: recortava também as mãos e o corpo de quem usa e
+gastava NPU/GPU o tempo todo.
 
 ## Capturar sua sala em 360°
 

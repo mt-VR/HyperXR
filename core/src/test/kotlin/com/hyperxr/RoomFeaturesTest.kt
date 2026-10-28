@@ -1,10 +1,7 @@
 package com.hyperxr
 
 import com.hyperxr.environments.PanoramaStitcher
-import com.hyperxr.handtracking.PersonBreakthrough
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
@@ -13,49 +10,6 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 class RoomFeaturesTest {
-    // ------------------------------------------------------------ person breakthrough
-
-    private fun scene(n: Int, withPerson: Boolean): ByteArray {
-        val l = ByteArray(n * n)
-        fun fill(x0: Int, y0: Int, x1: Int, y1: Int, c: Int) { for (y in y0 until y1) for (x in x0 until x1) l[y * n + x] = c.toByte() }
-        // the wearer's own shirt at the bottom of the view, and their hand
-        fill(0, n - 30, n, n, PersonBreakthrough.CLOTHES)
-        fill(20, 150, 50, 190, PersonBreakthrough.SKIN)
-        if (withPerson) {
-            fill(120, 40, 150, 50, PersonBreakthrough.HAIR)
-            fill(120, 50, 150, 80, PersonBreakthrough.FACE)
-            fill(105, 80, 165, 200, PersonBreakthrough.CLOTHES)   // their body, not touching the shirt below
-        }
-        return l
-    }
-
-    @Test fun showsTheVisitorButNotTheWearersOwnBody() {
-        val n = 256
-        val p = PersonBreakthrough(n)
-        var t = 0L
-        assertNull(p.update(scene(n, true), t))           // first sighting: not yet
-        t += 100_000_000L
-        val m = p.update(scene(n, true), t)
-        assertNotNull(m)
-        fun at(x: Int, y: Int) = m!![y * n + x].toInt() and 0xff
-        assertEquals(255, at(135, 60))                     // face
-        assertEquals(255, at(135, 150))                    // their clothes, grown from the face
-        assertEquals(0, at(128, n - 10))                   // own shirt
-        assertEquals(0, at(30, 170))                       // own hand
-        assertEquals(0, at(10, 10))                        // background
-        // gone: held for a moment, then hidden
-        t += 300_000_000L
-        assertNotNull(p.update(scene(n, false), t))
-        t += 600_000_000L
-        assertNull(p.update(scene(n, false), t))
-        assertTrue(!p.present)
-    }
-
-    @Test fun nobodyNoMask() {
-        val p = PersonBreakthrough(256)
-        repeat(5) { assertNull(p.update(scene(256, false), it * 100_000_000L)) }
-    }
-
     // ------------------------------------------------------------ room panorama
 
     /** The "room": colour from the direction, so any pixel can be checked. */

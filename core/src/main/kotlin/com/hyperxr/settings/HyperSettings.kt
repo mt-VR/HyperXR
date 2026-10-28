@@ -46,8 +46,6 @@ data class GraphicsSettings(
     val stereoInMixedReality: Boolean = false,
     /** VR boundary warning: fade the camera in near real obstacles (needs ARCore Depth). */
     val vrBoundary: Boolean = true,
-    /** Inside a virtual environment, people walking into view show through (camera + segmenter). */
-    val peopleBreakthrough: Boolean = true,
     /** The OS-style boot animation when HyperXR starts. */
     val bootAnimation: Boolean = true,
     /** Distance in metres at which the boundary warning starts. */
