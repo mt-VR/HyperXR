@@ -308,14 +308,15 @@ uniform float uAlpha;
 out vec4 fragColor;
 void main() {
     if (uMode == 0) {
-        float a = texture(uTex, vUv).a;
-        // the sweep runs left to right, leaning with the logo's slant
-        float s = vUv.x + 0.22 * (0.5 - vUv.y);
+        vec4 tx = texture(uTex, vUv);   // premultiplied: the logo's own colours
+        float a = tx.a;
+        // the sweep runs left to right
+        float s = vUv.x;
         float shown = smoothstep(uA, uA - 0.12, s);
         float band = exp(-pow((s - uA) / 0.035, 2.0));
         // glow from blurred mip levels: only where the logo has been drawn
         float halo = textureLod(uTex, vUv, 4.0).a * 0.55 + textureLod(uTex, vUv, 6.0).a * 0.8;
-        vec3 line = vec3(1.0) * a * shown + vec3(0.75, 0.88, 1.0) * a * band * 2.2;
+        vec3 line = tx.rgb * 1.25 * shown + vec3(0.75, 0.88, 1.0) * a * band * 2.2;
         vec3 glow = vec3(0.45, 0.55, 1.0) * halo * uB * shown;
         float alpha = clamp(a * shown + a * band, 0.0, 1.0);
         fragColor = vec4((line + glow) * uAlpha, alpha * uAlpha);
