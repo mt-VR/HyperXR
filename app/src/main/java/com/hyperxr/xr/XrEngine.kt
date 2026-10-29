@@ -429,6 +429,13 @@ class XrEngine(
             if (settings.controllers.showHandsWithController) held.holdingHand(input.controllers[i].pose, i == 1, drawnHands[i])
             else drawnHands[i].state = com.hyperxr.handtracking.TrackingState.NOT_TRACKED
         }
+        // in VR (no camera image behind) the hands are solid hands with their arms
+        run {
+            val cam: CameraImageSource? = arCore ?: passthrough
+            val overCam = cam != null && cam.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill
+            realHandsDrawn = !overCam && settings.handTracking.handVisual == com.hyperxr.settings.HandVisual.AURA && input.handsAvailable
+            if (realHandsDrawn) realHand.submit(scene, renderer, drawnHands, input.head)
+        }
         if (bootActive) {
             val handsReady = !input.handsAvailable || hands.backendInUse != "-"
             boot.readiness = if (handsReady && ctx.frameIndex > 30) 1f else 0.4f
@@ -548,7 +555,7 @@ class XrEngine(
             // over the passthrough, each hand is drawn where the camera image shows it (exact size
             // and place); in a virtual environment, or without a fresh image, from the 3D hand
             val overCamera = camera != null && camera.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill
-            if (!overCamera) aura.render(handList, eye, target.fbo, target.width, target.height)
+            if (!overCamera) { if (!realHandsDrawn) aura.render(handList, eye, target.fbo, target.width, target.height) }
             else for (h in drawnHands) {
                 if (!h.isUsable) continue
                 if (hands.imageHand(h.handedness, imgHand, System.nanoTime() - DISPLAYED_CAMERA_AGE_NS) && imageToEye(imgHand, eye, camera!!, target.width, target.height)) {
@@ -567,6 +574,8 @@ class XrEngine(
     }
 
     private val drawnHands = arrayOf(HandState(Handedness.LEFT), HandState(Handedness.RIGHT))
+    private val realHand = RealHand()
+    private var realHandsDrawn = false
     private val imgHand = FloatArray(com.hyperxr.handtracking.HandJoint.COUNT * 2)
     private val eyePx = FloatArray(com.hyperxr.handtracking.HandJoint.COUNT * 2)
     private val single = arrayListOf(drawnHands[0])

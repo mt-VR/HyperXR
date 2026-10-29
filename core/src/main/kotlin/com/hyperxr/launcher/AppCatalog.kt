@@ -58,7 +58,11 @@ object IconLibrary {
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
         "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb", "qg_macacada", "qg_babuino", "qg_expediente",
-        "mc_questcraft", "mc_gorillacraft", "shop", "people", "missions",
+        "qg_neonrail", "qg_orbs", "qg_shapewall", "qg_drumboat", "qg_fittargets", "qg_domeracket", "qg_archery", "qg_slingshot",
+        "qg_basketball", "qg_bowling", "qg_darts", "qg_dodgeball", "qg_zombieyard", "qg_saber", "qg_spells", "qg_skeet",
+        "qg_paintball", "qg_zerog", "qg_bomb", "qg_spydesk", "qg_pieces", "qg_cubes", "qg_fallingblocks", "qg_tinytown",
+        "qg_dungeon", "qg_sketch", "qg_kayak", "qg_wingsuit", "qg_tableracing", "qg_jewelthief",
+        "mc_questcraft", "mc_gorillacraft", "shop", "people", "missions", "library", "vrmode", "voice",
     )
 
     fun isProvided(key: String?) = key != null && (key in PROVIDED || key in LIBRARY)
@@ -143,7 +147,7 @@ object BuiltinApps {
             limitations = "Precisa de uma conta Microsoft com o Minecraft Java; instale e entre na conta em Configurações 2D > Minecraft"),
     ) + com.hyperxr.questgames.QuestGameCatalog.games.map { g ->
         AppEntry("game:${g.id}", g.title, AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "qg_${g.id}", g.id,
-            runtime = "HyperMagic (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id in setOf("climb", "macacada", "babuino", "expediente", "slowtime")) "Mãos ou controle" else "Só as mãos (hand tracking)",
+            runtime = "HyperMagic (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id in com.hyperxr.questgames.QuestGameCatalog.controllerToo) "Mãos ou controle" else "Só as mãos (hand tracking)",
             limitations = "${g.howTo}. Inspirado em ${g.inspiredBy}; modelos 3D da Kenney (CC0)")
     } + listOf(
         AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, "youtube", "https://m.youtube.com"),

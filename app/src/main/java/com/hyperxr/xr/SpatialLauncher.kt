@@ -109,7 +109,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // ---------------------------------------------------------------- catalog
     private var appsCache: List<AppEntry> = BuiltinApps.all
     private val surfaces = ArrayList<InteractionSurface>()
-    override fun allApps(): List<AppEntry> = appsCache
+    override fun allApps(): List<AppEntry> = appsCache.filter { com.hyperxr.launcher.GameInstalls.visible(it) }
+    /** Everything, downloaded or not (the store). */
+    fun catalogApps(): List<AppEntry> = appsCache
     override fun icons(): IconFactory = ctx.icons
 
     private fun refreshInstalled() {
@@ -679,7 +681,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "share" -> com.hyperxr.share.SharePanel(ctx.share, activity) { capture() }
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
             "opengames" -> com.hyperxr.files.OpenGamesPanel(this) { url -> openBrowser(url, false) }
-            "loja" -> StorePanel(this, this) { url -> openBrowser(url, false) }
+            "loja" -> StorePanel(this, this, { catalogApps() }) { url -> openBrowser(url, false) }
             "people" -> PeoplePanel(this, this)
             "missions" -> MissionsPanel()
             "youtube" -> com.hyperxr.ytxr.YouTubePanel(this)
@@ -1373,7 +1375,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     // ---------------------------------------------------------------- LauncherActions
     override fun launch(app: AppEntry) {
-        libraryShown = false  // the library opened from the taskbar gives way to what was launched
+        libraryShown = false
+        // a game that was not downloaded yet opens the store
+        if (!com.hyperxr.launcher.GameInstalls.visible(app)) { openSystem("loja"); return }  // the library opened from the taskbar gives way to what was launched
         this.app.settings.update { it.copy(launcher = model.recordLaunch(it.launcher, app.id)) }
         when (app.kind) {
             AppKind.HYPERX_PACKAGE -> {

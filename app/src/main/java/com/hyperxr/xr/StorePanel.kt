@@ -29,8 +29,11 @@ import com.hyperxr.xrapps.PartnerGames
 class StorePanel(
     private val a: LauncherActions,
     private val host: MediaHost,
+    /** Every app and game, downloaded or not. */
+    private val catalog: () -> List<AppEntry>,
     private val openUrl: (String) -> Unit,
 ) : XrPanel(1.62f, 1.08f, title = "Loja") {
+    @Volatile private var installing: String? = null
 
     /** One thing in the store. */
     private class Item(
@@ -58,10 +61,10 @@ class StorePanel(
     )
 
     private fun build(): List<Row> {
-        val all = a.allApps()
+        val all = catalog()
         val byId = all.associateBy { it.id }
         val recents = HyperXRApp.instance.settings.current.launcher.recents.mapNotNull { byId[it] }
-            .filter { it.kind != AppKind.UNAVAILABLE }.take(10)
+            .filter { it.kind != AppKind.UNAVAILABLE && com.hyperxr.launcher.GameInstalls.visible(it) }.take(10)
         val games = all.filter { it.category == AppCategory.HYPERXR_GAME && it.kind == AppKind.SYSTEM_PANEL && !it.id.startsWith("game:questcraft") && !it.id.startsWith("game:gorillacraft") && it.target != "opengames" && it.target != "emulators" }
         val minecraft = listOfNotNull(byId["game:questcraft"], byId["game:gorillacraft"])
         val installedXr = all.filter { it.kind == AppKind.ANDROID_PACKAGE && (it.category == AppCategory.OPENXR || it.category == AppCategory.CARDBOARD) }
@@ -77,8 +80,8 @@ class StorePanel(
         }
         return listOfNotNull(
             Row("Continue jogando", recents.map { entryItem(it, "Abrir") }).takeIf { it.items.isNotEmpty() },
-            Row("Jogos HyperMagic", games.map { entryItem(it, "Grátis • Já instalado") }),
-            Row("Minecraft Java", minecraft.map { entryItem(it, "Grátis com a sua conta Minecraft") }).takeIf { it.items.isNotEmpty() },
+            Row("Jogos HyperMagic", games.map { entryItem(it, gameSub(it)) }),
+            Row("Minecraft Java", minecraft.map { entryItem(it, gameSub(it) + " · com a sua conta Minecraft") }).takeIf { it.items.isNotEmpty() },
             Row("OpenXR e Cardboard: parceiros e open source", partners + open),
             Row("Instalados no celular", installedXr.map { entryItem(it, "Instalado") }).takeIf { it.items.isNotEmpty() },
             Row("Vídeo, web e mais", media.map { entryItem(it, "Grátis • Já instalado") }),
@@ -171,8 +174,13 @@ class StorePanel(
         y += c.label(it.title, rx, y, 50f, XrTheme.text, bold = true, maxWidth = rw, maxLines = 2) + 10f
         y += c.label(it.subtitle, rx, y, 26f, XrTheme.textDim, maxWidth = rw) + 30f
         val (label, act) = mainAction(it)
-        c.button("main", if (busy) "Aguarde…" else label, rx, y, rw, 92f, accent = true, enabled = !busy) { act() }
+        c.button("main", if (busy) "Aguarde…" else label, rx, y, rw, 92f, accent = true, enabled = !busy && installing == null) { act() }
         y += 120f
+        val e = it.entry
+        if (e != null && com.hyperxr.launcher.GameInstalls.isGame(e) && com.hyperxr.launcher.GameInstalls.installed(e.id)) {
+            c.button("remove", "Desinstalar", rx, y - 16f, rw, 64f) { com.hyperxr.launcher.GameInstalls.uninstall(e.id); status = "${e.title} removido (o progresso fica salvo)"; builtAt = 0L }
+            y += 70f
+        }
         for ((k, v) in it.facts) {
             c.label(k, rx, y, 22f, XrTheme.textDim, maxWidth = rw)
             y += 30f
@@ -182,8 +190,21 @@ class StorePanel(
         c.label(it.description.ifEmpty { "Sem descrição." }, c.pad, top + ch + 30f, 28f, XrTheme.textDim, maxWidth = cw, maxLines = 8)
     }
 
+    private fun gameSub(e: AppEntry) = if (com.hyperxr.launcher.GameInstalls.installed(e.id)) "Instalado" else "Grátis • Baixar"
+
     private fun mainAction(it: Item): Pair<String, () -> Unit> {
         it.entry?.let { e ->
+            if (com.hyperxr.launcher.GameInstalls.isGame(e) && !com.hyperxr.launcher.GameInstalls.installed(e.id)) {
+                return (if (installing == e.id) "Instalando…" else "Baixar") to {
+                    // the game is inside HyperMagic already: installing puts it in the library
+                    installing = e.id; dirty = true
+                    Thread {
+                        Thread.sleep(900)
+                        com.hyperxr.launcher.GameInstalls.install(e.id)
+                        installing = null; status = "${e.title} instalado: está na Biblioteca"; builtAt = 0L; dirty = true
+                    }.start()
+                }
+            }
             return (if (e.category == AppCategory.HYPERXR_GAME) "Jogar" else "Abrir") to { a.launch(e) }
         }
         it.partner?.let { g ->

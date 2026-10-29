@@ -2,8 +2,8 @@ package com.hyperxr.questgames
 
 /**
  * HyperXR's games inspired by famous Quest games: the mechanics only (names, rules, art
- * and code are HyperXR's own; 3D models from Kenney's CC0 kits). Five play with the hands
- * alone, five need a controller (Joy-Con, the HyperConnect phone or a Bluetooth gamepad).
+ * and code are HyperXR's own; 3D models from Kenney's CC0 kits). Most play with the hands
+ * alone; some need a controller (Joy-Con, the HyperConnect phone or a Bluetooth gamepad).
  */
 object QuestGameCatalog {
     class Info(val id: String, val title: String, val inspiredBy: String, val controller: Boolean, val icon: String, val howTo: String)
@@ -37,7 +37,70 @@ object QuestGameCatalog {
             "Terror na floresta à noite: ache 8 bananas andando com os braços; se o babuíno te ver, suba numa árvore"),
         Info("expediente", "Expediente", "Job Simulator", false, "work",
             "Um emprego para um chefe robô: feche a mão para pegar, abra para soltar ou jogar; café, lixo, lanche, fruta e o botão vermelho"),
+        Info("neonrail", "Ritmo Neon", "Pistol Whip", false, "graphic_eq",
+            "Atire nos inimigos no ritmo da música (pinça apontando o dedo ou gatilho) e incline o corpo para desviar dos tiros"),
+        Info("orbs", "Orbes", "Synth Riders", false, "bubble_chart",
+            "Encoste nos orbes que vêm pelas trilhas: azuis com a mão esquerda, rosa com a direita"),
+        Info("shapewall", "Formas na Parede", "OhShape", false, "accessibility_new",
+            "Encaixe a cabeça e as mãos nos buracos das paredes que chegam; soque os blocos laranja"),
+        Info("drumboat", "Tambores do Norte", "Ragnarock", false, "sailing",
+            "Bata no tambor quando a runa chegar nele; acertos em sequência fazem o barco remar mais rápido"),
+        Info("fittargets", "Treino de Alvos", "FitXR / Supernatural", false, "fitness_center",
+            "Soque os alvos (azul com a esquerda, verde com a direita) e agache nas barras vermelhas"),
+        Info("domeracket", "Raquete Cósmica", "Racket: Nx", false, "sports_handball",
+            "Bata na bola com a palma da mão para quebrar os painéis brilhantes da cúpula"),
+        Info("archery", "Arqueiro", "In Death / Elven Assassin", false, "target",
+            "Mão esquerda segura o arco; faça a pinça com a direita perto da corda, puxe e solte"),
+        Info("slingshot", "Estilingue", "jogos de estilingue e torres", false, "scatter_plot",
+            "Faça a pinça no elástico, puxe para trás e solte para derrubar as torres"),
+        Info("basketball", "Basquete", "Hoops VR / Gym Class", false, "sports_basketball",
+            "Pegue uma bola (feche a mão) e arremesse na cesta; 60 segundos"),
+        Info("bowling", "Boliche", "Premium Bowling", false, "adjust",
+            "Pegue a bola, balance o braço e solte perto do chão para derrubar os pinos"),
+        Info("darts", "Dardos", "jogos de dardos de bar", false, "ads_click",
+            "Pegue um dardo com a pinça e arremesse no alvo; de 301 até zero"),
+        Info("dodgeball", "Queimada", "Dodgeball VR", false, "sports_volleyball",
+            "Desvie das bolas com o corpo; feche a mão para pegar uma e jogue de volta nos robôs"),
+        Info("zombieyard", "Quintal dos Zumbis", "Arizona Sunshine", false, "skull",
+            "Defenda o quintal: atire nos zumbis (pinça ou gatilho); tiro na cabeça derruba de uma vez"),
+        Info("saber", "Sabre de Energia", "Vader Immortal (treino)", false, "swords",
+            "Feche a mão para acender a lâmina e rebata os tiros do drone de volta nele"),
+        Info("spells", "Feitiços", "Waltz of the Wizard", false, "auto_fix_high",
+            "Palma aberta para cima faz uma bola de fogo, jogue nos cristais; a pinça solta um raio de gelo"),
+        Info("skeet", "Tiro ao Prato", "jogos de tiro ao prato", false, "track_changes",
+            "Os pratos voam pelo campo: atire neles no ar (pinça ou gatilho); 15 lançamentos"),
+        Info("paintball", "Paintball", "jogos de paintball em VR", false, "palette",
+            "Atire nos robôs quando aparecerem e agache atrás do barril para se proteger"),
+        Info("zerog", "Gravidade Zero", "Echo VR", false, "satellite_alt",
+            "Flutue na arena: empurre as paredes com as mãos, pegue o disco e jogue no gol"),
+        Info("bomb", "Bomba!", "Keep Talking and Nobody Explodes", false, "timer",
+            "Leia as regras do cartão, corte o fio certo e aperte os botões na ordem antes do tempo acabar"),
+        Info("spydesk", "Cofre do Espião", "I Expect You To Die", false, "lock",
+            "Mexa nas coisas da mesa, ache o código e abra o cofre antes que o gás encha a sala"),
+        Info("pieces", "Peças no Lugar", "jogos de montar em VR", false, "extension",
+            "Pegue cada peça e leve até a sombra dela para encaixar a casinha"),
+        Info("cubes", "Cubos", "Cubism", false, "deployed_code",
+            "Encha a caixa brilhante com as peças, sem sobrar espaço"),
+        Info("fallingblocks", "Blocos que Caem", "Tetris Effect", false, "view_quilt",
+            "Mão para os lados move a peça, pinça gira, empurrar para baixo derruba; complete linhas"),
+        Info("tinytown", "Cidadezinha", "jogos de construir cidade na mesa", false, "location_city",
+            "Escolha Rua, Casa, Loja ou Parque e toque num lote para construir; casas precisam de rua"),
+        Info("dungeon", "Masmorra de Mesa", "Demeo", false, "castle",
+            "Toque uma casa vizinha ao herói para andar e um goblin vizinho para atacar; chegue à saída dourada"),
+        Info("sketch", "Traços de Luz", "Gravity Sketch", false, "draw",
+            "Passe a ponta do dedo pelos pontos em ordem para desenhar cada forma; a pinça deixa rastro de luz"),
+        Info("kayak", "Caiaque", "Kayak VR: Mirage", false, "kayaking",
+            "Reme puxando a mão para trás perto da água e passe pelos portões de boias"),
+        Info("wingsuit", "Voo Livre", "jogos de wingsuit em VR", false, "paragliding",
+            "Braços abertos planam, fechados mergulham; baixe um braço para virar e passe pelos anéis"),
+        Info("tableracing", "Corrida de Mesa", "Mini Motor Racing X", false, "directions_car",
+            "Pinça (ou gatilho) acelera e a mão para os lados vira; 3 voltas contra o carro vermelho"),
+        Info("jewelthief", "Ladrão de Joias", "Thief Simulator VR", false, "diamond",
+            "Pegue as joias e solte na bolsa sem encostar nos lasers que se movem"),
     )
 
     val ids = games.map { it.id }.toSet()
+
+    /** Games that also play with a controller (the trigger grabs, shoots or touches). */
+    val controllerToo = setOf("climb", "macacada", "babuino", "expediente", "slowtime", "neonrail", "drumboat", "domeracket", "slingshot", "basketball", "bowling", "darts", "dodgeball", "zombieyard", "saber", "skeet", "paintball", "zerog", "bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon", "sketch", "kayak", "wingsuit", "tableracing", "jewelthief")
 }
