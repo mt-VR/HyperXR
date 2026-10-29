@@ -46,10 +46,10 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The XR launcher, laid out like the Quest home. New mode: the app library floats in front of the
- * user with the taskbar under it. Dock mode: windows side by side over the taskbar; the library
- * opens from the taskbar. Both modes share the window manager (system panels, spatial web apps,
- * Android apps) and the pointer stack.
+ * The XR launcher, in two interfaces. Hyper (HyperMagic's own): windows side by side over the
+ * dock; the library opens from the dock. Meta (like Meta Horizon OS): the library floats in front
+ * of the user as home, with the bar of round buttons under it. Both share the window manager
+ * (system panels, spatial web apps, Android apps) and the pointer stack.
  */
 class SpatialLauncher(override val activity: android.app.Activity, private val root: android.widget.FrameLayout) : XrContent, LauncherActions, BrowserUiHost, com.hyperxr.files.MediaHost, WorkspaceHost {
     private val app = HyperXRApp.instance
@@ -78,8 +78,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var restored = false
     private var lastSessionJson = ""
     private var keyboard: KeyboardPanel? = null
-    private lateinit var library: LibraryHomePanel
-    private lateinit var taskbar: TaskbarPanel
+    // the Hyper interface's library and dock, and the Meta interface's (LauncherMode)
+    private lateinit var hyperLibrary: LibraryHomePanel
+    private lateinit var hyperDock: TaskbarPanel
+    private lateinit var metaLibrary: MetaLibraryPanel
+    private lateinit var metaDock: MetaDockPanel
+    private val library: XrPanel get() = if (mode() == LauncherMode.META) metaLibrary else hyperLibrary
+    private val taskbar: XrPanel get() = if (mode() == LauncherMode.META) metaDock else hyperDock
     /** Library opened from the taskbar (Dock mode, or over windows in New mode). */
     private var libraryShown = false
     /** App-to-World: apps as objects around the user. */
@@ -129,8 +134,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         this.ctx = ctx
         app.packages.installBundled()
         refreshInstalled()
-        library = LibraryHomePanel(this, asWindow = false)
-        taskbar = TaskbarPanel(this)
+        hyperLibrary = LibraryHomePanel(this, asWindow = false)
+        hyperDock = TaskbarPanel(this)
+        metaLibrary = MetaLibraryPanel(this)
+        metaDock = MetaDockPanel(this)
         appWorld = com.hyperxr.appworld.AppWorld(ctx, this, this)
         ctx.ui { com.hyperxr.appworld.MediaHub.start(activity) }
         reticleTex = Gl.uploadBitmap(reticleBitmap())
@@ -148,7 +155,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun onPause() { ocean?.onPause() }
 
     override fun onGlRelease() {
-        (windows + library + taskbar).forEach { it.release() }
+        (windows + listOf(hyperLibrary, hyperDock, metaLibrary, metaDock)).forEach { it.release() }
         handToolsOrNull?.release()
         assistantOrNull?.release()
         if (::appWorld.isInitialized) appWorld.release()
@@ -193,8 +200,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         surfaces.clear()
         // inside a 360 photo/video only the taskbar and the open panels stay
         val immersiveMedia = ctx.renderer.immersive != null
-        // New mode: the library is home while no window is open; otherwise it opens from the taskbar
-        val showLibrary = !immersiveMedia && (libraryShown || (game == null && s.launcher.mode == LauncherMode.NEW && !windowsShown))
+        // Meta interface: the library is home while no window is open; otherwise it opens from the bar
+        val showLibrary = !immersiveMedia && (libraryShown || (game == null && s.launcher.mode == LauncherMode.META && !windowsShown))
         if (!showLibrary && libraryShown) libraryShown = false
         if (showLibrary) surfaces += library
         surfaces += taskbar
@@ -255,10 +262,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         placeLibraryHome(head)
         appWorld.anchorTo(head, anchorYaw)
         val k = uiFar()
-        taskbar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f * k, head.position.y - 0.5f * k, head.position.z - cos(anchorYaw) * 1.2f * k)
-        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, taskbar.pose.orientation)
-        // tilt the taskbar up towards the eyes
-        taskbar.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), taskbar.pose.orientation)
+        // both interfaces' bars, so switching keeps them in place
+        for (bar in listOf(hyperDock, metaDock)) {
+            bar.pose.position.set(head.position.x - sin(anchorYaw) * 1.2f * k, head.position.y - 0.5f * k, head.position.z - cos(anchorYaw) * 1.2f * k)
+            Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, bar.pose.orientation)
+            // tilt the bar up towards the eyes
+            bar.pose.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, -0.35f), bar.pose.orientation)
+        }
     }
 
     private fun faceTowards(p: Pose, eye: Vec3) {
@@ -270,11 +280,13 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         p.orientation.mul(Quat.fromAxisAngle(1f, 0f, 0f, pitch), p.orientation)
     }
 
-    /** The library as New mode's home: straight ahead of the launcher anchor, a little above the taskbar. */
+    /** The library as the Meta interface's home: straight ahead of the launcher anchor, a little above the bar. */
     private fun placeLibraryHome(head: Pose) {
         val k = uiFar()
-        library.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f * k, head.position.y + 0.06f * k, head.position.z - cos(anchorYaw) * 1.55f * k)
-        Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, library.pose.orientation)
+        for (lib in listOf(hyperLibrary, metaLibrary)) {
+            lib.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f * k, head.position.y + 0.06f * k, head.position.z - cos(anchorYaw) * 1.55f * k)
+            Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, lib.pose.orientation)
+        }
     }
 
     // ---------------------------------------------------------------- pointers
@@ -1209,7 +1221,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         return com.hyperxr.assistant.RuntimeSnapshot(
             xrMode = modeDescription, tracking = trackingDescription, hands = handStatus,
             background = when (backgroundChoice()) { "camera" -> "câmera"; "dim" -> "câmera escurecida"; else -> app.environments.installed().firstOrNull { it.id == currentEnvId }?.name ?: currentEnvId },
-            launcherMode = if (mode() == LauncherMode.DOCK) "dock" else "new",
+            launcherMode = if (mode() == LauncherMode.HYPER) "hyper" else "meta",
             battery = batteryText(),
             windows = appWindows.map { w -> if (w is com.hyperxr.browser.BrowserWindow) "${w.title} (${w.tabs.size} abas)" else w.title },
             windowsHidden = windowsMinimized,
@@ -1254,7 +1266,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             is com.hyperxr.voice.VoiceCommand.Background -> setBackgroundChoice(cmd.choice)
             is com.hyperxr.voice.VoiceCommand.SaveWorkspace -> if (!saveWorkspace(cmd.name)) voiceSay("Nenhuma janela aberta para salvar")
             is com.hyperxr.voice.VoiceCommand.OpenWorkspace -> if (workspaces.load(cmd.name) != null) openWorkspace(cmd.name) else voiceSay("Espaço \"${cmd.name}\" não existe")
-            is com.hyperxr.voice.VoiceCommand.SetMode -> setMode(if (cmd.dock) LauncherMode.DOCK else LauncherMode.NEW)
+            is com.hyperxr.voice.VoiceCommand.SetMode -> setMode(if (cmd.dock) LauncherMode.HYPER else LauncherMode.META)
             com.hyperxr.voice.VoiceCommand.Recenter -> recenter()
             com.hyperxr.voice.VoiceCommand.Capture -> capture()
             com.hyperxr.voice.VoiceCommand.CloseWindows -> pendingClose += appWindows
@@ -1348,10 +1360,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
 
     override fun pinnedApps(): List<AppEntry> = model.dockApps(app.settings.current.launcher)
-    override fun libraryOpen(): Boolean = libraryShown || (mode() == LauncherMode.NEW && (windowsMinimized || appWindows.none { it.visible }))
+    override fun libraryOpen(): Boolean = libraryShown || (mode() == LauncherMode.META && (windowsMinimized || appWindows.none { it.visible }))
     override fun toggleLibrary() {
         if (libraryOpen()) {
-            // in New mode with nothing open the library is home: hide the windows' absence instead
+            // in the Meta interface with nothing open the library is home: bring the windows back instead
             if (libraryShown) libraryShown = false else if (appWindows.isNotEmpty()) windowsMinimized = false
             return
         }
@@ -1404,7 +1416,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun setMode(mode: LauncherMode) {
         app.settings.setLauncherMode(mode); taskbar.dirty = true
         libraryShown = false
-        if (mode == LauncherMode.NEW) placeLibraryHome(ctx.input.head)
+        if (mode == LauncherMode.META) placeLibraryHome(ctx.input.head)
     }
     override fun mode(): LauncherMode = app.settings.current.launcher.mode
     override fun recenter() { ctx.requestRecenter(); anchored = false }

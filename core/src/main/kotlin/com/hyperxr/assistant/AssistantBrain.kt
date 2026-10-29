@@ -168,7 +168,7 @@ object AssistantBrain {
         }
         is VoiceCommand.SaveWorkspace -> "Salvando o espaço \"${c.name}\"."
         is VoiceCommand.OpenWorkspace -> "Abrindo o espaço \"${c.name}\"."
-        is VoiceCommand.SetMode -> if (c.dock) "Modo Dock." else "Modo New."
+        is VoiceCommand.SetMode -> if (c.dock) "Interface Hyper." else "Interface Meta."
         is VoiceCommand.Setting -> "Ajuste ${c.key} = ${c.value}."
         VoiceCommand.Recenter -> "Visão recentralizada."
         VoiceCommand.Capture -> "Captura feita."
@@ -223,7 +223,7 @@ object AssistantBrain {
                 "escurecer", "escuro", "dim" -> VoiceCommand.Background("dim")
                 else -> VoiceCommands.closest(arg, s.environments)?.let { VoiceCommand.Background(it.id) }
             }
-            "modo" -> when (VoiceCommands.normalize(arg)) { "dock" -> VoiceCommand.SetMode(true); "new", "novo" -> VoiceCommand.SetMode(false); else -> null }
+            "modo" -> when (VoiceCommands.normalize(arg)) { "hyper", "dock" -> VoiceCommand.SetMode(true); "meta", "new", "novo" -> VoiceCommand.SetMode(false); else -> null }
             "recentralizar" -> VoiceCommand.Recenter
             "capturar" -> VoiceCommand.Capture
             "fechar_janelas" -> VoiceCommand.CloseWindows
@@ -279,7 +279,7 @@ object AssistantBrain {
                 VoiceCommand.HideWindows -> said("escond", "minimiz", "ocult")
                 is VoiceCommand.OpenWorkspace -> said("espac", "workspace")
                 is VoiceCommand.SaveWorkspace -> said("salv", "guard") && said("espac", "workspace")
-                is VoiceCommand.SetMode -> said("modo", "dock", "new")
+                is VoiceCommand.SetMode -> said("modo", "hyper", "meta")
                 VoiceCommand.Capture -> said("captur", "print", "foto", "screenshot")
                 is VoiceCommand.Record -> said("grav")
                 is VoiceCommand.Setting -> said(*SETTING_WORDS.getValue(a.key))

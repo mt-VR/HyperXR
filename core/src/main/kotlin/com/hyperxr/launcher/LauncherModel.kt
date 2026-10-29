@@ -31,7 +31,7 @@ class LauncherModel(private val catalog: () -> List<AppEntry>) {
         s.copy(recents = (listOf(id) + (s.recents - id)).take(MAX_RECENTS))
 
     fun toggleMode(s: LauncherSettings): LauncherSettings =
-        s.copy(mode = if (s.mode == LauncherMode.DOCK) LauncherMode.NEW else LauncherMode.DOCK)
+        s.copy(mode = if (s.mode == LauncherMode.HYPER) LauncherMode.META else LauncherMode.HYPER)
 
     fun dockApps(s: LauncherSettings): List<AppEntry> {
         val all = catalog().associateBy { it.id }

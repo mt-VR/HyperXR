@@ -71,10 +71,10 @@ fun HomeSection(a: MainActivity) {
 fun LauncherSection(a: MainActivity) {
     val s = a.settingsState.launcher
     val model = remember { LauncherModel { BuiltinApps.all } }
-    SectionCard("Estilo do launcher", "A mesma preferência pode ser trocada dentro do XR (Ajustes rápidos ou barra da dock).") {
-        Segmented(listOf("DOCK" to "Dock", "NEW" to "New"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
-        Note(if (s.mode == LauncherMode.DOCK) "Dock: janelas lado a lado sobre a barra de tarefas (relógio, apps fixados, Biblioteca, Ajustes)."
-        else "New: a Biblioteca fica à sua frente (fundo, pesquisa, categorias, grade de apps) com a barra de tarefas embaixo. Segure um app para fixá-lo na barra.")
+    SectionCard("Interface", "A mesma escolha pode ser trocada dentro do XR, em Ajustes, ou dizendo \"modo meta\" ou \"modo hyper\".") {
+        Segmented(listOf("HYPER" to "Hyper", "META" to "Meta"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
+        Note(if (s.mode == LauncherMode.HYPER) "Hyper: a interface do HyperMagic. Janelas lado a lado sobre a dock (relógio, Missões, Loja, Pessoas, apps fixados, Ajustes rápidos, Biblioteca); a Biblioteca abre pela dock."
+        else "Meta: como o Meta Horizon OS. A Biblioteca fica à sua frente, com a lista à esquerda, a grade de ícones e o filtro e a ordem à direita; embaixo, a barra de botões redondos com a hora, o Wi-Fi e a bateria. Sem dock: segure um app para fixá-lo no topo da Biblioteca.")
         ToggleRow("Reabrir janelas ao entrar no XR", s.restoreWindows, "Abas do navegador e apps Android abertos voltam onde estavam") { v ->
             a.update { it.copy(launcher = it.launcher.copy(restoreWindows = v)) }
         }

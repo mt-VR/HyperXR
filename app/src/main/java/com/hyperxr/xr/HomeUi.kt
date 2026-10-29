@@ -22,7 +22,7 @@ internal fun batteryText(): String {
 }
 
 /**
- * The app library (the home of New mode, a window in Dock mode), laid out like a headset's App
+ * The Hyper interface's app library (a window opened from the dock), laid out like a headset's App
  * Library: title, search, filter chips and the count, then a grid of wide tiles. Games show their
  * cover art; apps a coloured tile with their icon and name. Long-press a tile to pin it to the dock.
  */

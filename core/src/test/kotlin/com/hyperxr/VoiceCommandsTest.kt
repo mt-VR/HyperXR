@@ -22,6 +22,8 @@ class VoiceCommandsTest {
     @Test fun launcherCommands() {
         assertEquals(VoiceCommand.SetMode(true), p("modo dock"))
         assertEquals(VoiceCommand.SetMode(false), p("Modo New"))
+        assertEquals(VoiceCommand.SetMode(true), p("modo hyper"))
+        assertEquals(VoiceCommand.SetMode(false), p("interface Meta"))
         assertEquals(VoiceCommand.Recenter, p("recentralizar"))
         assertEquals(VoiceCommand.CloseWindows, p("fechar todas as janelas"))
         assertEquals(VoiceCommand.Background("dim"), p("escurecer"))

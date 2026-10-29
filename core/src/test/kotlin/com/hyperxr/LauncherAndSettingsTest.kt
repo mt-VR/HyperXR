@@ -20,9 +20,9 @@ class LauncherAndSettingsTest {
     @Test fun modeSurvivesRestart() {
         val dir = Files.createTempDirectory("hx").toFile()
         val file = File(dir, "settings.json")
-        SettingsRepository(FileSettingsStorage(file)).setLauncherMode(LauncherMode.NEW)
+        SettingsRepository(FileSettingsStorage(file)).setLauncherMode(LauncherMode.META)
         val reloaded = SettingsRepository(FileSettingsStorage(file))
-        assertEquals(LauncherMode.NEW, reloaded.current.launcher.mode)
+        assertEquals(LauncherMode.META, reloaded.current.launcher.mode)
     }
 
     @Test fun corruptedSettingsFallBackToDefaultsAndReport() {
@@ -31,7 +31,7 @@ class LauncherAndSettingsTest {
             override fun write(content: String) {}
         }
         val repo = SettingsRepository(storage)
-        assertEquals(LauncherMode.DOCK, repo.current.launcher.mode)
+        assertEquals(LauncherMode.HYPER, repo.current.launcher.mode)
         assertNotNull(repo.lastLoadError)
     }
 
@@ -40,7 +40,7 @@ class LauncherAndSettingsTest {
             override fun read() = """{"launcher":{"mode":"NEW"},"futureField":42}"""
             override fun write(content: String) {}
         }
-        assertEquals(LauncherMode.NEW, SettingsRepository(storage).current.launcher.mode)
+        assertEquals(LauncherMode.META, SettingsRepository(storage).current.launcher.mode)
     }
 
     @Test fun listenersSeeChanges() {
@@ -52,7 +52,7 @@ class LauncherAndSettingsTest {
         var seen: LauncherMode? = null
         repo.addListener { seen = it.launcher.mode }
         repo.update { it.copy(launcher = model.toggleMode(it.launcher)) }
-        assertEquals(LauncherMode.NEW, seen)
+        assertEquals(LauncherMode.META, seen)
         assertTrue(mem!!.contains("\"NEW\""))
     }
 

@@ -51,8 +51,8 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
                 settings.update { st -> st.copy(language = langs[(langs.indexOf(com.hyperxr.i18n.Translations.resolve(st.language)) + 1) % langs.size]) }
             },
             Item.Info("Idioma atual") { com.hyperxr.i18n.I18n.LANGUAGES.first { it.first == com.hyperxr.i18n.I18n.language }.second },
-            Item.Toggle("Launcher no modo New", "Biblioteca à frente em vez da barra", { it.launcher.mode == LauncherMode.NEW }) { s, v ->
-                a.setMode(if (v) LauncherMode.NEW else LauncherMode.DOCK); s.copy(launcher = s.launcher.copy(mode = if (v) LauncherMode.NEW else LauncherMode.DOCK)) },
+            Item.Toggle("Interface Meta", "Desligado: interface Hyper (a do HyperMagic)", { it.launcher.mode == LauncherMode.META }) { s, v ->
+                a.setMode(if (v) LauncherMode.META else LauncherMode.HYPER); s.copy(launcher = s.launcher.copy(mode = if (v) LauncherMode.META else LauncherMode.HYPER)) },
             Item.Action("Recentralizar visão", "Traz tudo para a frente de você") { a.recenter() },
             Item.Toggle("Animação de inicialização", "O logo e a viagem pelas estrelas ao abrir", { it.graphics.bootAnimation }) { s, v -> s.copy(graphics = s.graphics.copy(bootAnimation = v)) },
             Item.Toggle("Timewarp", "Reajusta a imagem com o giroscópio antes de mostrar", { it.graphics.timewarp }) { s, v -> s.copy(graphics = s.graphics.copy(timewarp = v)) },

@@ -66,7 +66,7 @@ class UiPreviewTest {
         val all = BuiltinApps.all
         val pinned = all.filter { it.id in setOf("hx:browser", "hx:youtube", "game:rhythm") }
         return fake(LauncherActions::class.java, mapOf(
-            "icons" to icons, "allApps" to all, "pinnedApps" to pinned, "mode" to LauncherMode.NEW,
+            "icons" to icons, "allApps" to all, "pinnedApps" to pinned, "mode" to LauncherMode.META,
             "getModeDescription" to "Modo New • rastreamento 6DoF", "getTrackingDescription" to "6DoF",
             "getHandStatus" to "Mãos: rastreando (NPU)", "getHyperConnectStatus" to "", "vrOn" to true, "vrSwitchable" to true,
             "voiceStatus" to "", "currentEnvironmentId" to "studio", "libraryOpen" to false,
@@ -116,6 +116,9 @@ class UiPreviewTest {
         clickRegion(store2, "shelf:all")
         shot("store_all", store2)
         shot("library", com.hyperxr.xr.LibraryHomePanel(a, false))
+        // the Meta interface: its library and its bar
+        shot("meta_library", com.hyperxr.xr.MetaLibraryPanel(a), hover = 850f to 300f)
+        shot("meta_dock", com.hyperxr.xr.MetaDockPanel(a).also { it.update(0f) }, hover = 740f to 60f)
         for ((name, make) in listOf<Pair<String, () -> XrPanel>>(
             "settings" to { com.hyperxr.xr.SettingsHubPanel(a) {} },
             "people" to { com.hyperxr.xr.PeoplePanel(a, host) },

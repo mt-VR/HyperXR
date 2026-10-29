@@ -9,6 +9,7 @@ sealed class VoiceCommand {
     data class Background(val choice: String) : VoiceCommand()  // "camera", "dim" or an environment id
     data class SaveWorkspace(val name: String) : VoiceCommand()
     data class OpenWorkspace(val name: String) : VoiceCommand()
+    /** [dock] true: the Hyper interface; false: the Meta one. */
     data class SetMode(val dock: Boolean) : VoiceCommand()
     object Recenter : VoiceCommand()
     object Capture : VoiceCommand()
@@ -63,7 +64,7 @@ object VoiceCommands {
         if (has("fechar", "fecha", "feche") && has("janela", "janelas", "tudo")) return VoiceCommand.CloseWindows
         if (has("esconder", "esconde", "minimizar", "ocultar") && has("janela", "janelas")) return VoiceCommand.HideWindows
         if (has("mostrar", "mostra") && has("janela", "janelas")) return VoiceCommand.ShowWindows
-        if (has("modo")) { if (has("dock", "doca")) return VoiceCommand.SetMode(true); if (has("new", "novo", "nil")) return VoiceCommand.SetMode(false) }
+        if (has("modo", "interface")) { if (has("hyper", "haiper", "dock", "doca")) return VoiceCommand.SetMode(true); if (has("meta", "new", "novo")) return VoiceCommand.SetMode(false) }
         if (has("biblioteca")) return VoiceCommand.Library
         if (has("escurecer", "escuro", "escurece")) return VoiceCommand.Background("dim")
         if (has("camera", "realidade mista", "passthrough")) return VoiceCommand.Background("camera")

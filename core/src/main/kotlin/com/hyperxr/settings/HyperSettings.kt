@@ -1,10 +1,16 @@
 package com.hyperxr.settings
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** Launcher presentation inside the XR session. */
+/**
+ * Launcher look inside the XR session. Hyper: HyperMagic's own (windows side by side over the
+ * dock, the library opens from it). Meta: like Meta Horizon OS (the library is home, in front of
+ * you, with a side list and a grid of icons, and a light round-button dock under it). Saved as the
+ * names of the modes they replace (Dock, New), so settings from older versions still load.
+ */
 @Serializable
-enum class LauncherMode { DOCK, NEW }
+enum class LauncherMode { @SerialName("DOCK") HYPER, @SerialName("NEW") META }
 
 /** Which immersive mode the user prefers; AUTO means "MR when the device really supports it". */
 @Serializable
@@ -184,7 +190,7 @@ data class RuntimeSettings(
 
 @Serializable
 data class LauncherSettings(
-    val mode: LauncherMode = LauncherMode.DOCK,
+    val mode: LauncherMode = LauncherMode.HYPER,
     val pinned: List<String> = DEFAULT_PINNED,
     val recents: List<String> = emptyList(),
     /** New-mode free placement, appId -> [yawDeg, pitchDeg, distanceM]. */
