@@ -201,6 +201,32 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     }
     private val planeInv = Pose(); private val planeTmp = Vec3(); private val planeOut = Vec3()
 
+    /**
+     * The top of the horizontal surface (a table, a desk, the floor) right under the point (x, y,
+     * z), at most [maxDrop] metres below it, in HyperXR's tracking space; NaN when ARCore has found
+     * none there (or plane finding is off: [wantPlanes]).
+     */
+    fun surfaceBelow(x: Float, y: Float, z: Float, maxDrop: Float): Float {
+        val s = session ?: return Float.NaN
+        if (planeUsers.isEmpty()) return Float.NaN
+        // tracking space -> ARCore's, where the planes are
+        origin.transformPoint(planeTmp.set(x, y, z), surfAr)
+        var best = Float.NaN
+        for (p in runCatching { s.getAllTrackables(com.google.ar.core.Plane::class.java) }.getOrDefault(emptyList())) {
+            if (p.trackingState != TrackingState.TRACKING || p.subsumedBy != null) continue
+            if (p.type != com.google.ar.core.Plane.Type.HORIZONTAL_UPWARD_FACING) continue
+            val py = p.centerPose.ty()
+            if (py > surfAr.y + 0.05f || py < surfAr.y - maxDrop) continue
+            if (!best.isNaN() && py <= best) continue
+            if (!runCatching { p.isPoseInPolygon(com.google.ar.core.Pose.makeTranslation(surfAr.x, py, surfAr.z)) }.getOrDefault(false)) continue
+            best = py
+        }
+        if (best.isNaN()) return Float.NaN
+        origin.inverse(planeInv).transformPoint(planeTmp.set(surfAr.x, best, surfAr.z), planeOut)
+        return planeOut.y
+    }
+    private val surfAr = Vec3()
+
     /** Advances ARCore one frame (GL thread). */
     fun update() {
         val s = session ?: return

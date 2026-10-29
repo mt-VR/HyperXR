@@ -75,6 +75,9 @@ fun LauncherSection(a: MainActivity) {
         Segmented(listOf("HYPER" to "Hyper", "META" to "Meta"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
         Note(if (s.mode == LauncherMode.HYPER) "Hyper: a interface do HyperMagic. Janelas lado a lado sobre a dock (relógio, Missões, Loja, Pessoas, apps fixados, Ajustes rápidos, Biblioteca); a Biblioteca abre pela dock."
         else "Meta: como o Meta Horizon OS. A Biblioteca fica à sua frente, com a lista à esquerda, a grade de ícones e o filtro e a ordem à direita; embaixo, a barra de botões redondos com a hora, o Wi-Fi e a bateria. Sem dock: segure um app para fixá-lo no topo da Biblioteca.")
+        ToggleRow("HyperBot", s.hyperBot, "O mascote do HyperMagic: um robozinho azul que fica na sua mesa (com ARCore ele acha o tampo), te acompanha com o olhar, anda, acena, dança com música e fala de vez em quando. Toque nele com a pinça; segure a pinça para mudar de lugar") { v ->
+            a.update { it.copy(launcher = it.launcher.copy(hyperBot = v)) }
+        }
         ToggleRow("Reabrir janelas ao entrar no XR", s.restoreWindows, "Abas do navegador e apps Android abertos voltam onde estavam") { v ->
             a.update { it.copy(launcher = it.launcher.copy(restoreWindows = v)) }
         }

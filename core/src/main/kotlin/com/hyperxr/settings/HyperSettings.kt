@@ -190,6 +190,8 @@ data class RuntimeSettings(
 
 @Serializable
 data class LauncherSettings(
+    /** HyperBot, the little robot on your table (App-to-World). */
+    val hyperBot: Boolean = true,
     val mode: LauncherMode = LauncherMode.HYPER,
     val pinned: List<String> = DEFAULT_PINNED,
     val recents: List<String> = emptyList(),

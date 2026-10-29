@@ -1209,7 +1209,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         if (a.busy) { voiceText = a.status; voiceUntil = System.currentTimeMillis() + 1000; return }
         if (a.version != assistantSeen) {
             assistantSeen = a.version
-            synchronized(a.messages) { a.messages.lastOrNull() }?.takeIf { !it.fromUser }?.let { voiceText = it.text; voiceUntil = System.currentTimeMillis() + 6000 }
+            synchronized(a.messages) { a.messages.lastOrNull() }?.takeIf { !it.fromUser }?.let {
+                voiceText = it.text; voiceUntil = System.currentTimeMillis() + 6000
+                // the HyperBot, when it is on the table, says the answer too
+                if (::appWorld.isInitialized) appWorld.objects.firstNotNullOfOrNull { o -> o as? com.hyperxr.appworld.HyperBot }?.speak(it.text)
+            }
         }
     }
     private val assistantOrNull get() = if (assistantMade) assistant else null

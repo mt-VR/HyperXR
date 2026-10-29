@@ -113,6 +113,7 @@ class AppWorld(private val ctx: XrContext, private val a: LauncherActions, priva
         key == "music" -> MusicObject(this)
         key == "notifications" -> NotificationObject(this)
         key == "shelf" -> ShelfObject(this)
+        key == HyperBot.KEY -> HyperBot(this)
         key.startsWith("portal:") -> a.allApps().firstOrNull { it.id == key.removePrefix("portal:") }?.let { PortalObject(this, it) }
         key.startsWith("app:") -> {
             val pkg = key.removePrefix("app:").substringBefore(':'); val id = key.substringAfterLast(':')
@@ -141,8 +142,35 @@ class AppWorld(private val ctx: XrContext, private val a: LauncherActions, priva
     val hits: List<InteractionSurface> get() = objects.map { it.hit }
 
     fun update(dt: Float) {
+        // things scheduled for later (the HyperBot's chirps)
+        clock += dt
+        if (laterQueue.isNotEmpty()) laterQueue.removeAll { (at, fn) -> if (at <= clock) { fn(); true } else false }
+        syncBot(dt)
         for (o in objects) o.update(dt)
     }
+
+    private var clock = 0f
+    private val laterQueue = ArrayList<Pair<Float, () -> Unit>>()
+    internal fun later(seconds: Float, fn: () -> Unit) { laterQueue += (clock + seconds) to fn }
+
+    /** The HyperBot is on the table while its setting is on (checked once a second). */
+    private var botCheck = 0f
+    private fun syncBot(dt: Float) {
+        botCheck -= dt
+        if (botCheck > 0f || !anchored) return
+        botCheck = 1f
+        val on = app.settings.current.launcher.hyperBot
+        val there = has(HyperBot.KEY)
+        if (on && !there) {
+            // in front of you, a little to the right, at desk height (it finds the table itself)
+            add(HyperBot(this).also { it.slot.set(-18f, 0.55f, -0.42f) }); save()
+        } else if (!on && there) toggle(HyperBot.KEY)
+    }
+
+    internal val input get() = ctx.input
+    internal val audio get() = ctx.audio
+    /** ARCore, when it runs (planes for the table under the HyperBot). */
+    internal val arCore get() = ctx.camera as? com.hyperxr.mixedreality.ArCoreSession
 
     fun submit() {
         val head = ctx.input.head.position

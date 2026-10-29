@@ -51,6 +51,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
                 settings.update { st -> st.copy(language = langs[(langs.indexOf(com.hyperxr.i18n.Translations.resolve(st.language)) + 1) % langs.size]) }
             },
             Item.Info("Idioma atual") { com.hyperxr.i18n.I18n.LANGUAGES.first { it.first == com.hyperxr.i18n.I18n.language }.second },
+            Item.Toggle("HyperBot", "O robozinho na sua mesa", { it.launcher.hyperBot }) { s, v -> s.copy(launcher = s.launcher.copy(hyperBot = v)) },
             Item.Toggle("Interface Meta", "Desligado: interface Hyper (a do HyperMagic)", { it.launcher.mode == LauncherMode.META }) { s, v ->
                 a.setMode(if (v) LauncherMode.META else LauncherMode.HYPER); s.copy(launcher = s.launcher.copy(mode = if (v) LauncherMode.META else LauncherMode.HYPER)) },
             Item.Action("Recentralizar visão", "Traz tudo para a frente de você") { a.recenter() },

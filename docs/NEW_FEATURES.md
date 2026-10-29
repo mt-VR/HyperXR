@@ -432,3 +432,29 @@ Tem chuva, trovões, luz e volume num menu no estilo do painel rápido do Androi
   - sem inferência repetida quando a busca mais larga falha;
   - com uma mão rastreada, a busca pela segunda roda em outra thread, então a mão rastreada não
     espera o detector.
+
+## HyperBot
+
+O mascote do HyperMagic: um robozinho azul de uns 20 cm que fica em cima da sua mesa
+(`app/.../appworld/HyperBot.kt`). Ele é um objeto do App-to-World: a pinça toca nele, segurar a
+pinça muda ele de lugar, e o lugar fica salvo. Liga e desliga em Configurações 2D > Launcher e nos
+Ajustes do XR.
+
+- **Na mesa pela profundidade:** com o ARCore, ele pede os planos horizontais (que o ARCore ajusta
+  com a profundidade) e acha o tampo embaixo dele (`ArCoreSession.surfaceBelow`). Flutua alguns
+  centímetros acima e, quando anda, só vai para pontos onde a mesa continua: nunca cai da beirada.
+  Sem ARCore, flutua onde você o deixar.
+- **Modelo:** feito de formas arredondadas desenhadas pelo próprio app: cabeça azul brilhante com
+  visor escuro e olhos que brilham, antena com a ponta acesa, orelhas com anel de luz, corpo
+  redondo com barriga branca e luz no peito, bracinhos, anel de flutuação e a sombra na mesa.
+- **Animações:** respira e flutua, pisca, segue você com a cabeça e olha em volta, anda pela mesa
+  inclinado, acena, gira, pula, dança quando toca música e dorme (olhos fechados e "zzz").
+- **Reações:**
+  - olhar para ele por um instante: acena e diz oi;
+  - encostar o dedo na cabeça: cócegas, olhos felizes e bochechas coradas;
+  - cutucar a barriga ou passar a mão rápido perto: susto;
+  - tocar com a pinça: gira, conta uma piada ou diz a hora e a bateria.
+- **Falas:** de vez em quando, num balão: bom dia/tarde/noite, dicas, bobagens de robô, mensagens
+  novas e bateria baixa, com bipes. As respostas do assistente de voz também aparecem no balão
+  dele. Tudo traduzido para inglês, espanhol e russo.
+- **Dorme** tarde da noite ou depois de 10 minutos sem atenção; acorda quando você olha ou encosta.
