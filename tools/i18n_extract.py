@@ -70,6 +70,8 @@ def wanted(key, line):
         return False
     if re.search(r'Diagnostics\.log|Log\.[dewiv]\(|println\(|logcat|IllegalStateException|error\("|check\(|require\(', line):
         return False
+    if re.fullmatch(r'[A-Z0-9]+(-[A-Z0-9]+)+', text):
+        return False   # wire-protocol tags: "HXVR-PC"
     if ('_' in text and ' ' not in text) or re.search(r'[\[\]^\\|]|HTTP/|%[0-9.]*[dfs]', text):
         return False
     if re.fullmatch(r'[A-Za-z0-9.+\- ]*[0-9][A-Za-z0-9.+\- ]*', text) and not PT_MARK.search(text):

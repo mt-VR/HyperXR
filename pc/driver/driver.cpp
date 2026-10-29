@@ -26,6 +26,7 @@
 #include "../common/config.h"
 #include "../common/perf.h"
 #include "../common/hxvr_protocol.h"
+#include "../common/discovery.h"
 #include "encoder.h"
 
 using namespace vr;
@@ -123,11 +124,11 @@ private:
     }
 
     /** Outgoing connection to the phone (preferred: the Windows firewall allows it). */
-    SOCKET Dial() {
-        if (phoneIp_.empty()) return INVALID_SOCKET;
+    static SOCKET Dial(const std::string& ip) {
+        if (ip.empty()) return INVALID_SOCKET;
         SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in a = {}; a.sin_family = AF_INET; a.sin_port = htons(hxvr::kPort);
-        if (inet_pton(AF_INET, phoneIp_.c_str(), &a.sin_addr) != 1) { closesocket(s); return INVALID_SOCKET; }
+        if (inet_pton(AF_INET, ip.c_str(), &a.sin_addr) != 1) { closesocket(s); return INVALID_SOCKET; }
         u_long nb = 1; ioctlsocket(s, FIONBIO, &nb);
         connect(s, reinterpret_cast<sockaddr*>(&a), sizeof a);
         fd_set wr; FD_ZERO(&wr); FD_SET(s, &wr);
@@ -163,11 +164,33 @@ private:
         return true;
     }
 
+    /**
+     * Once a second, while no phone is connected: a discovery beacon (the phone's answer gives its
+     * address), and the IP in pc.ini again (the app may have saved a new one since SteamVR started).
+     */
+    void Look() {
+        std::string ip, name;
+        if (discovery_.Poll(150, ip, name) && ip != foundIp_) {
+            foundIp_ = ip;
+            Log("HyperMagic: phone %s found at %s\n", name.c_str(), ip.c_str());
+        }
+        hxvr::Config c; c.Load();
+        phoneIp_ = c.phoneIp;
+        std::string where = !foundIp_.empty() ? "achado na rede em " + foundIp_ + ", conectando"
+                          : !phoneIp_.empty() ? "procurando o celular (" + phoneIp_ + ") e na rede"
+                                              : "procurando o celular na rede";
+        { std::lock_guard<std::mutex> l(g_status.m); g_status.phone = where; }
+        g_status.Write();
+    }
+
     void Run() {
+        double lastLook = -10;
         while (running_) {
-            SOCKET s = Dial();
+            if (NowSeconds() - lastLook > 1.0) { Look(); lastLook = NowSeconds(); }
+            SOCKET s = Dial(foundIp_);
+            if (s == INVALID_SOCKET && phoneIp_ != foundIp_) s = Dial(phoneIp_);
             if (s == INVALID_SOCKET) s = AcceptOne();
-            if (s == INVALID_SOCKET) { std::this_thread::sleep_for(std::chrono::milliseconds(300)); continue; }
+            if (s == INVALID_SOCKET) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); continue; }
             Tune(s);
             { std::lock_guard<std::mutex> l(sendMutex_); sock_ = s; }
             Log("HyperMagic: phone connected\n");
@@ -193,7 +216,8 @@ private:
         }
     }
 
-    std::string phoneIp_;
+    std::string phoneIp_, foundIp_;
+    hxvr::Discovery discovery_;
     std::atomic<bool> running_{false};
     SOCKET sock_ = INVALID_SOCKET;
     SOCKET listen_ = INVALID_SOCKET;

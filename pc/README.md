@@ -10,14 +10,26 @@ Joga jogos do SteamVR no celular com o HyperXR:
 
 1. Extraia o zip inteiro numa pasta fixa. O programa `HyperXR PC.exe` e a pasta `hyperxr` precisam
    ficar juntos.
-2. No celular, abra **HyperXR > SteamVR**. A tela mostra o IP do celular.
-3. No PC, abra **HyperXR PC.exe**, digite o IP do celular e clique em
-   **Conectar e iniciar o SteamVR**.
-4. No celular, digite o IP do PC (aparece no programa do PC), toque em **Conectar** e coloque o
-   celular no VR Box.
+2. No celular, abra **HyperXR > SteamVR**, no mesmo Wi-Fi do PC.
+3. No PC, abra **HyperXR PC.exe** e clique em **Conectar e iniciar o SteamVR**. Não precisa
+   digitar IP: o PC manda um aviso na rede (UDP 9945), o celular responde e o driver liga para o
+   celular. Os IPs digitados continuam valendo, se preferir.
+4. Coloque o celular no VR Box.
 
 Na primeira conexão, o SteamVR reinicia uma vez sozinho para usar a tela e o campo de visão do seu
 celular.
+
+### Se ficar em "Procurando"
+
+O celular agora diz o motivo:
+
+- **nada ouve na porta 9944**: o SteamVR está fechado ou o driver não carregou. O programa do PC
+  avisa quando o SteamVR está aberto sem o driver; o SteamVR desativa drivers depois de um erro, e
+  eles voltam em SteamVR > Configurações > Inicialização/Desligamento > Gerenciar complementos.
+- **sem resposta / firewall**: clique em **Liberar no firewall** no programa do PC (pede
+  administrador uma vez). Redes marcadas como "Pública" no Windows bloqueiam conexões de entrada.
+- **não é alcançável**: celular e PC estão em redes diferentes, ou o roteador isola os clientes
+  (comum em Wi-Fi de visitante). Um cabo de rede no PC no mesmo roteador também serve.
 
 ## Requisitos
 

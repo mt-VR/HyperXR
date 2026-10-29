@@ -6,19 +6,29 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
+#include <atomic>
 #include <cstdio>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../common/config.h"
+#include "../common/discovery.h"
 #include "../common/perf.h"
 
 namespace {
 
-enum { ID_PHONE_IP = 101, ID_BITRATE, ID_START, ID_REMOVE, ID_TIMER, ID_PRESET };
-HWND g_phoneIp, g_bitrate, g_status, g_pcIp, g_preset;
+enum { ID_PHONE_IP = 101, ID_BITRATE, ID_START, ID_REMOVE, ID_TIMER, ID_PRESET, ID_FIREWALL };
+HWND g_phoneIp, g_bitrate, g_status, g_pcIp, g_preset, g_found;
 HFONT g_font, g_bold;
+
+// the phone the discovery thread found (pc/common/discovery.h)
+std::mutex g_foundMutex;
+std::string g_foundIp, g_foundName;
+std::atomic<bool> g_running{true};
 
 std::wstring Widen(const std::string& s) {
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
@@ -129,8 +139,15 @@ bool RegisterDriver(bool add, std::wstring& message) {
     return true;
 }
 
+/** SteamVR's server process, where the driver runs. */
 bool IsSteamVrRunning() {
-    return FindWindowW(nullptr, L"SteamVR Status") != nullptr || FindWindowW(nullptr, L"SteamVR") != nullptr;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return FindWindowW(nullptr, L"SteamVR Status") != nullptr;
+    PROCESSENTRY32W e = {sizeof e};
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &e); ok && !found; ok = Process32NextW(snap, &e)) found = !_wcsicmp(e.szExeFile, L"vrserver.exe");
+    CloseHandle(snap);
+    return found;
 }
 
 void SetStatus(const std::wstring& s) { SetWindowTextW(g_status, s.c_str()); }
@@ -139,7 +156,8 @@ void Start() {
     hxvr::Config cfg; cfg.Load();
     std::wstring ip = GetText(g_phoneIp);
     in_addr a;
-    if (inet_pton(AF_INET, Narrow(ip).c_str(), &a) != 1) { SetStatus(L"Digite o IP do celular (aparece no HyperMagic do celular, em SteamVR)."); return; }
+    // empty is fine: the driver finds the phone on the network by itself
+    if (!ip.empty() && inet_pton(AF_INET, Narrow(ip).c_str(), &a) != 1) { SetStatus(L"O IP do celular não é válido (exemplo: 192.168.0.15). Deixe vazio para achar sozinho."); return; }
     cfg.phoneIp = Narrow(ip);
     int mbps = _wtoi(GetText(g_bitrate).c_str());
     cfg.bitrateMbps = mbps >= 5 && mbps <= 200 ? mbps : 40;
@@ -153,7 +171,49 @@ void Start() {
         return;
     }
     ShellExecuteW(nullptr, L"open", L"steam://rungameid/250820", nullptr, nullptr, SW_SHOWNORMAL);
-    SetStatus(L"Iniciando o SteamVR... No celular: HyperMagic > SteamVR > digite o IP deste PC e toque em Conectar.");
+    SetStatus(L"Iniciando o SteamVR... No celular: abra HyperMagic > SteamVR, no mesmo Wi-Fi. Os dois se acham sozinhos.");
+}
+
+/**
+ * Allows SteamVR's server (and this program) through the Windows firewall, for networks marked as
+ * public, where Windows blocks incoming connections without asking. One UAC prompt.
+ */
+void AllowFirewall() {
+    std::wstring vr = SteamVrDir();
+    std::wstring server = vr.empty() ? L"" : vr + L"\\bin\\win64\\vrserver.exe";
+    wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
+    std::wstring cmd = L"/c netsh advfirewall firewall delete rule name=\"HyperMagic SteamVR\" & "
+                       L"netsh advfirewall firewall add rule name=\"HyperMagic SteamVR\" dir=in action=allow protocol=TCP localport=9944 profile=any & "
+                       L"netsh advfirewall firewall add rule name=\"HyperMagic SteamVR\" dir=in action=allow protocol=UDP localport=9945 profile=any & "
+                       L"netsh advfirewall firewall add rule name=\"HyperMagic SteamVR\" dir=in action=allow program=\"" + std::wstring(self) + L"\" profile=any";
+    if (!server.empty()) cmd += L" & netsh advfirewall firewall add rule name=\"HyperMagic SteamVR\" dir=in action=allow program=\"" + server + L"\" profile=any";
+    SHELLEXECUTEINFOW sei = {sizeof sei};
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS; sei.lpVerb = L"runas"; sei.lpFile = L"cmd.exe"; sei.lpParameters = cmd.c_str(); sei.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&sei)) { SetStatus(L"O Windows não deixou mudar o firewall (é preciso aceitar o pedido de administrador)."); return; }
+    WaitForSingleObject(sei.hProcess, 20000);
+    DWORD code = 1; GetExitCodeProcess(sei.hProcess, &code); CloseHandle(sei.hProcess);
+    SetStatus(code == 0 ? L"Firewall liberado para o SteamVR (portas 9944 e 9945)." : L"O netsh falhou; libere o vrserver.exe no Firewall do Windows manualmente.");
+}
+
+/** Beacons for the phone once a second; its answer fills the phone's IP (and pc.ini, for the driver). */
+void DiscoveryThread() {
+    hxvr::Discovery d;
+    while (g_running) {
+        std::string ip, name;
+        if (d.Poll(400, ip, name)) { std::lock_guard<std::mutex> l(g_foundMutex); g_foundIp = ip; g_foundName = name; }
+        for (int i = 0; i < 6 && g_running; i++) Sleep(100);
+    }
+}
+
+/** Seconds since the driver last wrote status.txt (it writes about once a second), or -1. */
+double StatusAge() {
+    WIN32_FILE_ATTRIBUTE_DATA d;
+    if (!GetFileAttributesExW(hxvr::StatusPath().c_str(), GetFileExInfoStandard, &d)) return -1;
+    FILETIME now; GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER a, b;
+    a.LowPart = d.ftLastWriteTime.dwLowDateTime; a.HighPart = d.ftLastWriteTime.dwHighDateTime;
+    b.LowPart = now.dwLowDateTime; b.HighPart = now.dwHighDateTime;
+    return b.QuadPart > a.QuadPart ? double(b.QuadPart - a.QuadPart) / 1e7 : 0;
 }
 
 void Remove() {
@@ -164,9 +224,33 @@ void Remove() {
 
 /** Shows what the driver reports (status.txt), when SteamVR is running. */
 void RefreshStatus() {
-    SetWindowTextW(g_pcIp, (L"IP deste PC (digite no celular):  " + LocalIps()).c_str());
+    SetWindowTextW(g_pcIp, (L"IP deste PC:  " + LocalIps()).c_str());
+    std::string foundIp, foundName;
+    { std::lock_guard<std::mutex> l(g_foundMutex); foundIp = g_foundIp; foundName = g_foundName; }
+    if (!foundIp.empty()) {
+        SetWindowTextW(g_found, (L"Celular achado na rede: " + Widen(foundName) + L"  (" + Widen(foundIp) + L")").c_str());
+        // the driver reads pc.ini once a second while it waits for the phone
+        if (Narrow(GetText(g_phoneIp)) != foundIp) {
+            SetWindowTextW(g_phoneIp, Widen(foundIp).c_str());
+            hxvr::Config cfg; cfg.Load();
+            if (cfg.phoneIp != foundIp) { cfg.phoneIp = foundIp; cfg.Save(); }
+        }
+    } else {
+        SetWindowTextW(g_found, L"Procurando o celular na rede (abra HyperMagic > SteamVR no celular, mesmo Wi-Fi)...");
+    }
+    if (!IsSteamVrRunning()) {
+        SetStatus(foundIp.empty() ? L"SteamVR fechado." : L"SteamVR fechado. Toque em Conectar e iniciar o SteamVR.");
+        return;
+    }
+    double age = StatusAge();
+    if (age < 0 || age > 8) {
+        SetStatus(L"O SteamVR está aberto, mas o driver HyperMagic não está rodando.\r\n"
+                  L"Se o SteamVR acabou de abrir, aguarde. Senão: SteamVR > Configurações > Inicialização/Desligamento > "
+                  L"Gerenciar complementos: ative o hyperxr (o SteamVR bloqueia drivers depois de um erro) e reinicie o SteamVR.");
+        return;
+    }
     std::wstring s = ReadFileW(hxvr::StatusPath());
-    if (s.empty() || !IsSteamVrRunning()) return;
+    if (s.empty()) return;
     auto val = [&](const wchar_t* k) {
         size_t a = s.find(std::wstring(k) + L"=");
         if (a == std::wstring::npos) return std::wstring();
@@ -190,8 +274,9 @@ LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         case WM_CREATE: {
             hxvr::Config cfg; cfg.Load();
             Label(w, L"HyperMagic para SteamVR", 20, 16, 520, 30, g_bold);
-            Label(w, L"1. No celular: abra o HyperMagic > SteamVR. 2. Digite aqui o IP do celular e no celular o IP deste PC. 3. Toque em Conectar nos dois.", 20, 52, 520, 40, g_font);
-            g_pcIp = Label(w, L"", 20, 100, 520, 22, g_font);
+            Label(w, L"1. No celular: abra HyperMagic > SteamVR (mesmo Wi-Fi deste PC). 2. Aqui: Conectar e iniciar o SteamVR. Os dois se acham sozinhos.", 20, 52, 520, 40, g_font);
+            g_pcIp = Label(w, L"", 20, 94, 520, 20, g_font);
+            g_found = Label(w, L"", 20, 112, 520, 20, g_font);
             Label(w, L"IP do celular:", 20, 136, 130, 22, g_font);
             g_phoneIp = CreateWindowW(L"EDIT", Widen(cfg.phoneIp).c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 160, 132, 200, 26, w, (HMENU)ID_PHONE_IP, nullptr, nullptr);
             SendMessageW(g_phoneIp, WM_SETFONT, (WPARAM)g_font, TRUE);
@@ -212,20 +297,24 @@ LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
             }
             HWND go = CreateWindowW(L"BUTTON", L"Conectar e iniciar o SteamVR", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 20, 266, 260, 40, w, (HMENU)ID_START, nullptr, nullptr);
             SendMessageW(go, WM_SETFONT, (WPARAM)g_bold, TRUE);
-            HWND rm = CreateWindowW(L"BUTTON", L"Remover do SteamVR", WS_CHILD | WS_VISIBLE, 300, 266, 180, 40, w, (HMENU)ID_REMOVE, nullptr, nullptr);
+            HWND fw = CreateWindowW(L"BUTTON", L"Liberar no firewall", WS_CHILD | WS_VISIBLE, 290, 266, 150, 40, w, (HMENU)ID_FIREWALL, nullptr, nullptr);
+            SendMessageW(fw, WM_SETFONT, (WPARAM)g_font, TRUE);
+            HWND rm = CreateWindowW(L"BUTTON", L"Remover", WS_CHILD | WS_VISIBLE, 450, 266, 90, 40, w, (HMENU)ID_REMOVE, nullptr, nullptr);
             SendMessageW(rm, WM_SETFONT, (WPARAM)g_font, TRUE);
             g_status = Label(w, L"", 20, 320, 520, 110, g_font);
             SetTimer(w, ID_TIMER, 1000, nullptr);
+            std::thread(DiscoveryThread).detach();
             RefreshStatus();
             return 0;
         }
         case WM_COMMAND:
             if (LOWORD(wp) == ID_START) Start();
             else if (LOWORD(wp) == ID_REMOVE) Remove();
+            else if (LOWORD(wp) == ID_FIREWALL) AllowFirewall();
             return 0;
         case WM_TIMER: RefreshStatus(); return 0;
         case WM_CTLCOLORSTATIC: SetBkMode((HDC)wp, TRANSPARENT); return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
-        case WM_DESTROY: PostQuitMessage(0); return 0;
+        case WM_DESTROY: g_running = false; PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(w, m, wp, lp);
 }

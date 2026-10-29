@@ -11,7 +11,7 @@ OUT=dist/HyperXR-PC
 rm -rf dist && mkdir -p "$OUT/hyperxr/bin/win64" "$OUT/hyperxr/resources/settings"
 $CXX $FLAGS -shared -o "$OUT/hyperxr/bin/win64/driver_hyperxr.dll" driver/driver.cpp driver/encoder.cpp \
     -Ithird_party/openvr -Wl,--kill-at \
-    -ld3d11 -ldxgi -lmfplat -lmfuuid -lmf -lole32 -loleaut32 -luuid -lws2_32 -lshell32 -lwinmm
+    -ld3d11 -ldxgi -lmfplat -lmfuuid -lmf -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lshell32 -lwinmm
 $CXX $FLAGS -mwindows -municode -o "$OUT/HyperXR PC.exe" app/main.cpp \
     -lws2_32 -liphlpapi -lshell32 -lole32 -luuid -lcomctl32 -lgdi32 -luser32 -ldxgi
 cp driver/driver.vrdrivermanifest "$OUT/hyperxr/"

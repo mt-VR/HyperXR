@@ -1,15 +1,21 @@
 package com.hyperxr.steamvr
 
+import android.content.Context
 import android.graphics.SurfaceTexture
+import android.net.wifi.WifiManager
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.view.Surface
 import com.hyperxr.diagnostics.Diagnostics
 import java.io.DataInputStream
-import java.io.OutputStream
+import java.net.ConnectException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
@@ -19,9 +25,15 @@ import java.util.concurrent.atomic.AtomicReference
  * The phone end of SteamVR streaming: keeps one TCP connection to the HyperXR driver (dialing the
  * PC and accepting the PC's own connection, preferring the PC's), sends the hello and tracking,
  * and decodes the H.264 video into [surfaceTexture].
+ *
+ * The PC is also found without typing: the HyperMagic PC app and the driver broadcast a beacon on
+ * UDP [DISCOVERY_PORT]; this phone answers it (so the PC learns this phone's address and dials it,
+ * which the Windows firewall allows) and dials the beacon's sender too.
  */
-class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.Hello, private val surfaceTexture: SurfaceTexture) {
-    @Volatile var state = "Procurando o PC…"; private set
+class SteamVrClient(private val context: Context, private val pcIp: String, private val hello: HxvrProtocol.Hello, private val surfaceTexture: SurfaceTexture) {
+    @Volatile var state = "Procurando o PC na rede…"; private set
+    /** The PC whose beacon arrived, when one did. */
+    @Volatile var foundPc: String? = null; private set
     @Volatile var connected = false; private set
     @Volatile var config: HxvrProtocol.Config? = null; private set
     @Volatile var framesDecoded = 0L; private set
@@ -34,6 +46,7 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
     @Volatile private var running = true
     @Volatile private var socket: Socket? = null
     private var server: ServerSocket? = null
+    private var discovery: DatagramSocket? = null
     private val pendingTracking = AtomicReference<ByteArray?>(null)
     private val sendLock = Object()
     private var decoder: MediaCodec? = null
@@ -44,11 +57,13 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
         Thread({ dialLoop() }, "hxvr-dial").start()
         Thread({ acceptLoop() }, "hxvr-accept").start()
         Thread({ sendLoop() }, "hxvr-send").start()
+        Thread({ discoveryLoop() }, "hxvr-discovery").start()
     }
 
     fun stop() {
         running = false
         runCatching { server?.close() }
+        runCatching { discovery?.close() }
         runCatching { socket?.close() }
         synchronized(sendLock) { sendLock.notifyAll() }
         releaseDecoder()
@@ -79,14 +94,61 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
     // ---------------------------------------------------------------- connection
     private fun dialLoop() {
         while (running) {
-            if (socket == null && pcIp.isNotBlank()) {
+            val targets = listOfNotNull(pcIp.trim().ifBlank { null }, foundPc).distinct()
+            if (socket == null && targets.isEmpty()) state = "Procurando o PC na rede… Abra o HyperMagic PC no computador, no mesmo Wi-Fi deste celular."
+            for (ip in targets) {
+                if (socket != null) break
                 try {
                     val s = Socket()
-                    s.connect(InetSocketAddress(pcIp, HxvrProtocol.PORT), 1500)
+                    s.connect(InetSocketAddress(ip, HxvrProtocol.PORT), 1500)
                     adopt(s, fromPc = false)
-                } catch (_: Throwable) {}
+                } catch (t: Throwable) {
+                    if (socket == null) state = dialError(ip, t)
+                }
             }
             Thread.sleep(1000)
+        }
+    }
+
+    /** What the failed dial says about the cause, for the person to fix it. */
+    private fun dialError(ip: String, t: Throwable): String {
+        val msg = t.message.orEmpty()
+        val found = foundPc != null
+        return when {
+            t is ConnectException && ("ECONNREFUSED" in msg || "refused" in msg) ->
+                "O PC $ip respondeu, mas nada ouve na porta 9944: o SteamVR está fechado ou o driver HyperMagic não carregou (veja o HyperMagic PC)."
+            t is SocketTimeoutException || "ETIMEDOUT" in msg -> if (found)
+                "O PC $ip foi achado, mas o Firewall do Windows bloqueia a conexão. No HyperMagic PC, toque em Liberar no firewall; enquanto isso o PC tenta chamar este celular."
+            else
+                "Sem resposta de $ip: o PC está em outra rede, desligado, ou o Firewall do Windows bloqueia (HyperMagic PC > Liberar no firewall)."
+            t is NoRouteToHostException || "EHOSTUNREACH" in msg || "ENETUNREACH" in msg ->
+                "$ip não é alcançável daqui: o celular e o PC precisam estar no mesmo Wi-Fi (e o roteador sem isolamento de clientes)."
+            else -> "Não conectou em $ip: ${t.javaClass.simpleName} $msg"
+        }
+    }
+
+    /** Answers the PC's beacon with this phone's name and remembers where it came from. */
+    private fun discoveryLoop() {
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        // some Wi-Fi drivers drop broadcasts unless an app holds this lock
+        val lock = runCatching { wifi?.createMulticastLock("hxvr-discovery")?.apply { setReferenceCounted(false); acquire() } }.getOrNull()
+        try {
+            val ds = DatagramSocket(null).apply { reuseAddress = true; broadcast = true; soTimeout = 1000; bind(InetSocketAddress(DISCOVERY_PORT)) }
+            discovery = ds
+            val buf = ByteArray(256)
+            val reply = "HXVR-PHONE ${hello.name}".toByteArray()
+            while (running) {
+                val p = DatagramPacket(buf, buf.size)
+                try { ds.receive(p) } catch (_: SocketTimeoutException) { continue }
+                if (!String(p.data, 0, p.length).startsWith("HXVR-PC")) continue
+                val from = p.address.hostAddress ?: continue
+                if (foundPc != from) { foundPc = from; Diagnostics.log("SteamVR: PC found at $from") }
+                runCatching { ds.send(DatagramPacket(reply, reply.size, p.socketAddress)) }
+            }
+        } catch (t: Throwable) {
+            if (running) Diagnostics.log("SteamVR discovery: $t")
+        } finally {
+            runCatching { lock?.release() }
         }
     }
 
@@ -97,7 +159,12 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
                 val s = ss.accept()
                 adopt(s, fromPc = true)
             }
-        } catch (t: Throwable) { if (running) Diagnostics.log("SteamVR accept: $t") }
+        } catch (t: Throwable) {
+            if (running) {
+                Diagnostics.log("SteamVR accept: $t")
+                state = "A porta 9944 deste celular está ocupada: feche e abra o SteamVR do HyperMagic de novo."
+            }
+        }
     }
 
     /** The PC's own connection wins over ours when both exist. */
@@ -234,5 +301,10 @@ class SteamVrClient(private val pcIp: String, private val hello: HxvrProtocol.He
                 framesDecoded++
             }
         } catch (_: Throwable) {}
+    }
+
+    companion object {
+        /** UDP port of the PC's beacon (pc/common/discovery.h). */
+        const val DISCOVERY_PORT = 9945
     }
 }

@@ -97,7 +97,7 @@ class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles
         surfaceTexture = st
         val hello = hello(ctx).also { display = it }
         st.setDefaultBufferSize(hello.eyeWidth * 2, hello.eyeHeight)
-        client = SteamVrClient(pcIp, hello, st).also { c ->
+        client = SteamVrClient(ctx.activity, pcIp, hello, st).also { c ->
             c.onHaptic = { h -> rumble(h) }
             c.start()
         }
@@ -296,7 +296,13 @@ class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles
         override fun draw(c: PanelCanvas) {
             c.paragraph(state, 32f, XrTheme.text, bold = true)
             c.paragraph("IP deste celular (digite no HyperMagic PC): " + (localIp() ?: "sem Wi-Fi"), 26f, XrTheme.accent2)
-            c.paragraph("PC: " + pcIp.ifBlank { "o PC é que vai se conectar" }, 26f)
+            val found = client?.foundPc
+            c.paragraph(when {
+                pcIp.isNotBlank() && found != null && found != pcIp.trim() -> "PC digitado: $pcIp   achado na rede: $found"
+                pcIp.isNotBlank() -> "PC: $pcIp"
+                found != null -> "PC achado na rede: $found"
+                else -> "PC: achado sozinho quando o HyperMagic PC estiver aberto"
+            }, 26f)
             c.paragraph("Perfil ${plan.profile.label}: ${plan.eyeWidth * 2}x${plan.eyeHeight} a ${plan.refreshHz} Hz, " +
                 (if (plan.codecs and SteamVrProfiles.CODEC_HEVC != 0) "HEVC" else "H.264") + ", até ${plan.maxMbps} Mb/s", 22f)
             c.paragraph("Joy-Con Home recentraliza. Sem Joy-Con, as mãos viram os controles: pinça = gatilho, fechar a mão = grip.", 22f)
@@ -304,9 +310,13 @@ class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles
     }
 
     companion object {
+        /** The Wi-Fi (or hotspot) address; the mobile data one (rmnet, ccmni) is useless to the PC. */
         fun localIp(): String? = runCatching {
-            java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
-                .flatMap { it.inetAddresses.toList() }.filterIsInstance<java.net.Inet4Address>().firstOrNull()?.hostAddress
+            val all = java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+                .flatMap { i -> i.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { i.name to it } }
+            val lan = listOf("wlan", "swlan", "ap", "eth", "rndis", "usb")
+            (all.firstOrNull { (n, _) -> lan.any { n.startsWith(it) } } ?: all.firstOrNull { it.second.isSiteLocalAddress } ?: all.firstOrNull())
+                ?.second?.hostAddress
         }.getOrNull()
 
         private const val VS = """#version 300 es
