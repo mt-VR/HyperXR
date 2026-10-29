@@ -418,7 +418,9 @@ class HandTrackingService(private val context: Context) {
         for ((side, img, wrist) in job.sides) {
             val r = armResult
             if (!ArmFromMask.forearm(arms.arm, ArmSegEngine.SIZE, img, aspect, r)) continue
-            val s = if (side == Handedness.RIGHT) 1f else -1f
+            // the shoulder on the side the hand is on (the label can be wrong; the place rarely is)
+            val lat = (wrist.x - job.pose.position.x) * -armFwd.z + (wrist.z - job.pose.position.z) * armFwd.x
+            val s = if (kotlin.math.abs(lat) > 0.06f) (if (lat > 0f) 1f else -1f) else if (side == Handedness.RIGHT) 1f else -1f
             armShoulder.set(job.pose.position).addScaled(armFwd, -0.04f)
             armShoulder.x += -armFwd.z * 0.18f * s; armShoulder.z += armFwd.x * 0.18f * s; armShoulder.y -= 0.24f
             ArmSolver.rayThrough(r.px, r.py, job.intr, job.pose, armRay)

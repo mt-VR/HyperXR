@@ -2,6 +2,7 @@ package com.hyperxr.xr
 
 import com.hyperxr.handtracking.ArmSolver
 import com.hyperxr.handtracking.HandJoint
+import com.hyperxr.handtracking.HandSide
 import com.hyperxr.handtracking.HandState
 import com.hyperxr.handtracking.Handedness
 import com.hyperxr.handtracking.TrackingState
@@ -75,10 +76,26 @@ class RealHand {
         fwd.normalize()
         right.set(-fwd.z, 0f, fwd.x)
         val now = System.nanoTime()
-        for (h in hands) {
-            val s = if (h.handedness == Handedness.RIGHT) 1 else 0
-            drawn[s] = h.isUsable
-            if (!h.isUsable) { armInit[s] = false; continue }
+        // which hand each one really is (its shape and place, not only the detector's label), so a
+        // left hand never gets the right arm from the right shoulder
+        val dt = if (lastNs == 0L) 0.016f else ((now - lastNs) / 1e9f).coerceIn(0f, 0.1f)
+        lastNs = now
+        drawn.fill(false)
+        for ((i, h) in hands.withIndex()) {
+            if (!h.isUsable) { deciders[i].reset(); continue }
+            lateral[i] = t.set(h.joints[HandJoint.WRIST]).sub(head.position).dot(right)
+            isRight[i] = deciders[i].update(h.handedness == Handedness.RIGHT, h.joints, lateral[i], dt)
+        }
+        if (hands.size == 2 && hands[0].isUsable && hands[1].isUsable) {
+            val (r0, r1) = HandSide.separate(isRight[0], lateral[0], isRight[1], lateral[1])
+            isRight[0] = r0; isRight[1] = r1
+        }
+        for ((i, h) in hands.withIndex()) {
+            if (!h.isUsable) continue
+            val s = if (isRight[i]) 1 else 0
+            // a hand that changed side starts its arm afresh
+            if (owner[s] != i) { owner[s] = i; armInit[s] = false }
+            drawn[s] = true
             fade[s] = if (h.state == TrackingState.LOST_PREDICTING) 0.8f else 1f
             val side = if (s == 1) 1f else -1f
             for (j in 0 until HandJoint.COUNT) cur[j].set(h.joints[j])
@@ -107,7 +124,14 @@ class RealHand {
                 skinMatrix(restFrames[s], b * 12, f, sx, sl, bones[s], b * 16)
             }
         }
+        for (side in 0..1) if (!drawn[side]) owner[side] = -1
     }
+
+    private val deciders = Array(2) { HandSide.Decider() }
+    private val isRight = BooleanArray(2)
+    private val lateral = FloatArray(2)
+    private val owner = IntArray(2) { -1 }
+    private var lastNs = 0L
 
     /** Draws the arms placed by [submit], depth-tested over the scene and the panels. GL thread. */
     fun render(eye: EyeView) {
