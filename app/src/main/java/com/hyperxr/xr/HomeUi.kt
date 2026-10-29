@@ -35,7 +35,9 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
     private var battery = ""
     private var note: String? = null
     private val search = UrlEditor({ a.closeKeyboard() }, { page = 0; dirty = true })
-    private val tile = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+    private val tile = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    /** Pictures are drawn with their own paint: a fill colour's alpha must never fade them. */
+    private val bmp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
 
     init { closable = asWindow; if (!asWindow) priority = 0 }
 
@@ -62,25 +64,27 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
             val byId = all.associateBy { it.id }
             com.hyperxr.HyperXRApp.instance.settings.current.launcher.recents.mapNotNull { byId[it] }.filter(::matches)
         } else all.filter(::matches)
-        // header: title, search, chips, count
-        c.label("Biblioteca", c.pad, 30f, 40f, XrTheme.text, bold = true, maxWidth = 300f)
+        // header: title and count, the clock, search
+        c.label("Biblioteca", c.pad, 26f, 44f, XrTheme.text, bold = true, maxWidth = 320f, maxLines = 1)
         val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        c.label(listOf(time, battery).filter { it.isNotEmpty() }.joinToString("  ·  "), c.pad + 250f, 42f, 22f, XrTheme.textDim, maxWidth = 260f, maxLines = 1)
+        c.label(listOf(time, battery.substringBefore(' ')).filter { it.isNotEmpty() }.joinToString("   "), c.pad + 270f, 40f, 24f, XrTheme.textDim, maxWidth = 200f, maxLines = 1)
         val active = search.active
-        val sw = 300f
-        c.button("search", if (active) search.text + "|" else if (search.text.isNotEmpty()) search.text else "Pesquisar", c.w - c.pad - 520f - sw, 24f, sw, 60f,
+        val sw = 420f
+        c.button("search", if (active) search.text + "|" else if (search.text.isNotEmpty()) search.text else "Pesquisar na biblioteca", c.w - c.pad - sw, 22f, sw, 62f,
             accent = active, icon = Glyphs.get("search")) { if (!search.active) { search.begin(search.text); a.openKeyboard(search) } else { search.cancel() } }
-        c.button("filter", section.label, c.w - c.pad - 500f, 24f, 230f, 60f, icon = Glyphs.get("expand_more")) {
-            section = Section.entries[(section.ordinal + 1) % Section.entries.size]; page = 0
+        // the filters, all visible: one tap each
+        var fx = c.pad
+        for (sec in Section.entries) {
+            val n = if (sec == section) " (${apps.size})" else ""
+            val bw = 40f + (sec.label.length + n.length) * 15f + 20f
+            c.button("sec:${sec.name}", sec.label + n, fx, 104f, bw, 56f, accent = sec == section) { section = sec; page = 0 }
+            fx += bw + 12f
         }
-        c.button("count", "Instalados (${all.size})", c.w - c.pad - 255f, 24f, 255f, 60f) { section = Section.ALL; page = 0 }
-        if (a.vrSwitchable()) c.button("vr", if (a.vrOn()) "Modo VR" else "Realidade mista", c.pad, c.h - 84f, 280f, 62f, accent = a.vrOn(), icon = a.icons().icon("vrmode", 96)) { a.setVr(!a.vrOn()); dirty = true }
-        c.button("loja", "Loja", c.pad + 296f, c.h - 84f, 180f, 62f, icon = a.icons().icon("shop", 96)) { a.openTarget("loja") }
         // tiles
         val cols = 4; val rows = 4
-        val gx = c.pad; val gy = 110f
-        val gw = c.w - 2 * c.pad - 70f
-        val gh = c.h - gy - 100f
+        val gx = c.pad; val gy = 184f
+        val gw = c.w - 2 * c.pad
+        val gh = c.h - gy - 96f
         val gap = 18f
         val cellW = (gw - gap * (cols - 1)) / cols
         val cellH = (gh - gap * (rows - 1)) / rows
@@ -93,45 +97,54 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
             val y = gy + (i / cols) * (cellH + gap)
             drawTile(c, app, x, y, cellW, cellH)
         }
-        // scroll bar and page arrows on the right, like the library's
+        // bottom row: the store and VR switch on the left, the pages on the right
+        val by = c.h - 76f
+        c.button("loja", "Loja", c.pad, by, 170f, 60f, icon = Glyphs.get("storefront")) { a.openTarget("loja") }
+        if (a.vrSwitchable()) c.button("vr", if (a.vrOn()) "Modo VR" else "Realidade mista", c.pad + 186f, by, 270f, 60f, accent = a.vrOn(), icon = Glyphs.get("vrpano")) { a.setVr(!a.vrOn()); dirty = true }
         if (pages > 1) {
-            c.button("prev", "▲", c.w - c.pad - 56f, gy, 56f, 80f, enabled = page > 0) { page-- }
-            c.button("next", "▼", c.w - c.pad - 56f, gy + gh - 80f, 56f, 80f, enabled = page < pages - 1) { page++ }
-            tile.color = XrTheme.buttonDisabled
-            c.canvas.drawRoundRect(android.graphics.RectF(c.w - c.pad - 32f, gy + 96f, c.w - c.pad - 24f, gy + gh - 96f), 4f, 4f, tile)
-            val span = gh - 192f
-            tile.color = XrTheme.text
-            val t0 = gy + 96f + span * page / pages
-            c.canvas.drawRoundRect(android.graphics.RectF(c.w - c.pad - 32f, t0, c.w - c.pad - 24f, t0 + span / pages), 4f, 4f, tile)
+            c.button("prev", "‹  Anterior", c.w - c.pad - 560f, by, 200f, 60f, enabled = page > 0) { page-- }
+            c.label("${page + 1} de $pages", c.w - c.pad - 345f, by + 16f, 25f, XrTheme.textDim, maxWidth = 130f, maxLines = 1)
+            c.button("next", "Próxima  ›", c.w - c.pad - 200f, by, 200f, 60f, enabled = page < pages - 1) { page++ }
         }
-        note?.let { c.label(it, c.pad + 500f, c.h - 70f, 22f, XrTheme.accent2, maxWidth = 600f, maxLines = 1) }
+        note?.let { c.label(it, c.pad + 480f, by + 16f, 22f, XrTheme.accent2, maxWidth = 420f, maxLines = 1) }
     }
 
-    /** A game: its cover. An app: its colours as a tile, the icon on the left, the name. */
+    /** A game: its cover. An app: a solid tile with its icon, name and kind. */
     private fun drawTile(c: PanelCanvas, app: AppEntry, x: Float, y: Float, w: Float, h: Float) {
         val id = "app:${app.id}"
         val hover = isHovered(id); val press = isPressed(id)
-        val grow = if (press) -4f else if (hover) 5f else 0f
+        val grow = if (press) -4f else if (hover) 4f else 0f
         val r = android.graphics.RectF(x - grow, y - grow, x + w + grow, y + h + grow)
         val ctx = com.hyperxr.HyperXRApp.instance
         val game = app.category == AppCategory.HYPERXR_GAME
-        c.canvas.save()
-        c.canvas.clipPath(android.graphics.Path().apply { addRoundRect(r, 20f, 20f, android.graphics.Path.Direction.CW) })
+        val rad = XrTheme.TILE_RADIUS
         if (game) {
-            c.canvas.drawBitmap(com.hyperxr.rendering.CoverArt.cover(ctx, app.iconKey, app.title), null, r, tile)
+            c.canvas.save()
+            c.canvas.clipPath(android.graphics.Path().apply { addRoundRect(r, rad, rad, android.graphics.Path.Direction.CW) })
+            c.canvas.drawBitmap(com.hyperxr.rendering.CoverArt.cover(ctx, app.iconKey, app.title), null, r, bmp)
+            c.canvas.restore()
         } else {
+            tile.color = if (press) XrTheme.buttonPressed else if (hover) XrTheme.buttonHover else XrTheme.tile
+            c.canvas.drawRoundRect(r, rad, rad, tile)
+            val s = (h * 0.62f).coerceAtMost(w * 0.36f)
             val icon = a.appIcon(app, 128)
-            // the icon itself, blurred and stretched, makes the tile's colour
-            c.canvas.drawBitmap(icon, android.graphics.Rect(8, 8, 120, 120), r, tile)
-            tile.color = android.graphics.Color.argb(40, 0, 0, 0); c.canvas.drawRect(r, tile)
-            val s = h * 0.5f
-            c.canvas.drawBitmap(icon, null, android.graphics.RectF(r.left + 18f, r.centerY() - s / 2, r.left + 18f + s, r.centerY() + s / 2), tile)
-            c.label(app.title, r.left + 30f + s, r.centerY() - 17f, 28f, android.graphics.Color.WHITE, bold = true, maxLines = 1, maxWidth = w - s - 44f)
+            val ir = android.graphics.RectF(r.left + 18f, r.centerY() - s / 2, r.left + 18f + s, r.centerY() + s / 2)
+            c.canvas.save()
+            c.canvas.clipPath(android.graphics.Path().apply { addRoundRect(ir, s * 0.24f, s * 0.24f, android.graphics.Path.Direction.CW) })
+            c.canvas.drawBitmap(icon, null, ir, bmp)
+            c.canvas.restore()
+            val kind = when {
+                app.kind == AppKind.WEB -> "Web"
+                app.kind == AppKind.ANDROID_PACKAGE -> "App Android"
+                app.category == AppCategory.SYSTEM -> "Sistema"
+                else -> "HyperMagic"
+            }
+            c.label(app.title, ir.right + 16f, r.centerY() - 32f, 27f, XrTheme.text, bold = true, maxLines = 1, maxWidth = r.right - ir.right - 30f)
+            c.label(kind, ir.right + 16f, r.centerY() + 4f, 21f, XrTheme.textDim, maxLines = 1, maxWidth = r.right - ir.right - 30f)
         }
-        c.canvas.restore()
         if (hover) {
             tile.style = android.graphics.Paint.Style.STROKE; tile.strokeWidth = 4f; tile.color = android.graphics.Color.WHITE
-            c.canvas.drawRoundRect(r, 20f, 20f, tile); tile.style = android.graphics.Paint.Style.FILL
+            c.canvas.drawRoundRect(r, rad, rad, tile); tile.style = android.graphics.Paint.Style.FILL
         }
         addRegion(Region(android.graphics.RectF(x, y, x + w, y + h), id, { a.launch(app) }, {
             a.togglePin(app); note = if (a.isPinned(app)) "${app.title} fixado na dock" else "${app.title} removido da dock"; dirty = true
@@ -140,78 +153,150 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
 }
 
 /**
- * The dock: a dark pill like a headset's universal bar. On the left the clock, battery and your
- * avatar; then the library, the store, people, the camera and missions as coloured icons; your
- * pinned apps; and on the right the VR switch, voice and settings. A dot marks what is open.
+ * The dock, like a headset's universal menu: a dark rounded bar. On the left a status block with
+ * the clock, battery and Wi-Fi (it opens Ajustes rápidos), your avatar and the bell; then solid
+ * coloured squares with a white glyph (Missões, Loja, Pessoas, Câmera), your pinned apps, and at
+ * the right Ajustes rápidos and the Biblioteca grid. The bar grows with the pinned apps and stays
+ * centred; a dot marks what is open, and pointing at an icon shows its name above it.
  */
-class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.3f, 0.13f, title = "") {
+class TaskbarPanel(private val a: LauncherActions) : XrPanel(1.0f, 0.15f, title = "") {
     init { closable = false; priority = 0 }
     private var minute = -1L
     private var key = ""
     private var battery = ""
-    private val pill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private var wifi = true
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val bmp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+
+    private class Item(val id: String, val name: String, val glyph: String?, val color: Int, val icon: android.graphics.Bitmap?, val active: Boolean, val badge: Int, val act: () -> Unit)
 
     override fun update(dt: Float) {
         val m = System.currentTimeMillis() / 60_000
         val k = "${a.windowCount()}/${a.windowsMinimized()}/${a.mode()}/${a.voiceStatus()}/${a.vrOn()}/${a.pinnedApps().joinToString { it.id }}/${com.hyperxr.social.Social.unreadTotal}/${a.libraryOpen()}"
-        if (m != minute || k != key) { minute = m; key = k; battery = batteryText(); dirty = true }
+        if (m != minute || k != key) {
+            minute = m; key = k; battery = batteryText(); dirty = true
+            wifi = runCatching {
+                val cm = com.hyperxr.HyperXRApp.instance.getSystemService(android.net.ConnectivityManager::class.java)
+                cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+            }.getOrDefault(false)
+            // the bar fits its icons
+            val want = (layoutWidth() / pixelsPerMeter).coerceIn(0.7f, 1.7f)
+            if (kotlin.math.abs(want - widthMeters) > 0.005f) widthMeters = want
+        }
+    }
+
+    private fun items(): List<Item> {
+        val list = ArrayList<Item>()
+        list += Item("missions", "Missões", "emoji_events", android.graphics.Color.rgb(47, 124, 246), null, false, 0) { a.openTarget("missions") }
+        list += Item("store", "Loja", "storefront", android.graphics.Color.rgb(245, 150, 30), null, false, 0) { a.openTarget("loja") }
+        list += Item("people", "Pessoas", "group", android.graphics.Color.rgb(139, 92, 246), null, false, com.hyperxr.social.Social.unreadTotal) { a.openTarget("people") }
+        list += Item("camera", "Câmera", "share", android.graphics.Color.rgb(236, 72, 153), null, false, 0) { a.openTarget("share") }
+        if (a.windowCount() > 0) list += Item("win", if (a.windowsMinimized()) "Mostrar janelas" else "Esconder janelas", "dashboard", android.graphics.Color.rgb(84, 96, 110), null, !a.windowsMinimized(), 0) { a.toggleWindows() }
+        list += Item("|", "", null, 0, null, false, 0) {}
+        for (app in a.pinnedApps().take(6)) list += Item("pin:${app.id}", app.title, null, 0, a.appIcon(app, 128), a.isRunning(app), 0) { a.launch(app) }
+        if (a.pinnedApps().isNotEmpty()) list += Item("|", "", null, 0, null, false, 0) {}
+        list += Item("quick", "Ajustes rápidos", "settings", android.graphics.Color.rgb(20, 170, 150), null, false, 0) { a.openTarget("quick") }
+        list += Item("lib", "Biblioteca", "apps", 0, null, a.libraryOpen(), 0) { a.toggleLibrary() }
+        return list
+    }
+
+    private val statusW = 170f
+    private val icon = 84f
+    private val gap = 14f
+    private fun layoutWidth(): Float {
+        var w = 14f + statusW + 16f + 70f + 10f + 56f + 22f
+        for (it in items()) w += if (it.id == "|") 22f else icon + gap
+        return w + 8f
     }
 
     override fun paintBackground(c: PanelCanvas) {
-        // a rounded pill of dark glass with a soft rim
-        val rr = c.h / 2
-        pill.shader = android.graphics.LinearGradient(0f, 0f, 0f, c.h, android.graphics.Color.argb(245, 40, 42, 48), android.graphics.Color.argb(245, 26, 27, 31), android.graphics.Shader.TileMode.CLAMP)
-        c.canvas.drawRoundRect(android.graphics.RectF(0f, 0f, c.w, c.h), rr, rr, pill)
-        pill.shader = null
-        pill.style = android.graphics.Paint.Style.STROKE; pill.strokeWidth = 2f; pill.color = android.graphics.Color.argb(50, 255, 255, 255)
-        c.canvas.drawRoundRect(android.graphics.RectF(1f, 1f, c.w - 1f, c.h - 1f), rr, rr, pill)
-        pill.style = android.graphics.Paint.Style.FILL
+        val barTop = 36f   // room above the bar for the name of what you point at
+        val r = (c.h - barTop) * 0.26f
+        paint.color = android.graphics.Color.argb(240, 26, 32, 36)
+        c.canvas.drawRoundRect(android.graphics.RectF(0f, barTop, c.w, c.h), r, r, paint)
+        paint.style = android.graphics.Paint.Style.STROKE; paint.strokeWidth = 2f; paint.color = android.graphics.Color.argb(36, 255, 255, 255)
+        c.canvas.drawRoundRect(android.graphics.RectF(1f, barTop + 1f, c.w - 1f, c.h - 1f), r, r, paint)
+        paint.style = android.graphics.Paint.Style.FILL
     }
 
     override fun draw(c: PanelCanvas) {
-        val h = c.h
-        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        c.label(time, 40f, 16f, 30f, XrTheme.text, bold = true)
-        if (battery.isNotEmpty()) c.label(battery, 40f, 56f, 20f, XrTheme.textDim, maxLines = 1, maxWidth = 130f)
-        val me = com.hyperxr.social.Social.me
-        c.avatar(me, 160f, (h - 64f) / 2, 64f, online = me != null)
-        addRegion(Region(android.graphics.RectF(160f, 0f, 224f, h), "me", { a.openTarget("people") }))
-        val size = h - 26f
-        val gap = 10f
+        val top = 36f
+        val bh = c.h - top
         val voice = a.voiceStatus()
-        var x = 250f
-        fun sys(id: String, iconKey: String, active: Boolean = false, badge: Int = 0, act: () -> Unit) {
-            c.iconButton(id, a.icons().icon(iconKey, 128), x, 13f, size, active = active) { act(); dirty = true }
-            if (badge > 0) {
-                pill.color = XrTheme.danger; c.canvas.drawCircle(x + size - 10f, 22f, 14f, pill)
-                c.label(if (badge > 9) "9+" else "$badge", x + size - (if (badge > 9) 22f else 16f), 8f, 20f, android.graphics.Color.WHITE, bold = true)
-            }
-            x += size + gap
-        }
+        // status block: clock over battery and Wi-Fi; opens quick settings
+        val sr = android.graphics.RectF(12f, top + 12f, 12f + statusW, c.h - 12f)
+        val sHover = isHovered("status")
+        paint.color = if (sHover) android.graphics.Color.rgb(64, 76, 84) else android.graphics.Color.rgb(46, 56, 62)
+        c.canvas.drawRoundRect(sr, 18f, 18f, paint)
+        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        c.label(time, sr.left + 18f, sr.top + 6f, 30f, XrTheme.text, bold = true, maxLines = 1)
+        c.image(Glyphs.get("battery_full"), sr.left + 18f, sr.bottom - 34f, 24f, 24f)
+        c.label(battery.substringBefore(' '), sr.left + 44f, sr.bottom - 34f, 19f, XrTheme.textDim, maxLines = 1, maxWidth = 70f)
+        c.image(Glyphs.get(if (wifi) "wifi" else "wifi_off"), sr.right - 40f, sr.bottom - 34f, 24f, 24f)
+        addRegion(Region(sr, "status", { a.openTarget("quick") }))
+        var x = sr.right + 16f
+        // avatar and the bell
+        val me = com.hyperxr.social.Social.me
+        c.avatar(me, x, top + (bh - 64f) / 2, 64f, online = me != null)
+        addRegion(Region(android.graphics.RectF(x, top, x + 64f, c.h), "me", { a.openTarget("people") }))
+        x += 70f + 10f
+        c.roundIconButton("bell", Glyphs.get("notifications"), x, top + (bh - 56f) / 2, 56f) { a.openTarget("messages") }
+        x += 56f + 22f
         if (voice.isNotEmpty()) {
-            c.label(voice, x, 34f, 28f, XrTheme.accent2, maxWidth = c.w - x - 40f, maxLines = 1)
+            c.label(voice, x, top + bh / 2 - 18f, 28f, XrTheme.accent2, maxWidth = c.w - x - 30f, maxLines = 1)
             return
         }
-        sys("lib", "library", active = a.libraryOpen()) { a.toggleLibrary() }
-        sys("store", "shop") { a.openTarget("loja") }
-        sys("people", "people", badge = com.hyperxr.social.Social.unreadTotal) { a.openTarget("people") }
-        sys("camera", "camera_share") { a.openTarget("share") }
-        sys("missions", "missions") { a.openTarget("missions") }
-        // a thin separator, then the pinned apps
-        pill.color = android.graphics.Color.argb(60, 255, 255, 255)
-        c.canvas.drawRoundRect(android.graphics.RectF(x, 26f, x + 3f, h - 26f), 2f, 2f, pill)
-        x += 3f + gap
-        val rightW = 3 * (size + gap) + (if (a.windowCount() > 0) size + gap else 0f) + 20f
-        val fit = ((c.w - rightW - x) / (size + gap)).toInt().coerceAtLeast(0)
-        for (app in a.pinnedApps().take(fit)) {
-            c.iconButton("pin:${app.id}", a.appIcon(app, 128), x, 13f, size, active = a.isRunning(app)) { a.launch(app) }
-            x += size + gap
+        var hoverName = ""; var hoverX = 0f
+        for (it in items()) {
+            if (it.id == "|") {
+                paint.color = android.graphics.Color.argb(60, 255, 255, 255)
+                c.canvas.drawRoundRect(android.graphics.RectF(x + 8f, top + 26f, x + 11f, c.h - 26f), 2f, 2f, paint)
+                x += 22f; continue
+            }
+            val iy = top + (bh - icon) / 2
+            val r = android.graphics.RectF(x, iy, x + icon, iy + icon)
+            val hover = isHovered(it.id); val press = isPressed(it.id)
+            val k = if (press) 6f else if (hover) -3f else 0f
+            val rr = android.graphics.RectF(r.left + k, r.top + k, r.right - k, r.bottom - k)
+            when {
+                it.icon != null -> {
+                    c.canvas.save()
+                    c.canvas.clipPath(android.graphics.Path().apply { addRoundRect(rr, rr.width() * 0.24f, rr.width() * 0.24f, android.graphics.Path.Direction.CW) })
+                    c.canvas.drawBitmap(it.icon, null, rr, bmp)
+                    c.canvas.restore()
+                }
+                it.color != 0 -> {
+                    paint.color = it.color
+                    c.canvas.drawRoundRect(rr, rr.width() * 0.24f, rr.width() * 0.24f, paint)
+                    val g = rr.width() * 0.5f
+                    c.canvas.drawBitmap(Glyphs.get(it.glyph!!), null, android.graphics.RectF(rr.centerX() - g / 2, rr.centerY() - g / 2, rr.centerX() + g / 2, rr.centerY() + g / 2), bmp)
+                }
+                else -> {
+                    if (hover || press) { paint.color = android.graphics.Color.rgb(60, 70, 78); c.canvas.drawRoundRect(rr, rr.width() * 0.24f, rr.width() * 0.24f, paint) }
+                    val g = rr.width() * 0.56f
+                    c.canvas.drawBitmap(Glyphs.get(it.glyph!!), null, android.graphics.RectF(rr.centerX() - g / 2, rr.centerY() - g / 2, rr.centerX() + g / 2, rr.centerY() + g / 2), bmp)
+                }
+            }
+            if (hover) {
+                paint.style = android.graphics.Paint.Style.STROKE; paint.strokeWidth = 3f; paint.color = android.graphics.Color.WHITE
+                c.canvas.drawRoundRect(rr, rr.width() * 0.24f, rr.width() * 0.24f, paint); paint.style = android.graphics.Paint.Style.FILL
+                hoverName = it.name; hoverX = r.centerX()
+            }
+            if (it.active) { paint.color = android.graphics.Color.WHITE; c.canvas.drawCircle(r.centerX(), c.h - 7f, 4f, paint) }
+            if (it.badge > 0) {
+                paint.color = XrTheme.danger; c.canvas.drawCircle(r.right - 6f, r.top + 6f, 15f, paint)
+                c.label(if (it.badge > 9) "9+" else "${it.badge}", r.right - (if (it.badge > 9) 19f else 12f), r.top - 8f, 19f, android.graphics.Color.WHITE, bold = true)
+            }
+            val act = it.act
+            addRegion(Region(android.graphics.RectF(x - gap / 2, top, x + icon + gap / 2, c.h), it.id, { act(); dirty = true }))
+            x += icon + gap
         }
-        // right side
-        x = c.w - rightW + 10f
-        if (a.windowCount() > 0) sys("win", "workspaces", active = !a.windowsMinimized()) { a.toggleWindows() }
-        if (a.vrSwitchable()) sys("vr", "vrmode", active = a.vrOn()) { a.setVr(!a.vrOn()) } else x += size + gap
-        sys("voice", "voice") { a.startVoice() }
-        sys("qs", "settings") { a.openTarget("settings") }
+        if (hoverName.isNotEmpty()) {
+            val tw = hoverName.length * 13f + 30f
+            val l = (hoverX - tw / 2).coerceIn(4f, c.w - tw - 4f)
+            paint.color = android.graphics.Color.argb(235, 20, 24, 28)
+            c.canvas.drawRoundRect(android.graphics.RectF(l, 0f, l + tw, 32f), 16f, 16f, paint)
+            c.label(hoverName, l + 15f, 4f, 21f, XrTheme.text, maxLines = 1, maxWidth = tw)
+        }
     }
 }

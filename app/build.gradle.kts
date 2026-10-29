@@ -65,7 +65,7 @@ android {
     androidResources { noCompress += listOf("task", "so", "tflite", "onnx") }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/hyperx-assets"))
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true }
 }
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
@@ -90,6 +90,9 @@ tasks.named("preBuild") { dependsOn(packHyperx) }
  * bundled: only its sources are in third_party/compatibility-layer, see README there.)
  */
 val compatAar: Configuration by configurations.creating
+// Robolectric's Android jar comes through Gradle (its own downloader can't use the proxy)
+val robolectricSdk: Configuration by configurations.creating
+
 dependencies { compatAar("org.khronos.openxr:openxr_loader_for_android:${libs.versions.openxrLoader.get()}@aar") }
 val compatAssets = tasks.register<Sync>("compatAssets") {
     group = "hyperxr"
@@ -150,10 +153,19 @@ dependencies {
     implementation(libs.geckoview)
     implementation(libs.browser)
     testImplementation(libs.junit)
+    // panel previews (UiPreviewTest): real Android Canvas drawing on the PC
+    testImplementation("org.robolectric:robolectric:4.16")
+    robolectricSdk("org.robolectric:android-all-instrumented:15-robolectric-13954326-i7")
 }
 
 // Host JNI bridge tests: ./gradlew :app:testDebugUnitTest -Phyperxr.hostBridge=<dir with libhyperxr.so>
 tasks.withType<Test>().configureEach {
+    // panel previews: ./gradlew :app:testDebugUnitTest --tests '*UiPreviewTest' -Phyperxr.previews=<out dir>
+    providers.gradleProperty("hyperxr.previews").orNull?.let {
+        systemProperty("hyperxr.previews", it)
+        systemProperty("robolectric.offline", "true")
+        systemProperty("robolectric.dependency.dir", robolectricSdk.singleFile.parentFile.absolutePath)
+    }
     val dir = providers.gradleProperty("hyperxr.hostBridge").orNull
     if (dir != null) {
         systemProperty("hyperxr.hostBridge", dir)

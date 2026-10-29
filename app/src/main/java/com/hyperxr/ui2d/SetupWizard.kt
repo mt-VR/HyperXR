@@ -22,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -66,7 +65,7 @@ fun SetupWizard(a: MainActivity) {
             Text("${step + 1}. ${steps[step]}", color = HxColors.text, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
             Column(Modifier.widthIn(max = 980.dp)) {
                 when (step) {
-                    0 -> Welcome()
+                    0 -> { SectionCard("Idioma") { LanguagePicker(a) }; Welcome() }
                     1 -> Permissions(a)
                     2 -> RealityLensesSection(a)
                     3 -> EyesAndHands(a)

@@ -353,7 +353,7 @@ class HyperGuardian(private val activity: Activity) {
         val c = Canvas(b)
         val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(225, 190, 40, 40) }
         c.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), h / 2f, h / 2f, bg)
-        c.drawText(text, 60f, h / 2f - (p.descent() + p.ascent()) / 2, p)
+        c.drawText(com.hyperxr.i18n.I18n.t(text), 60f, h / 2f - (p.descent() + p.ascent()) / 2, p)
         labelTex = Gl.uploadBitmap(b, labelTex)
         labelAspect = w.toFloat() / h
         b.recycle()

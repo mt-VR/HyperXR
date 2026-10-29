@@ -83,6 +83,13 @@ class HandState(val handedness: Handedness) {
      */
     val nnTipHeight = FloatArray(5) { Float.NaN }
     var nnNs: Long = 0L
+    /**
+     * Forearm seen by the camera (skin segmentation on the NPU): unit direction from the wrist to
+     * the elbow, world space, how sure, and the capture time it was measured at (0 = never).
+     */
+    val armDir = Vec3(0f, -0.6f, 0.8f)
+    var armConfidence = 0f
+    var armNs = 0L
 
     /** Includes the short coasting phase after a missed detection (gesture and position are held). */
     val isUsable: Boolean get() = state != TrackingState.NOT_TRACKED

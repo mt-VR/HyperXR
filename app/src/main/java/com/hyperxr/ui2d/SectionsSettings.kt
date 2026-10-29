@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +35,7 @@ internal fun MainActivity.update(f: (HyperSettings) -> HyperSettings) { app.sett
 fun HomeSection(a: MainActivity) {
     val caps = a.app.capabilities.last
     val decision = XrModeResolver.resolve(caps, XrModePreference.AUTO)
+    SectionCard("Idioma", "Português, English, Español, Русский") { LanguagePicker(a) }
     SectionCard("Experiência imersiva", "O HyperMagic sempre começa em realidade mista (a câmera mostra o seu ambiente). Dentro dele, o botão Modo VR na dock liga o ambiente virtual, escolhido no app Ambientes.") {
         KeyValue("Rastreamento de cabeça", decision.headTracking)
         if (decision.mode == com.hyperxr.capabilities.XrMode.VR_SBS) Note("Sem câmera utilizável agora: o modo VR fica sempre ligado.", HxColors.warn)
@@ -219,6 +219,9 @@ fun HandsSection(a: MainActivity) {
         ChoiceRow("Visual das mãos", listOf(com.hyperxr.settings.HandVisual.AURA, com.hyperxr.settings.HandVisual.NONE), h.handVisual, {
             if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Contorno"
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }
+        ChoiceRow("Tom de pele das mãos (modo VR)", (0 until com.hyperxr.settings.SKIN_TONES.size).toList(), h.skinTone.coerceIn(0, com.hyperxr.settings.SKIN_TONES.size - 1), {
+            com.hyperxr.settings.SKIN_TONE_NAMES[it]
+        }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(skinTone = v)) } }
         ToggleRow("Apontar com a bolinha", h.ballPointer, "Ligado: clica no que está sob a bolinha, como você vê. Desligado: raio que sai do ombro") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(ballPointer = v)) }
         }

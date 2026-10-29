@@ -19,7 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -160,3 +159,10 @@ val HxShapes = androidx.compose.material3.Shapes(
     extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(24.dp),
 )
+
+/** The language picker: automatic (the phone's language) or one of HyperMagic's languages. */
+@Composable
+fun LanguagePicker(a: MainActivity) {
+    val opts = listOf("" to "Automático") + com.hyperxr.i18n.I18n.LANGUAGES
+    Segmented(opts, a.settingsState.language) { code -> a.update { it.copy(language = code) } }
+}

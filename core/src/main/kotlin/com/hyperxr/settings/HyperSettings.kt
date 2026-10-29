@@ -80,6 +80,8 @@ data class HandTrackingSettings(
     val prefer60FpsOverDepth: Boolean = false,
     /** How tracked hands are drawn. */
     val handVisual: HandVisual = HandVisual.AURA,
+    /** Skin of the VR hands and arms: 0 light .. 4 dark (see [SKIN_TONES]). */
+    val skinTone: Int = 1,
     val auraOpacity: Float = 0.8f,
     /** Point with the pinch ball (what is under it, seen from the eyes); false = shoulder ray. */
     val ballPointer: Boolean = true,
@@ -114,6 +116,13 @@ data class HandTrackingSettings(
 enum class ClickGesture { POINT_PUSH, PINCH }
 
 enum class HandVisual { AURA, NONE, SKELETON, BOTH }
+
+/** Skin colours of the VR hands (albedo, 0..1) and their names. */
+val SKIN_TONES = arrayOf(
+    floatArrayOf(0.93f, 0.75f, 0.65f), floatArrayOf(0.85f, 0.64f, 0.53f), floatArrayOf(0.74f, 0.53f, 0.40f),
+    floatArrayOf(0.58f, 0.40f, 0.29f), floatArrayOf(0.40f, 0.27f, 0.19f),
+)
+val SKIN_TONE_NAMES = arrayOf("Clara", "Média clara", "Média", "Morena", "Negra")
 
 @Serializable
 data class ControllerSettings(
@@ -202,6 +211,8 @@ data class OnboardingSettings(
 data class HyperSettings(
     val version: Int = CURRENT_VERSION,
     val xrMode: XrModePreference = XrModePreference.AUTO,
+    /** Language of the texts: "pt", "en", "es", "ru", or "" to follow the phone. */
+    val language: String = "",
     val launcher: LauncherSettings = LauncherSettings(),
     val graphics: GraphicsSettings = GraphicsSettings(),
     val performance: PerformanceSettings = PerformanceSettings(),

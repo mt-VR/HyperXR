@@ -71,26 +71,100 @@ interface LauncherActions {
 
 private val background = Executors.newSingleThreadExecutor()
 
-class QuickSettingsPanel(private val a: LauncherActions, private val open: (String) -> Unit) : XrPanel(1.0f, 1.1f, title = "Ajustes rápidos") {
+/**
+ * Ajustes rápidos, like a headset's quick settings: battery, hands and controller at the top
+ * left, the date, Configurações on the right; volume and brightness sliders; three big cards (VR
+ * or mixed reality, HyperGuardian, Ambientes); and two rows of round shortcuts. Pointing at a
+ * shortcut names it at the bottom.
+ */
+class QuickSettingsPanel(private val a: LauncherActions, private val activity: android.app.Activity, private val open: (String) -> Unit) :
+    XrPanel(1.15f, 0.74f, title = "Ajustes rápidos") {
     private var t = 0f
-    override fun update(dt: Float) { t += dt; if (t > 1f) { t = 0f; dirty = true } } // live hand status
+    private var battery = ""
+    private val audio = activity.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+    private var brightness = runCatching {
+        val w = activity.window.attributes.screenBrightness
+        if (w >= 0f) w else android.provider.Settings.System.getInt(activity.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f
+    }.getOrDefault(0.8f)
+
+    override fun update(dt: Float) { t += dt; if (t > 1f) { t = 0f; battery = batteryText(); dirty = true } }
+
+    private fun volume(): Float {
+        val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        return audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat() / max
+    }
+
     override fun draw(c: PanelCanvas) {
         val s = HyperXRApp.instance.settings
-        c.paragraph("${a.modeDescription} • ${a.trackingDescription}", 26f)
-        c.paragraph(a.handStatus, 22f)
-        c.toggle("mode", "Launcher no modo New", a.mode() == LauncherMode.NEW) { a.setMode(if (it) LauncherMode.NEW else LauncherMode.DOCK); dirty = true }
-        val hv = s.current.handTracking.handVisual
-        c.row("handvis", "Mãos: " + if (hv == com.hyperxr.settings.HandVisual.NONE) "ocultas" else "contorno") {
-            val next = if (hv == com.hyperxr.settings.HandVisual.NONE) com.hyperxr.settings.HandVisual.AURA else com.hyperxr.settings.HandVisual.NONE
-            s.update { it.copy(handTracking = it.handTracking.copy(handVisual = next)) }; dirty = true
+        if (battery.isEmpty()) battery = batteryText()
+        // status row
+        var x = c.pad
+        fun status(glyph: String, text: String) {
+            c.image(Glyphs.get(glyph), x, 30f, 30f, 30f)
+            c.label(text, x + 36f, 30f, 22f, XrTheme.text, maxWidth = 200f, maxLines = 1)
+            x += 52f + text.length * 11f
         }
-        c.toggle("dt", "Direct Touch", s.current.handTracking.directTouch) { v -> s.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) }; dirty = true }
-        c.toggle("pp", "Clicar apontando e empurrando", s.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH) { v ->
-            s.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }; dirty = true
+        status("battery_full", battery.substringBefore(' ').ifEmpty { "—" })
+        status("back_hand", if (a.handStatus.contains("sem", true) || a.handStatus.contains("parad", true)) "—" else "ok")
+        if (a.hyperConnectStatus.isNotEmpty() && !a.hyperConnectStatus.contains("desligad", true)) status("sports_esports", "on")
+        val loc = java.util.Locale.forLanguageTag(com.hyperxr.i18n.I18n.language)
+        val date = android.icu.text.SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(loc, "EEEdMMM"), loc).format(java.util.Date())
+        c.label(date, c.w / 2 - 120f, 30f, 23f, XrTheme.text, maxWidth = 240f, maxLines = 1)
+        c.button("cfg", "Configurações", c.w - c.pad - 300f, 20f, 300f, 54f, icon = Glyphs.get("settings")) { open("settings") }
+        // sliders
+        val sw = (c.w - 2 * c.pad - 24f) / 2
+        c.slider("vol", volume(), c.pad, 104f, sw, 54f, Glyphs.get("volume_up")) { v ->
+            val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (v * max).toInt(), 0); dirty = true
         }
-        c.row("env", "Ambientes…") { open("environments") }
-        c.row("rc", "Recentralizar visão") { a.recenter() }
-        c.row("exit", "Sair para as configurações 2D", accent = true) { a.exitToSettings() }
+        c.slider("bri", brightness, c.pad + sw + 24f, 104f, sw, 54f, Glyphs.get("light_mode")) { v ->
+            brightness = v.coerceAtLeast(0.05f); dirty = true
+            activity.runOnUiThread { activity.window.attributes = activity.window.attributes.apply { screenBrightness = brightness } }
+        }
+        // three big cards
+        val gap = 20f
+        val tw = (c.w - 2 * c.pad - 2 * gap) / 3
+        val ty = 184f; val th = 150f
+        val vr = a.vrOn()
+        c.tile("vr", if (vr) "Modo VR" else "Realidade mista", if (a.vrSwitchable()) "Toque para trocar" else "Só VR neste celular", c.pad, ty, tw, th,
+            Glyphs.get("vrpano"), on = vr, enabled = a.vrSwitchable()) { a.setVr(!vr); dirty = true }
+        c.tile("guard", "HyperGuardian", "Área de segurança", c.pad + tw + gap, ty, tw, th, Glyphs.get("shield_person")) { open("guardian") }
+        c.tile("env", "Ambientes", "Trocar o cenário", c.pad + 2 * (tw + gap), ty, tw, th, Glyphs.get("landscape")) { open("environments") }
+        // two rows of shortcuts
+        val hv = s.current.handTracking.handVisual != com.hyperxr.settings.HandVisual.NONE
+        val rows = listOf(
+            listOf(
+                Triple("open_with", "Recentralizar a visão", false) to { a.recenter() },
+                Triple("mic", "Comando de voz", false) to { a.startVoice() },
+                Triple("back_hand", if (hv) "Mãos visíveis" else "Mãos ocultas", hv) to {
+                    s.update { it.copy(handTracking = it.handTracking.copy(handVisual = if (hv) com.hyperxr.settings.HandVisual.NONE else com.hyperxr.settings.HandVisual.AURA)) }; Unit
+                },
+                Triple("visibility", "Janela para o mundo real", false) to { open("reality") },
+                Triple("photo_camera", "Tirar uma foto", false) to { a.capture() },
+                Triple("screen_share", "Câmera e transmissão", false) to { open("share") },
+            ),
+            listOf(
+                Triple("apps", "Biblioteca", a.libraryOpen()) to { a.toggleLibrary() },
+                Triple("dashboard", "Áreas de trabalho", false) to { open("workspaces") },
+                Triple("storefront", "Loja", false) to { open("loja") },
+                Triple("group", "Pessoas", false) to { open("people") },
+                Triple("emoji_events", "Missões e conquistas", false) to { open("missions") },
+                Triple("power_settings_new", "Sair para a tela 2D", false) to { a.exitToSettings() },
+            ),
+        )
+        val pw = (c.w - 2 * c.pad - 5 * 16f) / 6
+        var hint = ""
+        for ((ri, row) in rows.withIndex()) {
+            val py = 360f + ri * 84f
+            for ((i, item) in row.withIndex()) {
+                val (meta, act) = item
+                val id = "p:${meta.first}"
+                if (isHovered(id)) hint = meta.second
+                c.pill(id, Glyphs.get(meta.first), c.pad + i * (pw + 16f), py, pw, 66f, on = meta.third) { act(); dirty = true }
+            }
+        }
+        if (hint.isNotEmpty()) c.label(hint, c.pad, c.h - 46f, 23f, XrTheme.textDim, maxLines = 1)
+        else c.label(a.modeDescription, c.pad, c.h - 46f, 21f, XrTheme.textDim, maxLines = 1)
     }
 }
 

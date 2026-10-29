@@ -392,10 +392,10 @@ class OceanPanel(private val app: OceanApp) : XrPanel(0.95f, 0.98f, title = "Oce
             c.canvas.drawBitmap(b, null, RectF(x + 26f, y + (h - s) / 2, x + 26f + s, y + (h + s) / 2), iconPaint)
         }
         text.color = fg; text.typeface = XrTheme.medium; text.textSize = 30f
-        c.canvas.drawText(t.title, x + 100f, y + h / 2 - 6f, text)
+        c.canvas.drawText(com.hyperxr.i18n.I18n.t(t.title), x + 100f, y + h / 2 - 6f, text)
         text.typeface = XrTheme.regular; text.textSize = 23f
         text.color = if (t.on) Color.rgb(40, 62, 98) else Color.rgb(170, 175, 184)
-        c.canvas.drawText(t.sub, x + 100f, y + h / 2 + 28f, text)
+        c.canvas.drawText(com.hyperxr.i18n.I18n.t(t.sub), x + 100f, y + h / 2 + 28f, text)
         if (t.enabled) addRegion(Region(r, t.id, t.action))
     }
 

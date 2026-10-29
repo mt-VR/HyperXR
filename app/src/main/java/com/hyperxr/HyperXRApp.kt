@@ -27,6 +27,9 @@ class HyperXRApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // texts in the chosen language, and again whenever it changes
+        com.hyperxr.i18n.Translations.apply(this, settings.current.language)
+        settings.addListener { com.hyperxr.i18n.Translations.apply(this, it.language) }
         // the Minecraft process belongs to its JVM (own signal handlers, exits by itself)
         if (processName().endsWith(":minecraft")) return
         com.hyperxr.diagnostics.CrashReporter.install(this)

@@ -374,6 +374,64 @@ class HandTrackingService(private val context: Context) {
         frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p, if (slot.depth.valid) slot.depth else null) } }
     }
 
+    // ------------------------------------------------------------------ arms (VR hands)
+    /** True while the VR hands are drawn with their arms: the arm segmenter then runs (~15 Hz). */
+    @Volatile var armTracking = false
+    val arms by lazy { ArmSegEngine(context) }
+    private val armThread = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "hx-arms") }
+    private val armBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var armPreparing = false
+    private var lastArmNs = 0L
+    private val armResult = ArmFromMask.Result()
+
+    private class ArmJob(val bmp: Bitmap, val intr: CameraIntrinsics, val pose: Pose, val captureNs: Long,
+                         val sides: List<Triple<Handedness, FloatArray, Vec3>>)
+
+    private fun maybeRunArms(slot: Slot, intr: CameraIntrinsics) {
+        if (!armTracking || seen.isEmpty() || arms.failed) return
+        val pose = slot.pose ?: return
+        if (!arms.ready) {
+            if (!armPreparing) { armPreparing = true; armThread.execute { arms.prepare(); armPreparing = false } }
+            return
+        }
+        val now = System.nanoTime()
+        if (now - lastArmNs < 66_000_000L || !armBusy.compareAndSet(false, true)) return
+        lastArmNs = now
+        val src = slot.bitmap ?: run { armBusy.set(false); return }
+        val small = Bitmap.createScaledBitmap(src, ArmSegEngine.SIZE, ArmSegEngine.SIZE, true)
+        val job = ArmJob(small, intr, pose.copy(), slot.captureNs,
+            seen.map { Triple(it, sideImage.getValue(it).copyOf(), trackers.getValue(it).state.joints[HandJoint.WRIST].copy()) })
+        armThread.execute {
+            try { runArmJob(job) } catch (t: Throwable) { Diagnostics.log("Arm tracking run failed: ${t.message}") } finally { small.recycle(); armBusy.set(false) }
+        }
+    }
+
+    private val armRay = Vec3(); private val armOut = Vec3(); private val armFwd = Vec3(); private val armShoulder = Vec3()
+
+    private fun runArmJob(job: ArmJob) {
+        if (!arms.run(job.bmp)) return
+        val aspect = job.intr.width.toFloat() / job.intr.height.coerceAtLeast(1)
+        // shoulders from where the camera (your head) is and faces, level
+        job.pose.orientation.rotate(armFwd.set(0f, 0f, -1f), armFwd); armFwd.y = 0f
+        if (armFwd.length() < 1e-3f) armFwd.set(0f, 0f, -1f)
+        armFwd.normalize()
+        for ((side, img, wrist) in job.sides) {
+            val r = armResult
+            if (!ArmFromMask.forearm(arms.arm, ArmSegEngine.SIZE, img, aspect, r)) continue
+            val s = if (side == Handedness.RIGHT) 1f else -1f
+            armShoulder.set(job.pose.position).addScaled(armFwd, -0.04f)
+            armShoulder.x += -armFwd.z * 0.18f * s; armShoulder.z += armFwd.x * 0.18f * s; armShoulder.y -= 0.24f
+            ArmSolver.rayThrough(r.px, r.py, job.intr, job.pose, armRay)
+            val prior = synchronized(lock) { published.getValue(side).let { if (it.armNs != 0L) it.armDir.copy() else null } }
+            if (!ArmSolver.elbowDirection(job.pose.position, wrist, armRay, armShoulder, prior, armOut)) continue
+            synchronized(lock) {
+                for (st in listOf(trackers.getValue(side).state, published.getValue(side))) {
+                    st.armDir.set(armOut); st.armConfidence = r.confidence; st.armNs = job.captureNs
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ AI depth (table typing)
     /**
      * Table height (tracking space) while the table keyboard wants AI depth; NaN = off. The
@@ -571,6 +629,7 @@ class HandTrackingService(private val context: Context) {
             }
         }
         maybeRunAiDepth(slot, intr)
+        maybeRunArms(slot, intr)
         afterFrame(slot)
         Diagnostics.record(Stage.HAND_POSE, System.nanoTime() - t0)
         updateStats(t0, seen.size, t0 - slot.submitNs, t0 - slot.captureNs)
@@ -678,6 +737,7 @@ class HandTrackingService(private val context: Context) {
         for (f in 0 until 5) { dst.rawTips[f].set(src.rawTips[f]); dst.measuredTips[f].set(src.measuredTips[f]); dst.measuredTipValid[f] = src.measuredTipValid[f] }
         dst.resultNs = src.resultNs
         src.nnTipHeight.copyInto(dst.nnTipHeight); dst.nnNs = src.nnNs
+        dst.armDir.set(src.armDir); dst.armConfidence = src.armConfidence; dst.armNs = src.armNs
     }
 
     /**

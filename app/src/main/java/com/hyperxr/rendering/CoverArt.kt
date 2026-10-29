@@ -22,10 +22,12 @@ object CoverArt {
     private val cache = HashMap<String, Bitmap>()
 
     fun cover(ctx: Context, key: String?, title: String, w: Int = 640, h: Int = 360): Bitmap = synchronized(cache) {
-        cache.getOrPut("$key|$title|$w") { draw(ctx, key, title, w, h) }
+        // the name on the cover in the chosen language (the colours stay those of the original name)
+        val shown = com.hyperxr.i18n.I18n.t(title)
+        cache.getOrPut("$key|$shown|$w") { draw(ctx, key, title, w, h, shown) }
     }
 
-    private fun draw(ctx: Context, key: String?, title: String, w: Int, h: Int): Bitmap {
+    private fun draw(ctx: Context, key: String?, title: String, w: Int, h: Int, shown: String = title): Bitmap {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -60,7 +62,7 @@ object CoverArt {
             color = Color.WHITE; typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             textSize = h * 0.16f; setShadowLayer(h * 0.03f, 0f, h * 0.01f, Color.argb(200, 0, 0, 0))
         }
-        val t = title.uppercase()
+        val t = shown.uppercase()
         val layout = android.text.StaticLayout.Builder.obtain(t, 0, t.length, tp, (w * 0.62f).toInt())
             .setMaxLines(2).setEllipsize(android.text.TextUtils.TruncateAt.END).setLineSpacing(0f, 0.9f).build()
         c.save(); c.translate(w * 0.06f, h * 0.92f - layout.height); layout.draw(c); c.restore()

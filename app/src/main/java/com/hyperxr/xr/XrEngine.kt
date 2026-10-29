@@ -434,7 +434,11 @@ class XrEngine(
             val cam: CameraImageSource? = arCore ?: passthrough
             val overCam = cam != null && cam.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill
             realHandsDrawn = !overCam && settings.handTracking.handVisual == com.hyperxr.settings.HandVisual.AURA && input.handsAvailable
-            if (realHandsDrawn) realHand.submit(scene, renderer, drawnHands, input.head)
+            hands.armTracking = realHandsDrawn
+            if (realHandsDrawn) {
+                realHand.skin = com.hyperxr.settings.SKIN_TONES[settings.handTracking.skinTone.coerceIn(0, com.hyperxr.settings.SKIN_TONES.size - 1)]
+                realHand.submit(scene, drawnHands, input.head)
+            }
         }
         if (bootActive) {
             val handsReady = !input.handsAvailable || hands.backendInUse != "-"
@@ -545,6 +549,7 @@ class XrEngine(
         val gc = guardian.cameraAmount
         if (gc > 0.02f && camera != null && camera.hasFrame && scene.background != Background.PASSTHROUGH) renderer.drawCameraOverlay(eye, camera, gc)
         renderer.renderLate(scene, eye)
+        if (realHandsDrawn) { realHand.render(eye); renderer.restoreState() }
         if (boundaryActive && camera != null) {
             val ar = arCore!!
             renderer.drawBoundary(eye, camera, boundaryTex, ar.depthMatrix, boundaryWarnM, BOUNDARY_FULL_M, boundaryFade)

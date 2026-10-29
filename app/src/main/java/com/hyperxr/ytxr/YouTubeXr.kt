@@ -132,7 +132,7 @@ private fun XrPanel.chip(c: PanelCanvas, id: String, label: String, x: Float, y:
     fill.color = if (on) Yt.chipOn else if (isHovered(id)) Yt.surfaceHover else Yt.surface
     c.canvas.drawRoundRect(r, height / 2.5f, height / 2.5f, fill)
     tp.color = if (on) Yt.chipOnText else Yt.text
-    c.canvas.drawText(label, x + 28f, y + height / 2 + 10f, tp)
+    c.canvas.drawText(com.hyperxr.i18n.I18n.t(label), x + 28f, y + height / 2 + 10f, tp)
     addRegion(XrPanel.Region(r, id, action))
     return w
 }
@@ -182,7 +182,7 @@ private fun badge(c: PanelCanvas, r: RectF, v: XrYouTube.Video) {
     val b = RectF(r.right - w - 12f, r.bottom - 46f, r.right - 12f, r.bottom - 12f)
     fill.color = if (v.live) Color.rgb(204, 0, 0) else Color.argb(204, 0, 0, 0)
     c.canvas.drawRoundRect(b, 8f, 8f, fill)
-    c.canvas.drawText(text, b.left + 10f, b.bottom - 9f, tp)
+    c.canvas.drawText(com.hyperxr.i18n.I18n.t(text), b.left + 10f, b.bottom - 9f, tp)
 }
 
 // ============================================================================ browse
@@ -291,7 +291,7 @@ class YouTubePanel(private val host: MediaHost) : XrPanel(1.9f, 1.28f, title = "
             if (on || isHovered("rail:$id")) { fill.color = if (on) Yt.surface else Color.argb(255, 33, 33, 33); c.canvas.drawRoundRect(r, 24f, 24f, fill) }
             YtIcons.get(ctx, railIcon(id))?.let { c.canvas.drawBitmap(it, null, RectF(r.centerX() - 26f, ry + 16f, r.centerX() + 26f, ry + 68f), bmpPaint) }
             val tp = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; typeface = if (on) XrTheme.medium else XrTheme.regular; color = Yt.text; textAlign = Paint.Align.CENTER }
-            c.canvas.drawText(if (label.length > 12) label.substringBefore(' ') else label, r.centerX(), ry + 100f, tp)
+            c.canvas.drawText(com.hyperxr.i18n.I18n.t(label).let { l -> if (l.length > 12) l.substringBefore(' ') else l }, r.centerX(), ry + 100f, tp)
             addRegion(Region(r, "rail:$id", { when (id) { "home" -> home(); "search" -> startSearch(); else -> open(id) } }))
             ry += 128f
             if (ry > c.h - 130f) break
@@ -565,7 +565,7 @@ class YouTubePlayerPanel(private val host: MediaHost, private var video: XrYouTu
         iconButton(c, "360", YtIcons.get(ctx, "panorama_photosphere"), rx, y, 36f, on = immersiveOn) { setImmersive(!immersiveOn) }
         if (q != null) {
             val tp = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; color = Yt.text2; textAlign = Paint.Align.RIGHT }
-            c.canvas.drawText(q.label, rx - 52f, y + 8f, tp)
+            c.canvas.drawText(com.hyperxr.i18n.I18n.t(q.label), rx - 52f, y + 8f, tp)
         }
         // quality menu: chips above the control row, highest first (like YouTube's quality list)
         if (qualityMenu && d != null) {

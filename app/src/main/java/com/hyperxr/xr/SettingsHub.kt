@@ -46,6 +46,11 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
     private val categories: List<Category> = listOf(
         Category("system", "tune", "Sistema", "Modo, recentralizar, tela 2D", listOf(
             Item.Info("Modo") { "${a.modeDescription} • ${a.trackingDescription}" },
+            Item.Action("Idioma", "Toque para trocar: Português, English, Español, Русский") {
+                val langs = com.hyperxr.i18n.I18n.LANGUAGES.map { it.first }
+                settings.update { st -> st.copy(language = langs[(langs.indexOf(com.hyperxr.i18n.Translations.resolve(st.language)) + 1) % langs.size]) }
+            },
+            Item.Info("Idioma atual") { com.hyperxr.i18n.I18n.LANGUAGES.first { it.first == com.hyperxr.i18n.I18n.language }.second },
             Item.Toggle("Launcher no modo New", "Biblioteca à frente em vez da barra", { it.launcher.mode == LauncherMode.NEW }) { s, v ->
                 a.setMode(if (v) LauncherMode.NEW else LauncherMode.DOCK); s.copy(launcher = s.launcher.copy(mode = if (v) LauncherMode.NEW else LauncherMode.DOCK)) },
             Item.Action("Recentralizar visão", "Traz tudo para a frente de você") { a.recenter() },
@@ -87,6 +92,9 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Info("Mãos") { a.handStatus },
             Item.Toggle("Mostrar as mãos", "Contorno das mãos rastreadas", { it.handTracking.handVisual != HandVisual.NONE }) { s, v ->
                 s.copy(handTracking = s.handTracking.copy(handVisual = if (v) HandVisual.AURA else HandVisual.NONE)) },
+            Item.Action("Tom de pele", "Mãos e braços do modo VR: toque para trocar") {
+                settings.update { it.copy(handTracking = it.handTracking.copy(skinTone = (it.handTracking.skinTone + 1) % com.hyperxr.settings.SKIN_TONES.size)) }
+            },
             Item.Toggle("Direct Touch", "Tocar botões com o dedo indicador", { it.handTracking.directTouch }) { s, v -> s.copy(handTracking = s.handTracking.copy(directTouch = v)) },
             Item.Toggle("Clicar apontando e empurrando", "Em vez da pinça", { it.handTracking.clickGesture == ClickGesture.POINT_PUSH }) { s, v ->
                 s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.POINT_PUSH else ClickGesture.PINCH)) },
@@ -158,7 +166,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
         stripIcon(c, "close", "close", 60f, c.h - STRIP / 2) { visible = false; onClose?.invoke() }
         stripIcon(c, "min", "remove", 150f, c.h - STRIP / 2) { visible = false; onClose?.invoke() }
         text.textSize = 30f; text.color = TEXT; text.typeface = XrTheme.medium; text.textAlign = Paint.Align.CENTER
-        c.canvas.drawText(page?.title ?: "Configurações", c.w / 2, c.h - STRIP / 2 + 10f, text)
+        c.canvas.drawText(com.hyperxr.i18n.I18n.t(page?.title ?: "Configurações"), c.w / 2, c.h - STRIP / 2 + 10f, text)
         text.textAlign = Paint.Align.LEFT
 
         val p = page
@@ -171,7 +179,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
         icon("search")?.let { c.canvas.drawBitmap(it, null, RectF(sb.left + 26f, sb.top + 15f, sb.left + 66f, sb.top + 55f), bmp) }
         text.textSize = 28f; text.typeface = XrTheme.regular
         text.color = if (query.isEmpty()) TEXT2 else TEXT
-        c.canvas.drawText(if (query.isEmpty()) "Pesquisar nas configurações" else query.toString() + if (searching) "|" else "", sb.left + 86f, sb.top + 45f, text)
+        c.canvas.drawText(if (query.isEmpty()) com.hyperxr.i18n.I18n.t("Pesquisar nas configurações") else query.toString() + if (searching) "|" else "", sb.left + 86f, sb.top + 45f, text)
         addRegion(Region(sb, "search", { searching = true; a.openKeyboard(this); dirty = true }))
 
         val q = query.toString().trim().lowercase()
@@ -282,15 +290,16 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
         val bmp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val text = TextPaint(Paint.ANTI_ALIAS_FLAG)
         const val STRIP = 96f
-        val BG = Color.argb(246, 50, 51, 54)
-        val STRIP_BG = Color.argb(240, 40, 41, 44)
-        val TILE = Color.rgb(72, 73, 77)
-        val TILE_HOVER = Color.rgb(90, 91, 96)
-        val SEARCH_BG = Color.rgb(62, 63, 67)
-        val SEARCH_HOVER = Color.rgb(76, 77, 82)
-        val TEXT = Color.rgb(242, 243, 245)
-        val TEXT2 = Color.rgb(176, 178, 184)
-        val ON = Color.rgb(24, 119, 242)
-        val OFF = Color.rgb(110, 111, 116)
+        // the same teal-slate look as every other panel (XrTheme)
+        val BG = XrTheme.panelBottom
+        val STRIP_BG = XrTheme.bar
+        val TILE = XrTheme.tile
+        val TILE_HOVER = XrTheme.buttonHover
+        val SEARCH_BG = XrTheme.button
+        val SEARCH_HOVER = XrTheme.buttonHover
+        val TEXT = XrTheme.text
+        val TEXT2 = XrTheme.textDim
+        val ON = XrTheme.accent
+        val OFF = XrTheme.buttonDisabled
     }
 }

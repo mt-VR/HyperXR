@@ -20,28 +20,34 @@ import com.hyperxr.math.Vec3
 import com.hyperxr.rendering.FrameScene
 import com.hyperxr.rendering.PanelSurface
 
-/** HyperXR visual identity for spatial panels: deep indigo glass with violet/pink accents. */
+/**
+ * HyperXR's look for spatial panels, like a headset's system panels: deep teal-slate glass,
+ * lighter rounded tiles, pill buttons, white text, blue only for what is on or selected, and the
+ * window bar (title, close, minimise) along the bottom edge with a grab handle under it.
+ */
 object XrTheme {
-    // Neutral graphite like Horizon OS panels: flat translucent grey glass, lighter grey controls,
-    // blue only for primary/selected actions.
-    val panelTop = Color.argb(240, 42, 43, 46)
-    val panelBottom = Color.argb(240, 32, 33, 36)
-    val border = Color.argb(46, 255, 255, 255)
-    val text = Color.rgb(242, 243, 245)
-    val textDim = Color.rgb(166, 169, 175)
-    val accent = Color.rgb(40, 116, 240)
-    val accentPressed = Color.rgb(84, 148, 255)
-    val accent2 = Color.rgb(84, 148, 255)
-    val button = Color.argb(255, 58, 60, 64)
-    val buttonHover = Color.argb(255, 78, 80, 86)
-    val buttonPressed = Color.argb(255, 104, 107, 114)
-    val buttonDisabled = Color.argb(255, 44, 45, 48)
-    val danger = Color.rgb(232, 72, 72)
-    val ok = Color.rgb(70, 200, 130)
+    val panelTop = Color.argb(246, 61, 90, 99)
+    val panelBottom = Color.argb(246, 47, 72, 80)
+    val bar = Color.argb(250, 40, 61, 68)
+    val border = Color.argb(40, 255, 255, 255)
+    val text = Color.rgb(246, 249, 250)
+    val textDim = Color.rgb(184, 201, 206)
+    val accent = Color.rgb(52, 132, 246)
+    val accentPressed = Color.rgb(96, 160, 255)
+    val accent2 = Color.rgb(120, 182, 255)
+    val button = Color.argb(255, 76, 103, 111)
+    val buttonHover = Color.argb(255, 92, 121, 129)
+    val buttonPressed = Color.argb(255, 112, 141, 149)
+    val buttonDisabled = Color.argb(255, 60, 84, 92)
+    val tile = Color.argb(255, 74, 101, 109)
+    val danger = Color.rgb(236, 84, 84)
+    val ok = Color.rgb(76, 206, 140)
     /** Corner radius of panels in metres (also used by the quad shader). */
-    const val PANEL_RADIUS_M = 0.045f
-    /** Rounded-square controls: radius as a fraction of the control height. */
-    const val CONTROL_ROUNDING = 0.32f
+    const val PANEL_RADIUS_M = 0.04f
+    /** Controls are pills: radius as a fraction of the control height. */
+    const val CONTROL_ROUNDING = 0.5f
+    /** Rounded tiles (cards, big toggles): radius in pixels at 900 px per metre. */
+    const val TILE_RADIUS = 22f
     val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 }
@@ -93,19 +99,23 @@ abstract class XrPanel(
     fun isHovered(id: String) = hoverRegion?.id == id
     fun isPressed(id: String) = pressRegion?.id == id
 
+    /** Called by the minimise button of the window bar (null: no minimise button). */
+    var onMinimize: (() -> Unit)? = null
+    /** Whether the panel has the window bar along its bottom edge (title, close, minimise) and the grab handle. */
+    open val windowBar: Boolean get() = closable || title.isNotEmpty()
+    private var handleTex = 0
+    private var langVersion = -1
+
     /** Renders when dirty and submits the quad to the frame (GL thread). */
     open fun submit(scene: FrameScene) {
         if (!visible) return
         var s = surface
         if (s == null) { s = PanelSurface(pxW, pxH); surface = s }
         if (s.widthPx != pxW || s.heightPx != pxH) { s.resize(pxW, pxH); dirty = true }
+        if (langVersion != com.hyperxr.i18n.I18n.version) { langVersion = com.hyperxr.i18n.I18n.version; dirty = true }
         if (dirty) {
             s.begin()
-            regions.clear()
-            val pc = PanelCanvas(s.canvas, pxW.toFloat(), pxH.toFloat(), this, ppm)
-            paintBackground(pc)
-            if (title.isNotEmpty() || closable) pc.titleBar(title, closable)
-            draw(pc)
+            renderTo(s.canvas)
             s.upload()
             dirty = false
         }
@@ -114,10 +124,39 @@ abstract class XrPanel(
         p.pose.set(pose)
         p.width = widthMeters; p.height = heightMeters
         p.radius = XrTheme.PANEL_RADIUS_M
+        if (windowBar) {
+            // the grab handle: a white pill a little under the window
+            if (handleTex == 0) handleTex = com.hyperxr.rendering.Gl.uploadBitmap(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) })
+            val hnd = scene.addPanel()
+            hnd.texture = handleTex
+            hnd.pose.set(pose)
+            pose.orientation.rotate(handleOffset.set(0f, -(heightMeters / 2 + 0.032f), 0f), handleOffset)
+            hnd.pose.position.add(handleOffset)
+            hnd.width = (widthMeters * 0.14f).coerceIn(0.08f, 0.16f); hnd.height = 0.011f
+            hnd.radius = 0.0055f
+            hnd.alpha = if (dragging || isHovered(TITLE_BAR)) 1f else 0.82f
+        }
+    }
+    private val handleOffset = Vec3()
+
+    /** Draws the whole panel (background, window bar, content) into [canvas], pxW x pxH. Any thread that owns the panel. */
+    fun renderTo(canvas: Canvas) {
+        regions.clear()
+        val full = PanelCanvas(canvas, pxW.toFloat(), pxH.toFloat(), this, ppm)
+        paintBackground(full)
+        val bar = windowBar
+        if (bar) full.windowBar(title, closable, onMinimize)
+        // content above the bar; it starts at the top padding
+        val pc = if (bar) PanelCanvas(canvas, pxW.toFloat(), pxH.toFloat() - PanelCanvas.BAR_PX, this, ppm) else full
+        pc.y = pc.pad
+        draw(pc)
     }
 
+    /** For previews: points at ([px], [py]) as if hovered, so hover looks can be checked. */
+    fun hoverAt(px: Float, py: Float) { hoverPx = px; hoverPy = py; hoverRegion = regions.lastOrNull { it.rect.contains(px, py) } }
+
     /** GL thread. Subclasses holding players/bitmaps free them here too. */
-    open fun release() { surface?.release(); surface = null }
+    open fun release() { surface?.release(); surface = null; if (handleTex != 0) { com.hyperxr.rendering.Gl.deleteTexture(handleTex); handleTex = 0 } }
 
     internal fun addRegion(r: Region) { regions += r }
 
@@ -222,7 +261,8 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     val pad = 36f
     var y = 0f
-    val titleHeight = 92f
+    /** Where content starts below the top edge (the window bar is at the bottom now). */
+    val titleHeight = 24f
 
     fun background() {
         val r = XrTheme.PANEL_RADIUS_M * ppm
@@ -236,28 +276,112 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         y = pad
     }
 
-    fun titleBar(title: String, closable: Boolean) {
-        panel.addRegion(XrPanel.Region(RectF(0f, 0f, w - 120f, titleHeight), XrPanel.TITLE_BAR, null))
-        label(title, pad, 30f, 42f, XrTheme.text, bold = true)
-        // drag handle
-        fill.color = Color.argb(80, 255, 255, 255)
-        canvas.drawRoundRect(RectF(w / 2 - 60f, 14f, w / 2 + 60f, 22f), 4f, 4f, fill)
-        if (closable) {
-            val r = RectF(w - 104f, 18f, w - 24f, 76f)
-            val hover = panel.isHovered("__close")
-            fill.color = if (hover) XrTheme.danger else XrTheme.button
-            canvas.drawRoundRect(r, r.height() * XrTheme.CONTROL_ROUNDING, r.height() * XrTheme.CONTROL_ROUNDING, fill)
-            fill.color = Color.WHITE; fill.strokeWidth = 5f
-            canvas.drawLine(r.centerX() - 11f, r.centerY() - 11f, r.centerX() + 11f, r.centerY() + 11f, fill)
-            canvas.drawLine(r.centerX() + 11f, r.centerY() - 11f, r.centerX() - 11f, r.centerY() + 11f, fill)
-            panel.addRegion(XrPanel.Region(r, "__close", { panel.visible = false; panel.onClose?.invoke() }))
+    /**
+     * The window bar along the bottom edge: a darker band with the title in the middle, and the
+     * close and minimise buttons as small discs on the left. Grabbing the band moves the window.
+     */
+    fun windowBar(title: String, closable: Boolean, onMinimize: (() -> Unit)?) {
+        val top = h - BAR_PX
+        val r = XrTheme.PANEL_RADIUS_M * ppm
+        canvas.save()
+        canvas.clipPath(android.graphics.Path().apply { addRoundRect(RectF(0f, 0f, w, h), r, r, android.graphics.Path.Direction.CW) })
+        fill.color = XrTheme.bar
+        canvas.drawRect(0f, top, w, h, fill)
+        fill.color = Color.argb(30, 255, 255, 255)
+        canvas.drawRect(0f, top, w, top + 2f, fill)
+        canvas.restore()
+        panel.addRegion(XrPanel.Region(RectF(0f, top, w, h), XrPanel.TITLE_BAR, null))
+        if (title.isNotEmpty()) {
+            text.textSize = 25f; text.typeface = XrTheme.medium; text.color = XrTheme.text
+            val t = TextUtilsEllipsize(com.hyperxr.i18n.I18n.t(title), text, w - 340f)
+            canvas.drawText(t, (w - text.measureText(t)) / 2, top + BAR_PX / 2 - (text.descent() + text.ascent()) / 2, text)
         }
-        y = titleHeight + 12f
+        val d = 50f
+        var x = 16f
+        val cy = top + (BAR_PX - d) / 2
+        fun disc(id: String, act: () -> Unit, glyph: (RectF) -> Unit) {
+            val rr = RectF(x, cy, x + d, cy + d)
+            val hover = panel.isHovered(id); val press = panel.isPressed(id)
+            fill.color = when { press -> XrTheme.buttonPressed; hover -> if (id == "__close") XrTheme.danger else XrTheme.buttonHover; else -> XrTheme.button }
+            canvas.drawOval(rr, fill)
+            fill.color = Color.WHITE; fill.strokeWidth = 4f; fill.strokeCap = Paint.Cap.ROUND
+            glyph(rr)
+            panel.addRegion(XrPanel.Region(RectF(rr.left - 6f, top, rr.right + 6f, h), id, act))
+            x += d + 12f
+        }
+        if (closable) disc("__close", { panel.visible = false; panel.onClose?.invoke() }) { rr ->
+            canvas.drawLine(rr.centerX() - 9f, rr.centerY() - 9f, rr.centerX() + 9f, rr.centerY() + 9f, fill)
+            canvas.drawLine(rr.centerX() + 9f, rr.centerY() - 9f, rr.centerX() - 9f, rr.centerY() + 9f, fill)
+        }
+        if (onMinimize != null) disc("__min", onMinimize) { rr -> canvas.drawLine(rr.centerX() - 10f, rr.centerY(), rr.centerX() + 10f, rr.centerY(), fill) }
+        fill.strokeCap = Paint.Cap.BUTT
+    }
+
+    /**
+     * A big toggle tile like a quick-settings card: rounded, lighter than the panel, an icon at
+     * the top left, a title and a line under it; blue when [on].
+     */
+    fun tile(id: String, title: String, detail: String, x: Float, top: Float, tw: Float, th: Float, glyph: Bitmap? = null,
+             on: Boolean = false, enabled: Boolean = true, action: () -> Unit) {
+        val r = RectF(x, top, x + tw, top + th)
+        val hover = panel.isHovered(id); val press = panel.isPressed(id)
+        fill.color = when {
+            !enabled -> XrTheme.buttonDisabled
+            on && press -> XrTheme.accentPressed
+            on -> XrTheme.accent
+            press -> XrTheme.buttonPressed
+            hover -> XrTheme.buttonHover
+            else -> XrTheme.tile
+        }
+        canvas.drawRoundRect(r, XrTheme.TILE_RADIUS, XrTheme.TILE_RADIUS, fill)
+        if (glyph != null) canvas.drawBitmap(glyph, null, RectF(x + 22f, top + 20f, x + 58f, top + 56f), bmpPaint)
+        val ty = top + th - (if (detail.isNotEmpty()) 64f else 44f)
+        label(title, x + 22f, ty, 28f, XrTheme.text, bold = true, maxWidth = tw - 40f, maxLines = 1)
+        if (detail.isNotEmpty()) label(detail, x + 22f, ty + 36f, 21f, if (on) Color.argb(220, 255, 255, 255) else XrTheme.textDim, maxWidth = tw - 40f, maxLines = 1)
+        if (enabled) panel.addRegion(XrPanel.Region(r, id, action))
+    }
+
+    /** A small pill with only a glyph (the quick-settings row of shortcuts); blue when [on]. */
+    fun pill(id: String, glyph: Bitmap, x: Float, top: Float, pw: Float, ph: Float, on: Boolean = false, action: () -> Unit) {
+        val r = RectF(x, top, x + pw, top + ph)
+        val hover = panel.isHovered(id); val press = panel.isPressed(id)
+        fill.color = when { on && press -> XrTheme.accentPressed; on -> XrTheme.accent; press -> XrTheme.buttonPressed; hover -> XrTheme.buttonHover; else -> XrTheme.tile }
+        canvas.drawRoundRect(r, ph / 2, ph / 2, fill)
+        val g = ph * 0.5f
+        canvas.drawBitmap(glyph, null, RectF(r.centerX() - g / 2, r.centerY() - g / 2, r.centerX() + g / 2, r.centerY() + g / 2), bmpPaint)
+        panel.addRegion(XrPanel.Region(r, id, action))
+    }
+
+    /**
+     * A slider like the volume one: a pill track, the blue part up to the value and a white knob
+     * with the glyph. Pointing at it and clicking sets the value where you point.
+     */
+    fun slider(id: String, value: Float, x: Float, top: Float, sw: Float, sh: Float, glyph: Bitmap?, onChange: (Float) -> Unit) {
+        val r = RectF(x, top, x + sw, top + sh)
+        fill.color = XrTheme.tile
+        canvas.drawRoundRect(r, sh / 2, sh / 2, fill)
+        val v = value.coerceIn(0f, 1f)
+        val kx = x + sh / 2 + (sw - sh) * v
+        fill.color = XrTheme.accent
+        canvas.drawRoundRect(RectF(x, top, kx + sh / 2, top + sh), sh / 2, sh / 2, fill)
+        val hover = panel.isHovered(id)
+        fill.color = Color.WHITE
+        canvas.drawCircle(kx, top + sh / 2, sh / 2 + (if (hover) 4f else 1f), fill)
+        if (glyph != null) {
+            val g = sh * 0.56f
+            val dark = Paint(bmpPaint).apply { colorFilter = android.graphics.PorterDuffColorFilter(Color.rgb(40, 60, 68), android.graphics.PorterDuff.Mode.SRC_IN) }
+            canvas.drawBitmap(glyph, null, RectF(kx - g / 2, top + sh / 2 - g / 2, kx + g / 2, top + sh / 2 + g / 2), dark)
+        }
+        panel.addRegion(XrPanel.Region(RectF(x, top - 10f, x + sw, top + sh + 10f), id, {
+            val px = panel.hoverPx
+            onChange(((px - x - sh / 2) / (sw - sh)).coerceIn(0f, 1f))
+        }))
     }
 
     /** Draws single or multi-line text; returns its height. */
-    fun label(s: String, x: Float, top: Float, size: Float, color: Int = XrTheme.text, bold: Boolean = false, maxWidth: Float = w - x - pad,
+    fun label(text0: String, x: Float, top: Float, size: Float, color: Int = XrTheme.text, bold: Boolean = false, maxWidth: Float = w - x - pad,
               maxLines: Int = Int.MAX_VALUE): Float {
+        val s = com.hyperxr.i18n.I18n.t(text0)
         text.textSize = size; text.color = color; text.typeface = if (bold) XrTheme.medium else XrTheme.regular
         val layout = StaticLayout.Builder.obtain(s, 0, s.length, text, maxWidth.toInt().coerceAtLeast(10))
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)
@@ -300,7 +424,7 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         }
         text.textSize = 30f; text.typeface = XrTheme.medium; text.color = if (enabled) XrTheme.text else XrTheme.textDim
         val ty = top + bh / 2 - (text.descent() + text.ascent()) / 2
-        canvas.drawText(TextUtilsEllipsize(s, text, bw - (tx - x) - 20f), tx, ty, text)
+        canvas.drawText(TextUtilsEllipsize(com.hyperxr.i18n.I18n.t(s), text, bw - (tx - x) - 20f), tx, ty, text)
         if (enabled) panel.addRegion(XrPanel.Region(r, id, action, onLong))
     }
 
@@ -311,7 +435,7 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         if (detail != null) {
             text.textSize = 24f; text.typeface = XrTheme.regular; text.color = XrTheme.textDim
             val tx = pad + 26f + (if (icon != null) bh - 20f else 0f)
-            canvas.drawText(TextUtilsEllipsize(detail, text, w - 2 * pad - (tx - pad) - 20f), tx, y + bh - 18f, text)
+            canvas.drawText(TextUtilsEllipsize(com.hyperxr.i18n.I18n.t(detail), text, w - 2 * pad - (tx - pad) - 20f), tx, y + bh - 18f, text)
         }
         y += bh + 14f
     }
@@ -320,7 +444,8 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         row(id, s + if (value) "   ●  ligado" else "   ○  desligado", accent = value) { onChange(!value) }
     }
 
-    fun chip(s: String, x: Float, top: Float, color: Int): Float {
+    fun chip(s0: String, x: Float, top: Float, color: Int): Float {
+        val s = com.hyperxr.i18n.I18n.t(s0)
         text.textSize = 24f; text.typeface = XrTheme.medium
         val tw = text.measureText(s)
         fill.color = color
@@ -352,7 +477,7 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
         canvas.drawBitmap(icon, null, RectF(ix, iy, ix + s, iy + s), bmpPaint)
         canvas.restore()
         text.textSize = 24f; text.typeface = XrTheme.medium; text.color = XrTheme.text
-        val t = TextUtilsEllipsize(label, text, cw - 10f)
+        val t = TextUtilsEllipsize(com.hyperxr.i18n.I18n.t(label), text, cw - 10f)
         canvas.drawText(t, x + (cw - text.measureText(t)) / 2, top + ch - 12f, text)
         panel.addRegion(XrPanel.Region(r, id, action, onLong))
     }
@@ -409,6 +534,8 @@ class PanelCanvas(val canvas: Canvas, val w: Float, val h: Float, private val pa
     }
 
     companion object {
+        /** Height of the window bar along the bottom edge, pixels. */
+        const val BAR_PX = 78f
         fun TextUtilsEllipsize(s: String, p: TextPaint, max: Float): String =
             android.text.TextUtils.ellipsize(s, p, max.coerceAtLeast(10f), android.text.TextUtils.TruncateAt.END).toString()
     }

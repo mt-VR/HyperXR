@@ -23,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -79,7 +78,10 @@ class MainActivity : ComponentActivity() {
                 }
                 var booting by remember { mutableStateOf(!bootSplashPlayed && app.settings.current.graphics.bootAnimation) }
                 androidx.compose.foundation.layout.Box {
-                    if (settingsState.onboarding.wizardDone) Root(this@MainActivity) else SetupWizard(this@MainActivity)
+                    // a new language redraws every text
+                    androidx.compose.runtime.key(settingsState.language) {
+                        if (settingsState.onboarding.wizardDone) Root(this@MainActivity) else SetupWizard(this@MainActivity)
+                    }
                     if (booting) BootSplash { bootSplashPlayed = true; booting = false }
                 }
             }
