@@ -76,8 +76,6 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     companion object {
         /** Eyes over the floor when tracking starts (the floor of games and environments is 1.6 m down). */
         const val EYE_HEIGHT = 1.6f
-        /** Streaming (SteamVR) needs only the pose and the hand image: no planes, smallest camera image. */
-        @Volatile var lightweight = false
     }
 
     fun create(useDepth: Boolean, prefer60Fps: Boolean = false): Capability {
@@ -97,11 +95,10 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
             val fpsFilter = com.google.ar.core.CameraConfigFilter(s).setTargetFps(java.util.EnumSet.of(
                 com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_30, com.google.ar.core.CameraConfig.TargetFps.TARGET_FPS_60))
             val candidates = runCatching { s.getSupportedCameraConfigs(fpsFilter) }.getOrDefault(emptyList())
-                .sortedWith(if (lightweight) compareBy({ -it.fpsRange.upper }, { it.imageSize.width * it.imageSize.height })
-                    else compareBy({ -it.fpsRange.upper }, { -(it.textureSize.width * it.textureSize.height) }))
+                .sortedWith(compareBy({ -it.fpsRange.upper }, { -(it.textureSize.width * it.textureSize.height) }))
             var chosen: com.google.ar.core.CameraConfig? = null
             var depthSupported = false
-            if (useDepth && !lightweight) {
+            if (useDepth) {
                 val top = candidates.firstOrNull()?.fpsRange?.upper ?: 30
                 for (c in candidates) {
                     // "60 fps first": only configurations as fast as the fastest one may bring depth

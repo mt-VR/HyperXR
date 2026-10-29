@@ -5,7 +5,6 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Voice dictation on the XR keyboard (asked only when the Ditado key is used). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -105,29 +104,6 @@
             </intent-filter>
         </activity>
 
-        <!-- SteamVR streaming client: the phone is the headset of the HyperXR SteamVR driver. -->
-        <activity
-            android:name=".steamvr.SteamVrActivity"
-            android:exported="false"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
-            android:launchMode="singleTask"
-            android:resizeableActivity="false"
-            android:theme="@style/Theme.HyperXR.Immersive" />
-        <!-- Immersive session: spatial launcher in MR or VR SBS. -->
-        <activity
-            android:name=".xr.XrActivity"
-            android:exported="false"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
-            android:launchMode="singleTask"
-            android:resizeableActivity="false"
-            android:theme="@style/Theme.HyperXR.Immersive">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
-            </intent-filter>
-        </activity>
 
         <!-- .hyperx packages run in a separate process: a runaway script is killed with the process. -->
         <activity

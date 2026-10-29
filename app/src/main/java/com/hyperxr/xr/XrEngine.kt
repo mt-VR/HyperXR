@@ -121,20 +121,6 @@ interface GameInput {
     fun onMotion(e: MotionEvent): Boolean
 }
 
-/**
- * Content that fills the whole phone screen itself, lens correction included, in one pass (SteamVR
- * streaming on weak phones): the engine then skips the per-eye targets and the composite. The
- * eyes are set up (pose and frustum) before the call. Return false to render normally.
- */
-interface ScreenOverride {
-    fun drawScreen(eyes: Array<EyeView>, screenW: Int, screenH: Int, xdpi: Float, g: com.hyperxr.settings.GraphicsSettings): Boolean
-}
-
-/** Content that draws an eye itself (SteamVR streaming): return false to render the scene normally. */
-interface EyeOverride {
-    fun renderEye(eye: EyeView, target: RenderTarget): Boolean
-}
-
 interface XrContent {
     fun onGlInit(ctx: XrContext)
     /** Fill ctx.scene for this frame. [dt] in seconds. */
@@ -159,7 +145,7 @@ private const val DISPLAYED_CAMERA_AGE_NS = 30_000_000L
 class XrEngine(
     private val activity: Activity,
     private val content: XrContent,
-    /** Lets an activity run with adjusted settings without saving them (SteamVR performance profiles). */
+    /** Lets an activity run with adjusted settings without saving them . */
     tweak: (com.hyperxr.settings.HyperSettings) -> com.hyperxr.settings.HyperSettings = { it },
 ) : GLSurfaceView.Renderer {
     private val app = HyperXRApp.instance
@@ -485,12 +471,9 @@ class XrEngine(
             val monoMr = scene.background == com.hyperxr.rendering.Background.PASSTHROUGH && ctx.passthroughAvailable && !settings.graphics.stereoInMixedReality
             val ipd = if (monoMr) 0f else settings.graphics.ipdMm / 1000f
             for (eye in 0..1) { eyes[eye].index = eye; setupEye(eyes[eye], if (eye == 0) -ipd / 2 else ipd / 2) }
-            val direct = (content as? ScreenOverride)?.drawScreen(eyes, width, height, activity.resources.displayMetrics.xdpi, settings.graphics) == true
-            if (!direct) {
-                for (eye in 0..1) renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
-                timewarp()
-                compositor.composite(settings.graphics)
-            }
+            for (eye in 0..1) renderEye(eyes[eye], compositor.eyeTarget(eye), camera)
+            timewarp()
+            compositor.composite(settings.graphics)
         }
         if (capture != null) {
             ctx.captureRequest = null
@@ -540,10 +523,6 @@ class XrEngine(
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
             boot.render(eye)
-            GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
-            return
-        }
-        if ((content as? EyeOverride)?.renderEye(eye, target) == true) {
             GLES30.glInvalidateFramebuffer(GLES30.GL_FRAMEBUFFER, 1, DEPTH_ATTACHMENT, 0)
             return
         }

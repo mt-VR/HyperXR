@@ -55,7 +55,6 @@ fun HomeSection(a: MainActivity) {
     SectionCard("Parceria", "O HyperMagic é feito em parceria com Samrat Beketov, criador do MagicXR, que autorizou o uso do código do MagicXR neste app. Obrigado, Samrat!") {
         Note("HyperMagic é software livre (GPLv3). Créditos completos no README do projeto.")
     }
-    SteamVrCard(a)
     SectionCard("Resumo do aparelho") {
         KeyValue("Aparelho", "${caps.manufacturer} ${caps.model} • Android ${caps.androidRelease} (API ${caps.androidSdk})")
         KeyValue("SoC", "${caps.socManufacturer} ${caps.socModel}")
@@ -335,31 +334,5 @@ fun NetworkSection(a: MainActivity) {
         ToggleRow("Baixar apenas em Wi-Fi", s.downloadsOnWifiOnly) { v -> a.update { it.copy(network = it.network.copy(downloadsOnWifiOnly = v)) } }
         ToggleRow("Apps web em modo desktop", s.webAppsDesktopMode, "Igual ao \"site para computador\" dos navegadores") { v -> a.update { it.copy(network = it.network.copy(webAppsDesktopMode = v)) } }
         Note("Pacotes .hyperx só acessam a rede com a permissão 'network' e apenas hosts HTTPS declarados no manifesto.")
-    }
-}
-
-/** SteamVR: the phone becomes the headset of a Windows PC running the HyperXR PC app. */
-@Composable
-private fun SteamVrCard(a: MainActivity) {
-    val prefs = com.hyperxr.steamvr.SteamVrActivity.prefs(a)
-    var ip by remember { mutableStateOf(prefs.getString("pc_ip", "") ?: "") }
-    SectionCard("SteamVR", "Jogue jogos do SteamVR do PC no celular. No PC: HyperMagic PC.exe (pasta pc/ do projeto) com o IP deste celular.") {
-        KeyValue("IP deste celular", com.hyperxr.steamvr.SteamVrContent.localIp() ?: "conecte o Wi-Fi")
-        var profile by remember { mutableStateOf(com.hyperxr.steamvr.SteamVrPlanner.profile(a)) }
-        Segmented(com.hyperxr.steamvr.SteamVrProfiles.Profile.entries.map { it.name to it.label }, profile.name) { k ->
-            profile = com.hyperxr.steamvr.SteamVrProfiles.Profile.valueOf(k)
-            com.hyperxr.steamvr.SteamVrPlanner.setProfile(a, profile)
-        }
-        val plan = remember(profile) { com.hyperxr.steamvr.SteamVrPlanner.plan(a, profile) }
-        val codec = if (plan.codecs and com.hyperxr.steamvr.SteamVrProfiles.CODEC_HEVC != 0) "HEVC" else "H.264"
-        KeyValue("Transmissão", "${plan.profile.label}: ${plan.eyeWidth * 2}x${plan.eyeHeight} a ${plan.refreshHz} Hz, $codec, até ${plan.maxMbps} Mb/s, mãos a ${plan.handHz} Hz")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            androidx.compose.material3.OutlinedTextField(value = ip, onValueChange = { ip = it.trim() }, singleLine = true, label = { Text("IP do PC") })
-            Button(onClick = {
-                prefs.edit().putString("pc_ip", ip).apply()
-                a.startActivity(android.content.Intent(a, com.hyperxr.steamvr.SteamVrActivity::class.java).putExtra(com.hyperxr.steamvr.SteamVrActivity.EXTRA_PC_IP, ip))
-            }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Conectar") }
-        }
-        Note("Use Wi-Fi 5 GHz. Os Joy-Cons viram controles do Quest 3 (posição pela mão); sem Joy-Con, as mãos são os controles. Joy-Con Home recentraliza.")
     }
 }

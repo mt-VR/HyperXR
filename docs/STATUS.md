@@ -70,7 +70,6 @@ Nenhuma afirmação abaixo diz que algo "funciona no aparelho": isso só será v
 | Janela "Mundo real": imagem da câmera num painel móvel dentro do VR | 🟡 |
 | Assistente com IA no celular (MediaPipe LLM + Qwen 2.5): estado do runtime, conhecimento do HyperXR, ações, voz ou texto | ✅ protocolo e filtros (testes) · 🟡 aparelho |
 | Compartilhar tela 16:9: vídeo MP4, capturas, navegador (MJPEG), telas externas, cópia 16:9 automática quando outro app grava a tela, com a tela continuando em SBS (Android 15+) | 🟡 |
-| SteamVR: driver do PC (display virtual, H.264 na GPU, Quest 3 Touch emulado), app HyperXR PC, cliente no celular com reprojeção — docs/STEAMVR.md | ✅ protocolo e mapeamento (testes) · ✅ compila para Windows · 🟡 nunca rodou com SteamVR |
 | Hand tracking próprio na NPU (LiteRT + NNAPI, rastreio por ROI, detector só quando falta mão) e verificador mão vs pé/cortina/outra pessoa (presença com histerese, tamanho, proporção, alcance) | ✅ decodificador e verificador (testes com landmarks reais) · 🟡 NPU no aparelho |
 | Giroscópio computacional para celulares sem giroscópio: rotação pela câmera (RANSAC + Horn), mapa de quadros-chave contra desvio, gravidade pelo acelerômetro | ✅ testes com imagens sintéticas (erro < 0,3°) · 🟡 aparelho |
 | Giroscópio computacional v2: pontos persistentes, Lucas-Kanade subpixel, raio adaptativo, bússola contra desvio de yaw | ✅ 2,3x mais rápido nos testes · 🟡 aparelho |

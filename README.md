@@ -66,7 +66,7 @@ Free and open-source XR platform for Android phones. Put your phone in a VR Box 
 - **Controllers**: Joy-Con, PlayStation, Xbox and other gamepads, a second phone (HyperConnect) and **colour-tracked 6DoF controllers** (stickers + calibrator, two at once).
 - **Own OpenXR runtime** and an on-device patcher for Quest, OpenXR, Daydream and Cardboard APKs.
 - **45 built-in games** (with Another Axiom's official Gorilla Locomotion), **Minecraft Java** (QuestCraft and GorillaCraft) and emulators (NES, Game Boy, GBA, DOS).
-- GeckoView **browser**, Android apps in windows (Shizuku), YouTube, files, gallery, store, people and calls, SteamVR streaming.
+- GeckoView **browser**, Android apps in windows (Shizuku), YouTube, files, gallery, store, people and calls.
 - **RealityLenses**: lens calibration for 46 viewers (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - App in Portuguese, English, Spanish and Russian.
 
@@ -96,7 +96,7 @@ Full guide (Portuguese): [below](#guide-pt) · honest status of every feature: [
 - **Контроллеры**: Joy-Con, PlayStation, Xbox и другие геймпады, второй телефон (HyperConnect) и **6DoF-контроллеры по цвету** (наклейки + калибровка, два одновременно).
 - **Собственный runtime OpenXR** и патчер на устройстве для APK Quest, OpenXR, Daydream и Cardboard.
 - **45 встроенных игр** (с официальным Gorilla Locomotion от Another Axiom), **Minecraft Java** (QuestCraft и GorillaCraft) и эмуляторы (NES, Game Boy, GBA, DOS).
-- **Браузер** GeckoView, приложения Android в окнах (Shizuku), YouTube, файлы, галерея, магазин, люди и звонки, стриминг SteamVR.
+- **Браузер** GeckoView, приложения Android в окнах (Shizuku), YouTube, файлы, галерея, магазин, люди и звонки.
 - **RealityLenses**: калибровка линз для 46 гарнитур (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - Приложение на португальском, английском, испанском и русском.
 
@@ -126,7 +126,7 @@ Plataforma XR gratuita e de código aberto para celulares Android. Coloque o cel
 - **Controles**: Joy-Con, PlayStation, Xbox e outros gamepads, outro celular (HyperConnect) e **controles 6DoF por cor** (adesivos + calibrador, dois ao mesmo tempo).
 - **Runtime OpenXR próprio** e patcher no celular para APKs de Quest, OpenXR, Daydream e Cardboard.
 - **45 jogos** embutidos (com o Gorilla Locomotion oficial da Another Axiom), **Minecraft Java** (QuestCraft e GorillaCraft) e emuladores (NES, Game Boy, GBA, DOS).
-- **Navegador** GeckoView, apps Android em janelas (Shizuku), YouTube, arquivos, galeria, loja, pessoas e chamadas, streaming do SteamVR.
+- **Navegador** GeckoView, apps Android em janelas (Shizuku), YouTube, arquivos, galeria, loja, pessoas e chamadas.
 - **RealityLenses**: calibração das lentes de 46 óculos (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - App em português, inglês, espanhol e russo.
 
@@ -156,7 +156,7 @@ Plataforma XR gratuita y de código abierto para móviles Android. Pon el móvil
 - **Mandos**: Joy-Con, PlayStation, Xbox y otros gamepads, otro móvil (HyperConnect) y **mandos 6DoF por color** (pegatinas + calibrador, dos a la vez).
 - **Runtime OpenXR propio** y parcheador en el móvil para APK de Quest, OpenXR, Daydream y Cardboard.
 - **45 juegos** incluidos (con el Gorilla Locomotion oficial de Another Axiom), **Minecraft Java** (QuestCraft y GorillaCraft) y emuladores (NES, Game Boy, GBA, DOS).
-- **Navegador** GeckoView, apps Android en ventanas (Shizuku), YouTube, archivos, galería, tienda, personas y llamadas, streaming de SteamVR.
+- **Navegador** GeckoView, apps Android en ventanas (Shizuku), YouTube, archivos, galería, tienda, personas y llamadas.
 - **RealityLenses**: calibración de lentes para 46 visores (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - App en portugués, inglés, español y ruso.
 
@@ -186,7 +186,7 @@ Plateforme XR libre et gratuite pour téléphones Android. Glissez le téléphon
 - **Manettes** : Joy-Con, PlayStation, Xbox et autres, un second téléphone (HyperConnect) et des **manettes 6DoF suivies par couleur** (autocollants + calibrage, deux à la fois).
 - **Runtime OpenXR maison** et un patcheur sur l'appareil pour les APK Quest, OpenXR, Daydream et Cardboard.
 - **45 jeux intégrés** (avec le Gorilla Locomotion officiel d'Another Axiom), **Minecraft Java** (QuestCraft et GorillaCraft) et des émulateurs (NES, Game Boy, GBA, DOS).
-- **Navigateur** GeckoView, applis Android en fenêtres (Shizuku), YouTube, fichiers, galerie, boutique, contacts et appels, streaming SteamVR.
+- **Navigateur** GeckoView, applis Android en fenêtres (Shizuku), YouTube, fichiers, galerie, boutique, contacts et appels.
 - **RealityLenses** : calibrage des lentilles de 46 casques (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - Appli en portugais, anglais, espagnol et russe.
 
@@ -216,7 +216,7 @@ Freie, kostenlose XR-Plattform für Android-Handys. Steck das Handy in eine VR B
 - **Controller**: Joy-Con, PlayStation, Xbox und andere Gamepads, ein zweites Handy (HyperConnect) und **per Farbe getrackte 6DoF-Controller** (Aufkleber + Kalibrierung, zwei gleichzeitig).
 - **Eigene OpenXR-Runtime** und ein Patcher auf dem Gerät für Quest-, OpenXR-, Daydream- und Cardboard-APKs.
 - **45 eingebaute Spiele** (mit Another Axioms offizieller Gorilla Locomotion), **Minecraft Java** (QuestCraft und GorillaCraft) und Emulatoren (NES, Game Boy, GBA, DOS).
-- GeckoView-**Browser**, Android-Apps in Fenstern (Shizuku), YouTube, Dateien, Galerie, Store, Kontakte und Anrufe, SteamVR-Streaming.
+- GeckoView-**Browser**, Android-Apps in Fenstern (Shizuku), YouTube, Dateien, Galerie, Store, Kontakte und Anrufe.
 - **RealityLenses**: Linsenkalibrierung für 46 Brillen (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - App auf Portugiesisch, Englisch, Spanisch und Russisch.
 
@@ -246,7 +246,7 @@ Piattaforma XR gratuita e open source per telefoni Android. Metti il telefono in
 - **Controller**: Joy-Con, PlayStation, Xbox e altri gamepad, un secondo telefono (HyperConnect) e **controller 6DoF tracciati dal colore** (adesivi + calibrazione, due insieme).
 - **Runtime OpenXR proprio** e un patcher sul dispositivo per APK Quest, OpenXR, Daydream e Cardboard.
 - **45 giochi inclusi** (con il Gorilla Locomotion ufficiale di Another Axiom), **Minecraft Java** (QuestCraft e GorillaCraft) ed emulatori (NES, Game Boy, GBA, DOS).
-- **Browser** GeckoView, app Android in finestre (Shizuku), YouTube, file, galleria, store, persone e chiamate, streaming SteamVR.
+- **Browser** GeckoView, app Android in finestre (Shizuku), YouTube, file, galleria, store, persone e chiamate.
 - **RealityLenses**: calibrazione delle lenti per 46 visori (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - App in portoghese, inglese, spagnolo e russo.
 
@@ -276,7 +276,7 @@ Guida completa (in portoghese): [qui sotto](#guide-pt) · stato onesto di ogni f
 - **控制器**：Joy-Con、PlayStation、Xbox 等手柄，另一部手机（HyperConnect），以及**颜色追踪的 6DoF 控制器**（贴纸 + 校准，可同时用两个）。
 - **自研 OpenXR 运行时**，以及在手机上为 Quest、OpenXR、Daydream 和 Cardboard APK 打补丁的工具。
 - **45 款内置游戏**（使用 Another Axiom 官方的 Gorilla Locomotion）、**Minecraft Java**（QuestCraft 和 GorillaCraft）以及模拟器（NES、Game Boy、GBA、DOS）。
-- GeckoView **浏览器**、窗口中的 Android 应用（Shizuku）、YouTube、文件、相册、商店、好友和通话、SteamVR 串流。
+- GeckoView **浏览器**、窗口中的 Android 应用（Shizuku）、YouTube、文件、相册、商店、好友和通话。
 - **RealityLenses**：46 款眼镜的镜片校准（Cardboard、Daydream、Gear VR、VR Box、千幻魔镜、小宅 BOBOVR……）。
 - 应用支持葡萄牙语、英语、西班牙语和俄语。
 
@@ -306,7 +306,7 @@ Android スマートフォン向けの無料・オープンソースの XR プ�
 - **コントローラー**：Joy-Con、PlayStation、Xbox などのゲームパッド、2 台目のスマホ（HyperConnect）、**色で追跡する 6DoF コントローラー**（シール + キャリブレーション、2 台同時）。
 - **独自の OpenXR ランタイム**と、Quest・OpenXR・Daydream・Cardboard の APK を端末上でパッチするツール。
 - **45 本の内蔵ゲーム**（Another Axiom 公式の Gorilla Locomotion を使用）、**Minecraft Java**（QuestCraft と GorillaCraft）、エミュレーター（NES、ゲームボーイ、GBA、DOS）。
-- GeckoView **ブラウザ**、ウィンドウで動く Android アプリ（Shizuku）、YouTube、ファイル、ギャラリー、ストア、フレンドと通話、SteamVR ストリーミング。
+- GeckoView **ブラウザ**、ウィンドウで動く Android アプリ（Shizuku）、YouTube、ファイル、ギャラリー、ストア、フレンドと通話。
 - **RealityLenses**：46 種類のゴーグルのレンズ補正（Cardboard、Daydream、Gear VR、VR Box、Shinecon、BOBOVR など）。
 - アプリはポルトガル語・英語・スペイン語・ロシア語に対応。
 
@@ -336,7 +336,7 @@ Android 휴대폰을 위한 무료 오픈 소스 XR 플랫폼입니다. 휴대�
 - **컨트롤러**: Joy-Con, PlayStation, Xbox 등 게임패드, 두 번째 휴대폰(HyperConnect), **색상으로 추적하는 6DoF 컨트롤러**(스티커 + 보정, 동시에 두 개).
 - **자체 OpenXR 런타임**과 Quest, OpenXR, Daydream, Cardboard APK를 기기에서 패치하는 도구.
 - **내장 게임 45개**(Another Axiom 공식 Gorilla Locomotion 사용), **Minecraft Java**(QuestCraft와 GorillaCraft), 에뮬레이터(NES, 게임보이, GBA, DOS).
-- GeckoView **브라우저**, 창으로 실행되는 Android 앱(Shizuku), YouTube, 파일, 갤러리, 스토어, 친구와 통화, SteamVR 스트리밍.
+- GeckoView **브라우저**, 창으로 실행되는 Android 앱(Shizuku), YouTube, 파일, 갤러리, 스토어, 친구와 통화.
 - **RealityLenses**: 46가지 고글의 렌즈 보정(Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
 - 앱은 포르투갈어, 영어, 스페인어, 러시아어를 지원합니다.
 
@@ -378,7 +378,6 @@ Every release is built by [.github/workflows/release.yml](.github/workflows/rele
 | `native/` | LuaJIT 2.1 (arm64-v8a, armeabi-v7a, x86_64), the HyperMagic OpenXR runtime, libretro cores |
 | `minecraft/` | Minecraft Java Edition launcher (QuestCraft and GorillaCraft), ported from QuestCraft's Pojlib; see [minecraft/README.md](minecraft/README.md) |
 | `broker/`, `vrcore/`, `hyperconnect/` | OpenXR broker, Daydream controller service, the controller-phone app |
-| `pc/` | SteamVR driver and the Windows app |
 | `games/` | Sources of the built-in `.hyperx` packages: Clock, Calculator, Calendar |
 | `sdk/tests/` | SDK tests running the real `bootstrap.lua` on desktop LuaJIT |
 | `third_party/` | GorillaLocomotion (MIT), NewPipe Extractor, compatibility layer |
@@ -391,7 +390,7 @@ Every release is built by [.github/workflows/release.yml](.github/workflows/rele
 - [Architecture](docs/ARCHITECTURE.md) · [SDK and the .hyperx format](docs/SDK.md) · [SDK security model](docs/SECURITY.md)
 - [Performance and latency](docs/PERFORMANCE.md) · [Hand tracking](docs/HAND_TRACKING.md) · [HyperMagic OpenXR runtime](docs/OPENXR_RUNTIME.md)
 - [Games inspired by Quest games](docs/QUEST_GAMES.md) · [Hand Physics Lab](docs/HAND_PHYSICS_LAB.md) · [Emulators](docs/EMULATORS.md)
-- [Controllers](docs/CONTROLLERS.md) · [HyperConnect](docs/HYPERCONNECT.md) · [Daydream](docs/DAYDREAM.md) · [SteamVR](docs/STEAMVR.md) and [HyperMagic PC](pc/README.md)
+- [Controllers](docs/CONTROLLERS.md) · [HyperConnect](docs/HYPERCONNECT.md) · [Daydream](docs/DAYDREAM.md)
 - [Icons](docs/ICONS.md) · [Tests](docs/TESTING.md) · [Feature status](docs/STATUS.md) · [Release notes](docs/releases/)
 
 <a id="guide-pt"></a>

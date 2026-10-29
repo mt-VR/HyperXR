@@ -178,8 +178,8 @@ A última rejeição aparece no status do teste de mãos, por exemplo "grande de
   uma vez com o recorte 40% maior antes de voltar ao detector de palma, que é mais caro e
   demorado.
 - **Taxa automática até 60 Hz:** com a configuração em 30 Hz ou mais, os quadros são pegos assim
-  que o motor termina o anterior, até 60 por segundo, ou seja, na taxa da câmera de 60 fps. Os
-  perfis de bateria do SteamVR, abaixo de 30 Hz, ficam como estão.
+  que o motor termina o anterior, até 60 por segundo, ou seja, na taxa da câmera de 60 fps. Taxas
+  abaixo de 30 Hz ficam como estão.
 - **Previsão pela idade real da imagem:** a idade de cada quadro é medida desde a exposição do
   sensor, pelo horário da câmera, até o resultado. O filtro de Kalman prevê 75% dessa idade, e o
   ajuste "previsão" corrige a partir disso (20 ms = neutro). Na tela, a mão ainda é levada até o

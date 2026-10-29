@@ -23,7 +23,7 @@ abstract class ImmersiveActivity : Activity() {
 
     protected abstract fun createContent(): XrContent?
 
-    /** Settings this session runs with (not saved); SteamVR lightens them for weak phones. */
+    /** Settings this session runs with (not saved). */
     protected open fun adjustSettings(s: com.hyperxr.settings.HyperSettings): com.hyperxr.settings.HyperSettings = s
 
     @SuppressLint("ClickableViewAccessibility")
