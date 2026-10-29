@@ -116,7 +116,7 @@ fun downloadOpenGame(host: MediaHost, g: OpenGame, openUrl: (String) -> Unit, st
     status("Procurando APK em ${g.repo}…")
     mediaIo.execute {
         try {
-            val apk: ApkAsset? = runCatching { OpenGames.parseRelease(githubGet(OpenGames.latestReleaseUrl(g.repo))).firstOrNull() }.getOrNull()
+            val apk: ApkAsset? = runCatching { OpenGames.parseRelease(githubGet(OpenGames.releaseUrl(g))).firstOrNull() }.getOrNull()
             if (apk == null) {
                 status("${g.name}: sem APK pronto na última versão; abrindo o código-fonte")
                 host.onGl { openUrl(g.url) }

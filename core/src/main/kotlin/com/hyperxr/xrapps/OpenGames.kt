@@ -20,6 +20,10 @@ data class OpenGame(
     val updated: String = "",
     /** What the user must provide (game data), empty when it runs as is. */
     val needs: String = "",
+    /** A release of [repo] with this tag instead of the latest one (games HyperMagic builds itself). */
+    val releaseTag: String = "",
+    /** Built for the HyperMagic runtime already: installs as it is, no APK fixing needed. */
+    val ready: Boolean = false,
 ) {
     enum class Kind { OPENXR, CARDBOARD }
     val url: String get() = "https://github.com/$repo"
@@ -41,6 +45,8 @@ object OpenGames {
 
     /** Checked on 2026-10-23: licence file read from each repository. Not tested on a phone. */
     val CURATED = listOf(
+        OpenGame("Open Saber", "mt-VR/HyperXR", "O jogo de ritmo com sabres de luz: corte os blocos na direção da seta. Port do Open Saber (Godot 4, OpenXR) compilado do código-fonte para o runtime do HyperMagic; as músicas vêm do BeatSaver, no menu do jogo",
+            "MIT", OpenGame.Kind.OPENXR, needs = "dois controles com posição (Joy-Cons, controle por cor ou HyperConnect)", releaseTag = "opensaber-v0.5.0", ready = true),
         OpenGame("Quest DOOM", "CommunityPokeOrg/quest-doom", "DOOM em VR com OpenXR (doomgeneric); tem versão para celular comum", "GPL-2.0",
             OpenGame.Kind.OPENXR, needs = ""),
         OpenGame("QuestZDoom", "DrBeef/QuestZDoom", "GZDoom em VR: DOOM, Heretic, Hexen e mods", "GPL-3.0",
@@ -67,6 +73,9 @@ object OpenGames {
         "https://api.github.com/search/repositories?q=" + java.net.URLEncoder.encode(query, "UTF-8") + "&sort=stars&order=desc&per_page=$perPage"
 
     fun latestReleaseUrl(repo: String) = "https://api.github.com/repos/$repo/releases/latest"
+
+    /** The release a game's APK comes from: its own tag, or the latest. */
+    fun releaseUrl(g: OpenGame) = if (g.releaseTag.isNotEmpty()) "https://api.github.com/repos/${g.repo}/releases/tags/${g.releaseTag}" else latestReleaseUrl(g.repo)
 
     private val json = Json { ignoreUnknownKeys = true }
 

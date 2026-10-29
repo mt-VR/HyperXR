@@ -83,7 +83,8 @@ class StorePanel(
         val open = OpenGames.CURATED.map { g ->
             Item("open:${g.repo}", g.name, "Grátis • ${if (g.kind == OpenGame.Kind.OPENXR) "OpenXR" else "Cardboard"} • ${g.license}",
                 g.description + (if (g.needs.isNotEmpty()) "\n\nPrecisa de: ${g.needs}" else ""), null, open = g,
-                facts = listOf("Licença" to g.license, "Código" to g.url, "Tipo" to if (g.kind == OpenGame.Kind.OPENXR) "OpenXR (passa pelo Corrigir APK)" else "Cardboard"))
+                facts = listOf("Licença" to g.license, "Código" to (if (g.ready) "${g.url}/tree/main/ports" else g.url),
+                    "Tipo" to when { g.ready -> "OpenXR (feito para o HyperMagic)"; g.kind == OpenGame.Kind.OPENXR -> "OpenXR (passa pelo Corrigir APK)"; else -> "Cardboard" }))
         }
         val hyperItems = hyper.map { entryItem(it, gameSub(it)) }
         val xrItems = partners + open + installedXr.map { entryItem(it, "Instalado") } +
