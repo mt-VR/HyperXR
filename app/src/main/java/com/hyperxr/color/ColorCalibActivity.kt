@@ -66,12 +66,17 @@ class ColorCalibActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val old = ColorControllerStore.load(this)
-        side = old.side
+        // start with the hand that still has no controller
+        side = if (ColorControllerStore.load(this, 1).usable && !ColorControllerStore.load(this, 0).usable) 0 else 1
         view = CalibView(this)
         status = TextView(this).apply { setTextColor(Color.WHITE); textSize = 14f; setPadding(16, 12, 16, 12); setBackgroundColor(0x99000000.toInt()) }
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12) }
-        fun button(key: String, onClick: () -> Unit) = Button(this).apply { isAllCaps = false; setOnClickListener { onClick(); refresh() } }.also { buttons[key] = it; column.addView(it) }
+        fun button(key: String, onClick: () -> Unit) = Button(this).apply { isAllCaps = false; setOnClickListener {
+            // a button that wrote its own message (saved, an error) keeps it; the others show the next step
+            val before = status.text
+            onClick()
+            if (status.text === before) refresh() else { refreshButtons(); view.invalidate() }
+        } }.also { buttons[key] = it; column.addView(it) }
         button("freeze") { if (view.frozen) restart() else view.frozen = true }
         button("mode") { mode = if (mode == Mode.SPOTS) Mode.AIM else Mode.SPOTS }
         button("forward") { aim = null; aimPx = null }
@@ -82,9 +87,9 @@ class ColorCalibActivity : Activity() {
         TextView(this).apply { setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(12, 0, 12, 0) }.also { dist.addView(it); distText = it }
         Button(this).apply { text = "+"; setOnClickListener { distanceCm = (distanceCm + 1).coerceAtMost(60); refresh() } }.also { dist.addView(it) }
         column.addView(dist)
-        button("side") { side = 1 - side }
+        button("side") { side = 1 - side; restart() }
         button("save") { save() }
-        button("test") { testing = !testing; if (testing) { view.frozen = false; tracker.use(ColorControllerStore.load(this)) } }
+        button("test") { testing = !testing; if (testing) { view.frozen = false; tracker.use(ColorControllerStore.loadAll(this)) } }
         val scroll = ScrollView(this).apply { addView(column) }
         val root = FrameLayout(this)
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
@@ -109,18 +114,9 @@ class ColorCalibActivity : Activity() {
     private fun restart() { view.frozen = false; taps.clear(); tapPx.clear(); buttonFlags.clear(); aim = null; aimPx = null }
 
     private fun refresh() {
-        fun set(k: String, t: String) { buttons[k]?.text = I18n.t(t) }
-        set("freeze", if (view.frozen) "Recomeçar (ao vivo)" else "Congelar imagem")
-        set("mode", if (mode == Mode.SPOTS) "Tocar marca: pontos" else "Tocar marca: apontador")
-        set("forward", "Apontar para a frente")
-        set("undo", "Desfazer ponto")
-        set("button", "Último ponto é botão")
-        set("side", if (side == 1) "Mão: direita" else "Mão: esquerda")
-        set("save", "Salvar")
-        set("test", if (testing) "Parar teste" else "Testar")
-        distText?.text = I18n.t("Pontos 1 e 2: {0} cm".replace("{0}", distanceCm.toString()))
+        refreshButtons()
         status.text = I18n.t(when {
-            testing -> "Teste: mexa o controle. Os pontos achados aparecem com um anel e o apontador com uma linha."
+            testing -> "Teste: mexa os controles. Os pontos achados aparecem com um anel e cada apontador com uma linha."
             taps.isEmpty() -> "Segure o controle de frente para a câmera, a uns 40 cm, com todos os pontos coloridos à vista, e toque no primeiro ponto (a imagem congela)."
             mode == Mode.AIM -> "Toque onde o apontador deve ir (por exemplo a ponta do controle)."
             taps.size < 3 -> "Toque nos outros pontos. Com 3 ou mais pontos de cores diferentes o rastreamento é 6DoF completo."
@@ -129,11 +125,24 @@ class ColorCalibActivity : Activity() {
         view.invalidate()
     }
 
+    private fun refreshButtons() {
+        fun set(k: String, t: String) { buttons[k]?.text = I18n.t(t) }
+        set("freeze", if (view.frozen) "Recomeçar (ao vivo)" else "Congelar imagem")
+        set("mode", if (mode == Mode.SPOTS) "Tocar marca: pontos" else "Tocar marca: apontador")
+        set("forward", "Apontar para a frente")
+        set("undo", "Desfazer ponto")
+        set("button", "Último ponto é botão")
+        set("side", if (side == 1) "Calibrando: controle direito" else "Calibrando: controle esquerdo")
+        set("save", "Salvar")
+        set("test", if (testing) "Parar teste" else "Testar")
+        distText?.text = I18n.t("Pontos 1 e 2: {0} cm".replace("{0}", distanceCm.toString()))
+    }
+
     private fun save() {
         val m = ColorCalibration.build(taps.mapIndexed { i, t -> ColorCalibration.Tap(t.marker.copy(button = buttonFlags[i]), t.u, t.v, t.r) }, distanceCm / 100f, aim, side)
         if (m == null) { status.text = I18n.t("Marque pelo menos um ponto antes de salvar."); return }
         ColorControllerStore.save(this, m)
-        tracker.use(m)
+        tracker.use(ColorControllerStore.loadAll(this))
         HyperXRApp.instance.settings.update { it.copy(controllers = it.controllers.copy(colorController = true)) }
         status.text = I18n.t("Salvo. O controle por cor foi ligado; toque em Testar para conferir.")
     }
@@ -151,7 +160,11 @@ class ColorCalibActivity : Activity() {
             mode = Mode.SPOTS
             refresh(); return
         }
-        if (taps.size >= ColorTracker.MAX) { status.text = I18n.t("No máximo 8 pontos."); return }
+        // both controllers' colours are sorted in one pass, 8 at most
+        val other = ColorControllerStore.load(this, 1 - side).markers
+        if (taps.size + other.size >= ColorTracker.MAX) {
+            status.text = I18n.t(if (other.isEmpty()) "No máximo 8 pontos." else "Os dois controles juntos podem ter no máximo 8 pontos."); return
+        }
         // the colour: a 9x9 patch around the tap
         val x0 = (px - 4).coerceAtLeast(0); val y0 = (py - 4).coerceAtLeast(0)
         val w = minOf(9, f.width - x0); val h = minOf(9, f.height - y0)
@@ -168,9 +181,12 @@ class ColorCalibActivity : Activity() {
         taps += ColorCalibration.Tap(marker, u, v, rPx * sx / intr.fx)
         tapPx += floatArrayOf((cx + 0.5f) / f.width, (cy + 0.5f) / f.height, rPx / f.width)
         buttonFlags += false
-        if (taps.dropLast(1).any { ColorMatch.hueDistance(it.marker.h, marker.h) < 20f && marker.s >= 0.22f && it.marker.s >= 0.22f })
-            status.text = I18n.t("Atenção: esta cor é parecida com a de outro ponto; use cores bem diferentes.")
         refresh()
+        fun close(o: ColorMarker) = ColorMatch.hueDistance(o.h, marker.h) < 20f && marker.s >= 0.22f && o.s >= 0.22f
+        if (taps.dropLast(1).any { close(it.marker) })
+            status.text = I18n.t("Atenção: esta cor é parecida com a de outro ponto; use cores bem diferentes.")
+        else if (other.any { close(it) })
+            status.text = I18n.t("Atenção: esta cor já está no outro controle; use cores diferentes em cada controle.")
         if (spot == null) status.text = I18n.t("Não achei a mancha de cor aí; o ponto foi marcado só onde você tocou.")
     }
 
@@ -266,6 +282,8 @@ class ColorCalibActivity : Activity() {
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 30f; isFakeBoldText = true; setShadowLayer(4f, 0f, 0f, Color.BLACK) }
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(64, 224, 208); strokeWidth = 6f }
+        private val sideLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 34f; isFakeBoldText = true; setShadowLayer(4f, 0f, 0f, Color.BLACK) }
+        private val lineLeft = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 170, 60); strokeWidth = 6f }
 
         /** The hand tracking thread: copy the frame unless the picture is frozen. */
         fun post(b: Bitmap, i: CameraIntrinsics) {
@@ -302,19 +320,28 @@ class ColorCalibActivity : Activity() {
             }
             if (testing) {
                 val d = debug ?: return
-                val m = tracker.model
+                val all = tracker.model(0).markers + tracker.model(1).markers
+                val leftCount = tracker.model(0).markers.size
                 for (i in 0 until d.spots.size / 2) {
                     if (d.spots[i * 2].isNaN()) continue
-                    val mk = m.markers.getOrNull(i) ?: continue
+                    val mk = all.getOrNull(i) ?: continue
                     ring.color = Color.HSVToColor(floatArrayOf(mk.h, mk.s.coerceAtLeast(0.6f), 1f))
                     c.drawCircle(x(d.spots[i * 2]), y(d.spots[i * 2 + 1]), 26f, ring)
-                    c.drawText("${i + 1}", x(d.spots[i * 2]) + 28f, y(d.spots[i * 2 + 1]), label)
+                    // numbered per controller, in its pointer's colour (orange left, teal right)
+                    val name = if (d.owner[i] == 0) "${i + 1}" else "${i + 1 - leftCount}"
+                    sideLabel.color = if (d.owner[i] == 0) lineLeft.color else line.color
+                    c.drawText(name, x(d.spots[i * 2]) + 28f, y(d.spots[i * 2 + 1]), sideLabel)
                 }
-                val a = d.center; val b = d.tip
-                if (a != null && b != null) c.drawLine(x(a[0]), y(a[1]), x(b[0]), y(b[1]), line)
-                c.drawText(I18n.t("{0} · erro {1} · {2}".replace("{0}", if (d.dof >= 6) "6DoF" else if (d.dof > 0) "${d.dof}DoF" else "—")
-                    .replace("{1}", "%.3f".format(d.error)).replace("{2}", if (d.gpu) "GPU" else "CPU")) + if (d.pressed) "  ·  " + I18n.t("botão apertado") else "",
-                    dst.left + 16f, dst.top + 40f, label)
+                for (sd in 0..1) {
+                    val a = d.center[sd]; val b = d.tip[sd]
+                    if (a != null && b != null) c.drawLine(x(a[0]), y(a[1]), x(b[0]), y(b[1]), if (sd == 0) lineLeft else line)
+                    if (!tracker.model(sd).usable) continue
+                    val head = I18n.t(if (sd == 0) "Esquerdo" else "Direito")
+                    c.drawText(head + ": " + I18n.t("{0} · erro {1}".replace("{0}", if (d.dof[sd] >= 6) "6DoF" else if (d.dof[sd] > 0) "${d.dof[sd]}DoF" else "—")
+                        .replace("{1}", "%.3f".format(d.error[sd]))) + if (d.pressed[sd]) "  ·  " + I18n.t("botão apertado") else "",
+                        dst.left + 16f, dst.top + 40f + sd * 40f, label)
+                }
+                c.drawText(if (d.gpu) "GPU" else "CPU", dst.left + 16f, dst.top + 120f, label)
                 return
             }
             for ((i, p) in tapPx.withIndex()) {

@@ -28,21 +28,43 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.PI
 import kotlin.math.sqrt
 
-/** Where the calibrated controller is kept: files/color_controller.json. */
+/**
+ * Where the calibrated controllers are kept: one file per hand (files/color_controller_left.json,
+ * files/color_controller_right.json), so two controllers (two Joy-Cons) can be tracked at once.
+ */
 object ColorControllerStore {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    fun file(ctx: Context) = File(ctx.filesDir, "color_controller.json")
-    fun load(ctx: Context): ColorControllerModel =
-        runCatching { json.decodeFromString(ColorControllerModel.serializer(), file(ctx).readText()) }.getOrDefault(ColorControllerModel())
-    fun save(ctx: Context, m: ColorControllerModel) { file(ctx).writeText(json.encodeToString(ColorControllerModel.serializer(), m)) }
+    fun file(ctx: Context, side: Int) = File(ctx.filesDir, if (side == 0) "color_controller_left.json" else "color_controller_right.json")
+
+    fun load(ctx: Context, side: Int): ColorControllerModel {
+        migrate(ctx)
+        return runCatching { json.decodeFromString(ColorControllerModel.serializer(), file(ctx, side).readText()) }.getOrDefault(ColorControllerModel(side = side)).copy(side = side)
+    }
+
+    fun loadAll(ctx: Context): Array<ColorControllerModel> = arrayOf(load(ctx, 0), load(ctx, 1))
+    fun save(ctx: Context, m: ColorControllerModel) { file(ctx, m.side).writeText(json.encodeToString(ColorControllerModel.serializer(), m)) }
+    fun delete(ctx: Context, side: Int) { file(ctx, side).delete() }
+    /** Changes whenever either file changes. */
+    fun stamp(ctx: Context): Long = file(ctx, 0).lastModified() * 31 + file(ctx, 1).lastModified()
+
+    /** The first version kept a single controller in color_controller.json: it becomes its hand's file. */
+    private fun migrate(ctx: Context) {
+        val old = File(ctx.filesDir, "color_controller.json")
+        if (!old.exists()) return
+        runCatching { json.decodeFromString(ColorControllerModel.serializer(), old.readText()) }.getOrNull()?.let { m ->
+            if (!file(ctx, m.side).exists()) save(ctx, m)
+        }
+        old.delete()
+    }
 }
 
 /**
- * Tracks the colour-marked controller in the camera frames hand tracking already analyses.
- * Every frame is shrunk to ~320 px, a fragment shader on the GPU sorts each pixel into one of
- * the markers' colours (HSV, the same test as [ColorMatch.classify]), the largest blob of each
- * colour becomes a spot, and [ColorPoseSolver] turns the spots into the controller's pose.
- * Without a usable GL context the same sorting runs on the CPU.
+ * Tracks the colour-marked controllers (up to two, one per hand) in the camera frames hand
+ * tracking already analyses. Every frame is shrunk to ~320 px, a fragment shader on the GPU sorts
+ * each pixel into one of the markers' colours of both controllers at once (HSV, the same test as
+ * [ColorMatch.classify]), the largest blob of each colour becomes a spot, and [ColorPoseSolver]
+ * turns each controller's spots into its pose. Without a usable GL context the same sorting runs
+ * on the CPU.
  *
  * A spot marked as a button, hidden (under a finger) while the others are seen, is a click.
  */
@@ -56,13 +78,41 @@ class ColorTracker(private val ctx: Context) {
         var timeNs = 0L
     }
 
-    /** For the calibrator's test view: spots found (image 0..1, NaN when not), and the aim drawn in the image. */
-    class Debug(val spots: FloatArray, val center: FloatArray?, val tip: FloatArray?, val dof: Int, val error: Float, val pressed: Boolean, val gpu: Boolean)
+    /**
+     * For the calibrator's test view: spots found for all markers (left's first, then right's;
+     * image 0..1, NaN when not), and per hand the aim drawn in the image.
+     */
+    class Debug(
+        val spots: FloatArray, val owner: IntArray,
+        val center: Array<FloatArray?>, val tip: Array<FloatArray?>,
+        val dof: IntArray, val error: FloatArray, val pressed: BooleanArray, val gpu: Boolean,
+    )
 
-    @Volatile var model: ColorControllerModel = ColorControllerStore.load(ctx); private set
+    /** Everything about one hand's controller. */
+    private class Track(val side: Int) {
+        var model = ColorControllerModel(side = side)
+        var first = 0                       // its first marker in the combined list
+        val camRot = Quat(); val camPos = Vec3()
+        var haveCam = false
+        var hiddenFrames = 0
+        var pressed = false
+        val smoothRot = Quat(); val smoothPos = Vec3()
+        var smoothed = false
+        val snap = Snapshot()
+        val obs = ArrayList<ColorPoseSolver.Obs>()
+        fun reset() { haveCam = false; smoothed = false; hiddenFrames = 0; pressed = false }
+    }
+
+    private val tracks = arrayOf(Track(0), Track(1))
+    /** The markers of both controllers, left's first: what the shader sorts pixels into. */
+    @Volatile private var combined = ColorControllerModel()
     @Volatile var debugListener: ((Debug) -> Unit)? = null
     /** True when the shader runs on the GPU; false when the CPU does the sorting. */
     @Volatile var onGpu = false; private set
+
+    /** The controller of one hand (0 left, 1 right). */
+    fun model(side: Int): ColorControllerModel = tracks[side].model
+    val usable: Boolean get() = combined.usable
 
     private val thread = HandlerThread("hx-color").apply { start() }
     private val handler = Handler(thread.looper)
@@ -72,39 +122,58 @@ class ColorTracker(private val ctx: Context) {
     private val srcRect = Rect(); private val dstRect = Rect()
     private var frameIntr: CameraIntrinsics? = null
     private val framePose = Pose()
-    private var framePoseKnown = false
-    private var modelStamp = 0L
+    private var modelStamp = Long.MIN_VALUE
     private var lastCheckNs = 0L
-
-    private val snap = Snapshot()
     private val lock = Any()
+
+    init { use(ColorControllerStore.loadAll(ctx)) }
 
     /** Hand tracking's frame callback (its thread): copies a small picture and hands it to our thread. */
     val tap: (Bitmap, CameraIntrinsics, Pose, DepthSampler?) -> Unit = { bmp, intr, pose, _ -> offer(bmp, intr, pose) }
 
-    /** Use [model] right away (the calibrator); the tracker otherwise rereads the file when it changes. */
-    fun use(m: ColorControllerModel) { model = m; synchronized(lock) { snap.timeNs = 0L }; resetState() }
+    /** Use these controllers right away (the calibrator); the tracker otherwise rereads the files when they change. */
+    fun use(models: Array<ColorControllerModel>) {
+        handler.post {
+            var first = 0
+            val all = ArrayList<ColorMarker>()
+            for (t in tracks) {
+                val m = models.getOrNull(t.side) ?: ColorControllerModel(side = t.side)
+                // the shader takes 8 colours: the right controller gets what the left leaves
+                val room = ColorTracker.MAX - all.size
+                t.model = if (m.markers.size > room) m.copy(markers = m.markers.take(room)) else m
+                t.first = first; first += t.model.markers.size
+                all += t.model.markers
+                t.reset()
+                synchronized(lock) { t.snap.timeNs = 0L }
+            }
+            combined = ColorControllerModel(all)
+        }
+    }
 
     fun offer(bmp: Bitmap, intr: CameraIntrinsics, pose: Pose?) {
         val now = System.nanoTime()
         if (now - lastCheckNs > 2_000_000_000L) {
             lastCheckNs = now
-            val f = ColorControllerStore.file(ctx)
-            val stamp = if (f.exists()) f.lastModified() else 0L
-            if (stamp != modelStamp) { modelStamp = stamp; if (stamp != 0L) { model = ColorControllerStore.load(ctx); resetState() } }
+            val stamp = ColorControllerStore.stamp(ctx)
+            if (stamp != modelStamp) {
+                val firstCheck = modelStamp == Long.MIN_VALUE
+                modelStamp = stamp
+                if (!firstCheck) use(ColorControllerStore.loadAll(ctx))
+            }
         }
-        if (!model.usable || !busy.compareAndSet(false, true)) return
+        if (!combined.usable || !busy.compareAndSet(false, true)) return
         val sw = minOf(320, bmp.width); val sh = (bmp.height.toLong() * sw / bmp.width).toInt().coerceAtLeast(1)
         val s = small?.takeIf { it.width == sw && it.height == sh } ?: Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888).also { small = it }
         srcRect.set(0, 0, bmp.width, bmp.height); dstRect.set(0, 0, sw, sh)
         Canvas(s).drawBitmap(bmp, srcRect, dstRect, paint)
         frameIntr = intr
-        if (pose != null) { framePose.set(pose); framePoseKnown = true } else { framePose.position.set(0f, 0f, 0f); framePose.orientation.identity(); framePoseKnown = false }
+        if (pose != null) framePose.set(pose) else { framePose.position.set(0f, 0f, 0f); framePose.orientation.identity() }
         handler.post { try { process(s) } catch (t: Throwable) { Diagnostics.log("Color controller: ${t.message}") } finally { busy.set(false) } }
     }
 
-    /** The latest pose; false before the first one. */
-    fun read(out: Snapshot): Boolean = synchronized(lock) {
+    /** The latest pose of one hand's controller; false before the first one. */
+    fun read(side: Int, out: Snapshot): Boolean = synchronized(lock) {
+        val snap = tracks[side].snap
         if (snap.timeNs == 0L) return false
         out.pose.set(snap.pose); out.aim.set(snap.aim); out.pressed = snap.pressed; out.dof = snap.dof; out.timeNs = snap.timeNs
         true
@@ -115,71 +184,75 @@ class ColorTracker(private val ctx: Context) {
     // ------------------------------------------------------------------ per frame (our thread)
     private var classes = ByteArray(0)
     private var blobs = Array(0) { BlobFinder.Blob() }
-    private val obs = ArrayList<ColorPoseSolver.Obs>()
     private val result = ColorPoseSolver.Result()
-    private val camRot = Quat(); private val camPos = Vec3()
-    private var haveCam = false
-    private var hiddenFrames = 0
-    private var pressed = false
     private val worldRot = Quat(); private val worldPos = Vec3(); private val tmp = Vec3()
-    private val smoothRot = Quat(); private val smoothPos = Vec3()
-    private var smoothed = false
-
-    private fun resetState() { handler.post { haveCam = false; smoothed = false; hiddenFrames = 0; pressed = false } }
 
     private fun process(bmp: Bitmap) {
-        val m = model
+        val all = combined
         val intr = frameIntr ?: return
         val w = bmp.width; val h = bmp.height
         if (classes.size != w * h) classes = ByteArray(w * h)
-        if (blobs.size != m.markers.size) blobs = Array(m.markers.size) { BlobFinder.Blob() }
-        if (!classifyGpu(bmp, m)) classifyCpu(bmp, m)
-        BlobFinder.find(classes, w, h, m.markers.size, blobs, minArea = 5)
-        obs.clear()
+        if (blobs.size != all.markers.size) blobs = Array(all.markers.size) { BlobFinder.Blob() }
+        if (!classifyGpu(bmp, all)) classifyCpu(bmp, all)
+        BlobFinder.find(classes, w, h, all.markers.size, blobs, minArea = 5)
         val pxPerSmall = intr.width.toFloat() / w
-        var buttonSeen = true; var others = 0
-        for ((i, b) in blobs.withIndex()) {
-            val mk = m.markers[i]
-            if (!b.found) { if (mk.button) buttonSeen = false; continue }
-            if (!mk.button) others++
-            val u = (b.x * intr.width - intr.cx) / intr.fx
-            val v = (b.y * intr.height - intr.cy) / intr.fy
-            val r = sqrt(b.area / PI.toFloat()) * pxPerSmall / intr.fx
-            obs += ColorPoseSolver.Obs(i, u, v, r)
+        val listener = debugListener
+        val center = arrayOfNulls<FloatArray>(2); val tip = arrayOfNulls<FloatArray>(2)
+        val dof = IntArray(2); val error = FloatArray(2); val pressedOut = BooleanArray(2)
+        for (t in tracks) {
+            val m = t.model
+            if (!m.usable) continue
+            t.obs.clear()
+            var buttonSeen = true; var others = 0
+            for (i in m.markers.indices) {
+                val b = blobs[t.first + i]; val mk = m.markers[i]
+                if (!b.found) { if (mk.button) buttonSeen = false; continue }
+                if (!mk.button) others++
+                val u = (b.x * intr.width - intr.cx) / intr.fx
+                val v = (b.y * intr.height - intr.cy) / intr.fy
+                val r = sqrt(b.area / PI.toFloat()) * pxPerSmall / intr.fx
+                t.obs += ColorPoseSolver.Obs(i, u, v, r)
+            }
+            // a click: the button spot gone for two frames while the rest is in view
+            if (m.markers.any { it.button }) {
+                if (!buttonSeen && others >= 1) t.hiddenFrames++ else t.hiddenFrames = 0
+                t.pressed = t.hiddenFrames >= 2
+            } else t.pressed = false
+            pressedOut[t.side] = t.pressed
+            if (t.obs.isEmpty()) continue
+            val ok = ColorPoseSolver.solve(m, t.obs, if (t.haveCam) t.camRot else null, if (t.haveCam) t.camPos else null, result)
+            error[t.side] = result.error
+            if (!ok || result.error > 0.05f) continue
+            t.camRot.set(result.rotation); t.camPos.set(result.position); t.haveCam = true
+            dof[t.side] = result.dof
+            // world pose: the camera's pose times the controller's pose in camera space
+            framePose.orientation.mul(t.camRot, worldRot).normalize()
+            framePose.transformPoint(t.camPos, worldPos)
+            if (!t.smoothed) { t.smoothRot.set(worldRot); t.smoothPos.set(worldPos); t.smoothed = true }
+            else {
+                // follow quickly when it moves, hold still when it doesn't (less shake at rest)
+                val move = tmp.set(worldPos).sub(t.smoothPos).length()
+                val a = (0.35f + move * 25f).coerceIn(0.35f, 1f)
+                t.smoothPos.lerp(worldPos, a)
+                t.smoothRot.slerp(worldRot, if (result.dof >= 6) a else 0.25f, t.smoothRot).normalize()
+            }
+            synchronized(lock) {
+                t.snap.pose.position.set(t.smoothPos); t.snap.pose.orientation.set(t.smoothRot)
+                t.smoothRot.rotate(m.aim(tmp), t.snap.aim).normalize()
+                t.snap.pressed = t.pressed; t.snap.dof = result.dof; t.snap.timeNs = System.nanoTime()
+            }
+            if (listener != null) {
+                // centre and a point 12 cm along the aim, back in the picture
+                center[t.side] = project(t.camPos, intr)
+                val tipCam = t.camRot.rotate(m.aim(Vec3()), Vec3()).also { it.scale(0.12f).add(t.camPos) }
+                tip[t.side] = project(tipCam, intr)
+            }
         }
-        val hasButton = m.markers.any { it.button }
-        // a click: the button spot gone for two frames while the rest is in view
-        if (hasButton) {
-            if (!buttonSeen && others >= 1) hiddenFrames++ else hiddenFrames = 0
-            pressed = hiddenFrames >= 2
-        } else pressed = false
-        val spots = FloatArray(m.markers.size * 2) { Float.NaN }
-        for ((i, b) in blobs.withIndex()) if (b.found) { spots[i * 2] = b.x; spots[i * 2 + 1] = b.y }
-        if (obs.isEmpty()) { debugListener?.invoke(Debug(spots, null, null, 0, 0f, pressed, onGpu)); return }
-        val ok = ColorPoseSolver.solve(m, obs, if (haveCam) camRot else null, if (haveCam) camPos else null, result)
-        if (!ok || result.error > 0.05f) { debugListener?.invoke(Debug(spots, null, null, 0, result.error, pressed, onGpu)); return }
-        camRot.set(result.rotation); camPos.set(result.position); haveCam = true
-        // world pose: the camera's pose times the controller's pose in camera space
-        framePose.orientation.mul(camRot, worldRot).normalize()
-        framePose.transformPoint(camPos, worldPos)
-        if (!smoothed) { smoothRot.set(worldRot); smoothPos.set(worldPos); smoothed = true }
-        else {
-            // follow quickly when it moves, hold still when it doesn't (less shake at rest)
-            val move = tmp.set(worldPos).sub(smoothPos).length()
-            val a = (0.35f + move * 25f).coerceIn(0.35f, 1f)
-            smoothPos.lerp(worldPos, a)
-            smoothRot.slerp(worldRot, if (result.dof >= 6) a else 0.25f, smoothRot).normalize()
-        }
-        synchronized(lock) {
-            snap.pose.position.set(smoothPos); snap.pose.orientation.set(smoothRot)
-            smoothRot.rotate(m.aim(tmp), snap.aim).normalize()
-            snap.pressed = pressed; snap.dof = result.dof; snap.timeNs = System.nanoTime()
-        }
-        debugListener?.let { l ->
-            // centre and a point 12 cm along the aim, back in the picture
-            val c = project(camPos, intr)
-            val tipCam = camRot.rotate(m.aim(Vec3()), Vec3()).also { it.scale(0.12f).add(camPos) }
-            l(Debug(spots, c, project(tipCam, intr), result.dof, result.error, pressed, onGpu))
+        if (listener != null) {
+            val spots = FloatArray(all.markers.size * 2) { Float.NaN }
+            for ((i, b) in blobs.withIndex()) if (b.found) { spots[i * 2] = b.x; spots[i * 2 + 1] = b.y }
+            val owner = IntArray(all.markers.size) { i -> if (i < tracks[1].first) 0 else 1 }
+            listener(Debug(spots, owner, center, tip, dof, error, pressedOut, onGpu))
         }
     }
 

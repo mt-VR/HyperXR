@@ -838,25 +838,31 @@ class XrEngine(
     // ---------------------------------------------------------------- colour-marked controller
     private var colorTracker: com.hyperxr.color.ColorTracker? = null
     private val colorSnap = com.hyperxr.color.ColorTracker.Snapshot()
-    private val colorRay = Ray()
+    private val colorRays = arrayOf(Ray(), Ray())
 
-    /** The controller marked with coloured spots: its pose from the camera, its click from a covered spot. */
+    /**
+     * The controllers marked with coloured spots (one per hand, so two Joy-Cons can be tracked at
+     * once): their pose from the camera, their click from a covered spot. A Joy-Con on the same
+     * hand keeps its buttons and sticks and gets the pose from its colours.
+     */
     private fun updateColorController() {
         val on = settings.controllers.colorController
         if (!on) { if (hands.colorTap != null) hands.colorTap = null; return }
         val tracker = colorTracker ?: com.hyperxr.color.ColorTracker(activity).also { colorTracker = it }
         if (hands.colorTap == null) hands.colorTap = tracker.tap
-        val m = tracker.model
-        if (!m.usable || !tracker.read(colorSnap)) return
-        // a pose older than a third of a second is lost: no controller rather than a frozen one
-        if (System.nanoTime() - colorSnap.timeNs > 330_000_000L) return
-        val c = input.controllers[m.side.coerceIn(0, 1)]
-        c.connected = true
-        c.buttons = c.buttons or (if (colorSnap.pressed) 128 else 0)
-        c.pose.set(colorSnap.pose)
-        colorRay.origin.set(colorSnap.pose.position); colorRay.direction.set(colorSnap.aim)
-        c.aim = colorRay
-        c.positionFromHand = false
+        val now = System.nanoTime()
+        for (side in 0..1) {
+            if (!tracker.model(side).usable || !tracker.read(side, colorSnap)) continue
+            // a pose older than a third of a second is lost: no controller rather than a frozen one
+            if (now - colorSnap.timeNs > 330_000_000L) continue
+            val c = input.controllers[side]
+            c.connected = true
+            c.buttons = c.buttons or (if (colorSnap.pressed) 128 else 0)
+            c.pose.set(colorSnap.pose)
+            colorRays[side].origin.set(colorSnap.pose.position); colorRays[side].direction.set(colorSnap.aim)
+            c.aim = colorRays[side]
+            c.positionFromHand = false
+        }
     }
 
     private fun recenterControllers() { input.recenterCursor = true }
