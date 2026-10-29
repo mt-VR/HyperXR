@@ -97,6 +97,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val ray = Ray()
     private var anchorYaw = 0f
     private var anchored = false
+    private var anchoredAt = 0.0
+    private var anchoredY = 0f
     private var reticleTex = 0
     private var ringTex = 0
     private var installedApps: List<AppEntry> = emptyList()
@@ -187,8 +189,19 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         processPendingCloses()
         val s = app.settings.current
         val head = ctx.input.head
+        // the head jumped up or down since the launcher was placed (a tracker that started late
+        // reported the head at the floor first): place everything at the head again
+        if (anchored && ctx.timeSeconds - anchoredAt < 20.0 && kotlin.math.abs(head.position.y - anchoredY) > 0.6f) {
+            // what is already open goes up (or down) with it
+            val dy = head.position.y - anchoredY
+            for (w in windows) w.pose.position.y += dy
+            for (w in appWindows) w.pose.position.y += dy
+            anchorTo(head)
+            anchoredAt = ctx.timeSeconds; anchoredY = head.position.y
+        }
         if (!anchored && ctx.frameIndex > 5) {
             anchorTo(head); anchored = true
+            anchoredAt = ctx.timeSeconds; anchoredY = head.position.y
             // the free-app notice, in front of you at every start of the VR mode
             FreeNoticePanel {}.also { n -> n.placeInFront(head, 1.15f, 0.12f); windows += n }
             if (!restored) { restored = true; restoreSession() }

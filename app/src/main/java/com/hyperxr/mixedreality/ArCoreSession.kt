@@ -57,7 +57,12 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
     override val hasFrame: Boolean get() = lastFrame != null && lastFrame!!.timestamp != 0L
 
     private val headPose = Pose()
-    private val origin = Pose()
+    /**
+     * Tracking space in ARCore's world. Until ARCore tracks (about a second) the head reads (0, 0,
+     * 0) in ARCore's world: this starting origin puts it at eye height, 1.6 m over the floor, like
+     * the recentred origin does, so nothing sees the head at the floor in the meantime.
+     */
+    private val origin = Pose(Vec3(0f, -EYE_HEIGHT, 0f))
     private var recenterPending = true
     private val quadUv = floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
     private val texUv = FloatArray(8)
@@ -69,6 +74,8 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
 
     /** Must be called on the GL thread (creates the camera texture). */
     companion object {
+        /** Eyes over the floor when tracking starts (the floor of games and environments is 1.6 m down). */
+        const val EYE_HEIGHT = 1.6f
         /** Streaming (SteamVR) needs only the pose and the hand image: no planes, smallest camera image. */
         @Volatile var lightweight = false
     }
@@ -268,7 +275,7 @@ class ArCoreSession(private val activity: Activity) : HeadTracker, CameraImageSo
                 // origin so that the current head yaw faces -Z and the floor estimate is 1.6 m below the eyes
                 val yaw = com.hyperxr.input.ControllerPoseFusion.yawOnly(headPose.orientation, Quat())
                 origin.orientation.set(yaw)
-                origin.position.set(headPose.position.x, headPose.position.y - 1.6f, headPose.position.z)
+                origin.position.set(headPose.position.x, headPose.position.y - EYE_HEIGHT, headPose.position.z)
                 recenterPending = false
             } else if (lost && com.hyperxr.headtracking.TrackingRebase.jumped(shownWhileLost, origin.inverse().compose(headPose))) {
                 // ARCore came back with its world moved: keep the head (and so every window) where it was
