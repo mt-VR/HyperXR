@@ -34,6 +34,8 @@ abstract class QuestGame(val host: GameHost) {
     /** Shadows around the play space (radius in metres, 0: none) and where they are centred. */
     open val shadowRadius = 4f
     open val shadowZ = -1.2f
+    /** The game draws the player's hands itself (or something in their place): the system's are hidden. */
+    open val hidesHands = false
     abstract fun start()
     abstract fun update(dt: Float)
     abstract fun draw()
@@ -242,6 +244,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
             l.ambient.copyInto(sc.ambient, 0, 0, minOf(3, l.ambient.size, sc.ambient.size))
             sc.fog[0] = l.horizon[0]; sc.fog[1] = l.horizon[1]; sc.fog[2] = l.horizon[2]; sc.fog[3] = l.objectFog
         }
+        if (g.hidesHands) ctx.hideHands = true
         if (g.shadowRadius > 0f && !safeMode) { toWorld(0f, 0f, g.shadowZ, sc.shadowCenter); sc.shadowRadius = g.shadowRadius }
         g.draw()
         particles.draw()

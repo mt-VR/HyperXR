@@ -63,6 +63,7 @@ icons = {
     "qg_wingsuit": ("paragliding.svg", "#ff9a3c", "#2a5ab0", 0.54),
     "qg_tableracing": ("directions_car.svg", "#ff4a4a", "#2a3a6a", 0.54),
     "qg_jewelthief": ("diamond.svg", "#5affd0", "#2a2a6a", 0.54),
+    "qg_pipeclimb": ("plumbing.svg", "#ffb547", "#3b4656", 0.54),
     "mc_questcraft":   ("deployed_code.svg", "#6fcf4a", "#3a6b2a", 0.54),
     "mc_gorillacraft": ("front_hand.svg",    "#8b6a4a", "#2f2a26", 0.52),
     "shop":        ("storefront.svg",     "#4f8dff", "#7a3cf0", 0.52),

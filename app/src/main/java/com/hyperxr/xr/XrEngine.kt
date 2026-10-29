@@ -108,6 +108,11 @@ class XrContext(
     var hyperConnect: com.hyperxr.connect.HyperConnectServer? = null
     /** HyperGuardian (play area / wall protection), for every app on this engine. */
     var guardian: com.hyperxr.guardian.HyperGuardian? = null
+    /**
+     * Set by content each frame it wants no hands drawn by the system (a game that draws its own,
+     * like a ball holding a pipe); tracking keeps running. Cleared before every frame.
+     */
+    var hideHands = false
 }
 
 /** Takes raw controller/keyboard input (emulators); return false to let HyperXR handle the event. */
@@ -401,6 +406,7 @@ class XrEngine(
 
         // 3. content
         scene.reset()
+        ctx.hideHands = false
         ctx.camera = arCore ?: passthrough
         val sim0 = System.nanoTime()
         content.onFrame(ctx, dt)
@@ -435,7 +441,7 @@ class XrEngine(
         run {
             val cam: CameraImageSource? = arCore ?: passthrough
             val overCam = cam != null && cam.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill
-            realHandsDrawn = !overCam && settings.handTracking.handVisual == com.hyperxr.settings.HandVisual.AURA && input.handsAvailable
+            realHandsDrawn = !overCam && settings.handTracking.handVisual == com.hyperxr.settings.HandVisual.AURA && input.handsAvailable && !ctx.hideHands
             hands.armTracking = realHandsDrawn
             if (realHandsDrawn) {
                 realHand.skin = com.hyperxr.settings.SKIN_TONES[settings.handTracking.skinTone.coerceIn(0, com.hyperxr.settings.SKIN_TONES.size - 1)]
@@ -558,7 +564,7 @@ class XrEngine(
         }
         // Aura is hidden while Joy-Cons drive the pointer; tracking keeps running underneath.
         val visual = settings.handTracking.handVisual
-        if (visual != com.hyperxr.settings.HandVisual.NONE) {
+        if (visual != com.hyperxr.settings.HandVisual.NONE && !ctx.hideHands) {
             // over the passthrough, each hand is drawn where the camera image shows it (exact size
             // and place); in a virtual environment, or without a fresh image, from the 3D hand
             val overCamera = camera != null && camera.hasFrame && scene.background == Background.PASSTHROUGH && renderer.passthroughFill

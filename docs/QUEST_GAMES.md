@@ -30,6 +30,39 @@ Funcionam com Joy-Con, com o celular controle (HyperConnect) ou com um gamepad B
 | Pescaria | Real VR Fishing | Lago com árvores e acampamento. Segure o gatilho, balance e solte para lançar. Quando a boia afunda (o controle vibra), aperte para fisgar. Recolha com o outro botão sem passar da tensão da linha. Quatro peixes. |
 | Pequeno Herói | Moss | Um mundo em miniatura sobre a mesa. Ande com o analógico (no celular controle, segure B e aponte), pule com o gatilho, pegue as moedas e chegue à bandeira. |
 
+## Locomoção com as mãos: Gorilla Locomotion oficial
+
+Macacada, Babuíno da Meia-Noite, Gravidade Zero e Escalada de Cano usam o `GorillaRig`
+(`core/.../questgames/GorillaRig.kt`), um porte para Kotlin do `Player.cs` do
+[GorillaLocomotion](https://github.com/Another-Axiom/GorillaLocomotion) da Another Axiom, o
+movimento do Gorilla Tag (licença MIT, Copyright (c) 2021 Another-Axiom). O algoritmo é o
+deles, linha por linha. O que o HyperMagic acrescenta está em
+[third_party/GorillaLocomotion/README.md](../third_party/GorillaLocomotion/README.md): os
+sphere casts no lugar do motor de física do Unity, o corpo rígido e as superfícies sem pegada.
+A licença vai no APK em `assets/games/GorillaLocomotion-LICENSE.txt`.
+
+Para a câmera de um celular, as mãos passam pelo `HandFeed` antes de chegar ao gorila:
+- filtro One Euro: a mão parada fica parada, sem atrasar o movimento rápido;
+- um salto impossível da detecção é ignorado;
+- uma mão que a câmera perde fica onde estava por um instante, em vez de soltar.
+
+Nos jogos de gorila, uma mão baixa na imagem é levada mais para baixo e para longe. A câmera só
+vê as mãos até uns 25 graus abaixo dos olhos, e assim o chão fica ao alcance com as mãos ainda
+à vista.
+
+### Escalada de Cano
+
+Você só tem um cano na mão e não consegue andar. As mãos não aparecem: uma bola em cada mão
+segura o cano. A ponta e o meio do cano são as "mãos" do Gorilla Locomotion: onde encostam,
+ficam, e quem se move é você. Dá para:
+- engatar o cano numa barra e puxar;
+- apoiar a ponta num degrau e empurrar;
+- saltar um vão apoiando em pinos.
+
+Nas paredes de vidro dos lados o cano escorrega e não segura. Com as duas mãos, o cano vai da
+mão mais perto de você na direção da outra, como uma vara. Com uma mão, segue a direção dela;
+com um controle, a mira do controle.
+
 ## Testes
 
 A física e as regras ficam no módulo core e têm testes no JVM (`QuestGamesTest`, 11 testes):

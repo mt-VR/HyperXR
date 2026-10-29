@@ -23,6 +23,8 @@ class ClimbGame(host: GameHost) : QuestGame(host) {
     private val rig = ClimbRig.route(System.nanoTime() % 1000)
     private val px = FloatArray(3); private val py = FloatArray(3); private val pz = FloatArray(3)
     private val closed = BooleanArray(3); private val present = BooleanArray(3)
+    private val feeds = arrayOf(HandFeed(), HandFeed(), HandFeed(holdS = 0.2f))
+    private val closeHold = FloatArray(2)
     private val reach = floatArrayOf(0.14f, 0.14f, 0.2f)
     private val holdColor = Array(rig.holds.size) { HOLD_COLORS[it * 7 % HOLD_COLORS.size] }
     private val holdShape = FloatArray(rig.holds.size) { (it * 37 % 11) / 11f }
@@ -34,16 +36,21 @@ class ClimbGame(host: GameHost) : QuestGame(host) {
     override fun start() { status = "Feche a mão numa agarra (ou aperte o gatilho) e puxe para subir. Soltando tudo, você cai até a última plataforma" }
 
     override fun update(dt: Float) {
+        // steadied hands (HandFeed), and a closed hand stays closed through a flicker of the
+        // gesture: a hand tracked by a phone camera shakes, and losing a grip for one frame drops you
         for (i in 0..1) {
             val g = host.hands[i]
-            present[i] = g.usable
-            px[i] = g.palm.x; py[i] = g.palm.y; pz[i] = g.palm.z
-            closed[i] = g.fist || g.pinch
+            val p = feeds[i].update(if (g.usable) g.palm else null, host.head, dt)
+            present[i] = p != null
+            if (p != null) { px[i] = p[0]; py[i] = p[1]; pz[i] = p[2] }
+            if (g.usable && (g.fist || g.pinch)) closeHold[i] = 0.2f else if (g.usable) closeHold[i] -= dt
+            closed[i] = closeHold[i] > 0f
         }
         val pad = host.pad
-        present[2] = pad.connected
-        px[2] = pad.pose.position.x; py[2] = pad.pose.position.y; pz[2] = pad.pose.position.z
-        closed[2] = pad.trigger
+        val pp = feeds[2].update(if (pad.connected) pad.pose.position else null, host.head, dt)
+        present[2] = pp != null
+        if (pp != null) { px[2] = pp[0]; py[2] = pp[1]; pz[2] = pp[2] }
+        closed[2] = pad.connected && pad.trigger
         // a controller alone climbs one grip at a time: more time to reach the next hold
         val onlyPad = pad.connected && !present[0] && !present[1]
         val grabbed = rig.step(dt, px, py, pz, closed, present, reach, if (onlyPad) 1.4f else 0.6f)

@@ -667,6 +667,7 @@ fun raySphere(ox: Float, oy: Float, oz: Float, dx: Float, dy: Float, dz: Float, 
  */
 class ClimbRig(val holds: List<FloatArray>, val ledges: FloatArray, val summitY: Float) {
     class Grip { var hold = -1; var ax = 0f; var ay = 0f; var az = 0f }
+    private var heldMask = 0
     val grips = Array(3) { Grip() }
     var ox = 0f; var oy = 0f; var oz = 0f
     var vy = 0f
@@ -703,6 +704,14 @@ class ClimbRig(val holds: List<FloatArray>, val ledges: FloatArray, val summitY:
             if (h >= 0) { g.hold = h; g.ax = wx - holds[h][0]; g.ay = wy - holds[h][1]; g.az = wz - holds[h][2]; grabbed = h }
         }
         val held = grips.withIndex().filter { it.value.hold >= 0 }
+        // when a grip lets go (or a second one closes) the body stays where it is: every grip still
+        // held is anchored again at the hand's present place, so the average does not jump
+        var mask = 0; for ((i, _) in held) mask = mask or (1 shl i)
+        if (mask != heldMask && held.isNotEmpty()) for ((i, g) in held) {
+            val h = holds[g.hold]
+            g.ax = px[i] + ox - h[0]; g.ay = py[i] + oy - h[1]; g.az = pz[i] + oz - h[2]
+        }
+        heldMask = mask
         if (held.isNotEmpty()) {
             // the body goes where the held hands stay on their holds
             var nx = 0f; var ny = 0f; var nz = 0f

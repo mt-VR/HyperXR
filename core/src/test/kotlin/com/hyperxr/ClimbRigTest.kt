@@ -48,4 +48,21 @@ class ClimbRigTest {
         assertTrue(main.last()[1] >= 27f)
         for ((a, b) in main.zipWithNext()) assertTrue(b[1] - a[1] < 0.6f)
     }
+
+    @Test fun lettingGoOfOneHandDoesNotJerkTheBody() {
+        val rig = ClimbRig(listOf(floatArrayOf(-0.2f, 1.5f, -0.4f), floatArrayOf(0.2f, 1.5f, -0.4f)), floatArrayOf(), 20f)
+        val both = booleanArrayOf(true, true, false)
+        px[0] = -0.2f; py[0] = 1.5f; pz[0] = -0.4f; px[1] = 0.2f; py[1] = 1.5f; pz[1] = -0.4f
+        closed[0] = true; closed[1] = true
+        rig.step(0.016f, px, py, pz, closed, both, reach, 0.5f)
+        // the two tracked hands drift apart by 4 cm (tracking noise): the body follows their average
+        py[0] = 1.46f; py[1] = 1.5f
+        rig.step(0.016f, px, py, pz, closed, both, reach, 0.5f)
+        val before = rig.oy
+        // let go with the left: the body stays put instead of jumping 2 cm
+        closed[0] = false
+        rig.step(0.016f, px, py, pz, closed, both, reach, 0.5f)
+        assertEquals(before, rig.oy, 1e-4f)
+        closed[0] = false; closed[1] = false
+    }
 }

@@ -41,15 +41,19 @@ abstract class GorillaGameBase(host: GameHost) : QuestGame(host) {
     /** Real eye height minus the gorilla's: what is subtracted from tracked heights. */
     protected var offsetY = Float.NaN
     protected val eye = 1.0f
-    protected val armBoost = 1.3f
     private val headLocal = FloatArray(3)
     private val handLocal = Array(2) { FloatArray(3) }
     private val handInputs = arrayOfNulls<FloatArray>(2)
+    private val feeds = arrayOf(HandFeed(), HandFeed())
+    private val padFeed = HandFeed(holdS = 0.2f)
+    private val reachV = FloatArray(3)
     protected var yaw = 0f
     private val fwd = Vec3()
     protected var tapCool = FloatArray(2)
 
     override val shadowRadius = 0f
+    /** Your gorilla arms are drawn by the game: the system's hands would be a second pair. */
+    override val hidesHands = true
 
     /** World point -> game space (where the player is). */
     protected fun gx(x: Float) = x - rig.body[0]
@@ -62,6 +66,14 @@ abstract class GorillaGameBase(host: GameHost) : QuestGame(host) {
         return out
     }
 
+    /** Whether a hand (0 left, 1 right) is driving its gorilla arm now (tracked, held a moment, or the controller). */
+    protected fun handActive(i: Int) = handInputs[i] != null
+
+    /**
+     * The gorilla's locomotion (GorillaRig, Another Axiom's GorillaLocomotion) fed with your hands:
+     * steadied (HandFeed), taken further down and out so the ground is in reach while the camera
+     * still sees them, and held for a moment when the camera loses one.
+     */
     protected fun stepPlayer(dt: Float) {
         if (offsetY.isNaN()) {
             if (host.head.y < 0.5f) return
@@ -71,18 +83,16 @@ abstract class GorillaGameBase(host: GameHost) : QuestGame(host) {
         host.ctx.input.head.orientation.rotate(Vec3(0f, 0f, -1f), fwd)
         host.dirToGame(Vec3(fwd.x, fwd.y, fwd.z), fwd)
         yaw = atan2(-fwd.x, -fwd.z)
-        val cy = cos(yaw); val sy = sin(yaw)
         for (i in 0..1) {
             val h = host.hands[i]
-            val usable = h.usable || (i == 1 && host.pad.connected && !host.hands[1].usable)
-            if (!usable) { handInputs[i] = null; continue }
-            val p = if (h.usable) h.palm else host.pad.pose.position
-            // shoulder: beside and below the head, turned with it
-            val side = if (i == 0) -0.19f else 0.19f
-            val sx = headLocal[0] + cy * side; val sY = headLocal[1] - 0.28f; val sz = headLocal[2] - sy * side
-            handLocal[i][0] = sx + (p.x - sx) * armBoost
-            handLocal[i][1] = sY + (p.y - offsetY - sY) * armBoost
-            handLocal[i][2] = sz + (p.z - sz) * armBoost
+            // the controller stands in for the right hand when that hand isn't tracked
+            val p = if (h.usable) feeds[i].update(h.palm, host.head, dt)
+                else if (i == 1 && host.pad.connected) padFeed.update(host.pad.pose.position, host.head, dt).also { feeds[i].update(null, host.head, dt) }
+                else feeds[i].update(null, host.head, dt)
+            if (p == null) { handInputs[i] = null; continue }
+            reachV[0] = p[0] - host.head.x; reachV[1] = p[1] - host.head.y; reachV[2] = p[2] - host.head.z
+            HandFeed.gorillaReach(reachV)
+            handLocal[i][0] = headLocal[0] + reachV[0]; handLocal[i][1] = headLocal[1] + reachV[1]; handLocal[i][2] = headLocal[2] + reachV[2]
             handInputs[i] = handLocal[i]
         }
         rig.step(dt, headLocal, handInputs)
@@ -108,8 +118,7 @@ abstract class GorillaGameBase(host: GameHost) : QuestGame(host) {
         for (i in 0..1) {
             val side = if (i == 0) -0.19f else 0.19f
             val sx = host.head.x + cy * side; val sY = host.head.y - 0.3f; val sz = host.head.z - sy * side
-            val handTracked = host.hands[i].usable || (i == 1 && host.pad.connected)
-            if (!handTracked) continue
+            if (!handActive(i)) continue
             val h = rig.hand[i]
             arm(sx, sY, sz, gx(h[0]), gy(h[1]), gz(h[2]), fur, palm, rig.touching[i], side)
         }
