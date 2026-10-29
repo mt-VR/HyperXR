@@ -86,6 +86,24 @@ A curvatura dos dedos também é enviada ao PC.
 ./build.sh   # MinGW-w64 no Linux ou MSYS2; gera dist/HyperXR-PC.zip
 ```
 
+## Por que o SteamVR não funcionava (corrigido na 0.3.2)
+
+- **Ordem dos argumentos entre MSVC e MinGW.** O SteamVR é compilado com MSVC, que chama uma
+  função membro que retorna uma struct com o `this` em RCX e o buffer de retorno em RDX; o GCC
+  (MinGW) espera o contrário. Em `GetPose()` e `ComputeDistortion()` o driver escrevia o pose por
+  cima do próprio objeto: o SteamVR caía ou o headset nunca rastreava. Agora o
+  `openvr_driver.h` declara esses dois métodos, no MinGW, com o buffer como argumento comum, o que
+  bate com o MSVC (conferido no assembly gerado).
+- **Notebook com duas placas de vídeo.** O driver abria o Direct3D na primeira placa e o SteamVR
+  renderizava na outra, e a imagem não abria. Agora o driver escolhe a placa de alto desempenho e
+  avisa o SteamVR para renderizar nela (`Prop_GraphicsAdapterLuid_Uint64`).
+- **Quadros-chave sem SPS/PPS.** Alguns codificadores da GPU só põem os parâmetros do vídeo no tipo
+  de mídia; sem eles o celular não decodifica nada. Agora todo quadro-chave sai com eles.
+- **COM** inicializado nas threads do Media Foundation.
+- **Protocolo conferido dos dois lados:** `pc/tests/protocol_test.cpp` lê os bytes que o celular
+  gera (`pc/tests/golden`, escritos pelo teste `HxvrGoldenTest` do core) e escreve os que o
+  celular lê. Roda no workflow de release, que agora também publica o `HyperMagic-PC-<versão>.zip`.
+
 ## Licenças
 
 - `openvr_driver.h`: Valve, BSD-3-Clause (`third_party/openvr/LICENSE`).

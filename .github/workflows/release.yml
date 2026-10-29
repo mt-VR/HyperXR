@@ -37,6 +37,14 @@ jobs:
       - name: Tests
         run: ./gradlew :core:test --no-daemon
 
+      # the PC side of SteamVR streaming: the driver and the app, built with MinGW-w64; the
+      # protocol test checks it reads the phone's bytes (golden files from the core tests)
+      - name: PC (SteamVR driver and app)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q mingw-w64 zip > /dev/null
+          g++ -std=c++17 -o hxvr_test pc/tests/protocol_test.cpp && ./hxvr_test pc/tests/golden
+          sh pc/build.sh
+
       - name: APK (arm64)
         run: |
           ./gradlew :app:assembleDebug -PhxAbi=arm64-v8a --no-daemon
@@ -55,6 +63,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           mv HyperMagic-arm64.apk "HyperMagic-$TAG-arm64.apk"
           mv HyperMagic-armv7.apk "HyperMagic-$TAG-armv7.apk"
+          cp pc/dist/HyperXR-PC.zip "HyperMagic-PC-$TAG.zip"
           NOTES="docs/releases/$TAG.md"
           [ -f "$NOTES" ] || NOTES=README.md
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
@@ -67,3 +76,4 @@ jobs:
           files: |
             HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk
             HyperMagic-${{ steps.names.outputs.tag }}-armv7.apk
+            HyperMagic-PC-${{ steps.names.outputs.tag }}.zip

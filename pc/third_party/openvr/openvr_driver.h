@@ -2998,7 +2998,14 @@ public:
 	virtual void DebugRequest( const char *pchRequest, char *pchResponseBuffer, uint32_t unResponseBufferSize ) = 0;
 
 	/** This interface is unused, and will never be called. */
+#if defined(__MINGW32__) && defined(_WIN64)
+	// HyperMagic: SteamVR is built with MSVC, which calls a member function that returns a struct
+	// with `this` in RCX and the return buffer in RDX; GCC (MinGW) expects them the other way round.
+	// Taking the buffer as an ordinary argument lines the two up (see pc/README.md).
+	virtual DriverPose_t *GetPose( DriverPose_t *pOut ) = 0;
+#else
 	virtual DriverPose_t GetPose() = 0;
+#endif
 };
 
 
@@ -3045,7 +3052,12 @@ namespace vr
 
 		/** Returns the result of the distortion function for the specified eye and input UVs. UVs go from 0,0 in
 		* the upper left of that eye's viewport and 1,1 in the lower right of that eye's viewport. */
+#if defined(__MINGW32__) && defined(_WIN64)
+		// HyperMagic: the return buffer as an argument, as for GetPose (MSVC's order)
+		virtual DistortionCoordinates_t *ComputeDistortion( DistortionCoordinates_t *pOut, EVREye eEye, float fU, float fV ) = 0;
+#else
 		virtual DistortionCoordinates_t ComputeDistortion( EVREye eEye, float fU, float fV ) = 0;
+#endif
 
 		/** Computes the result of the inverse distortion function for the specified eye, channel, and input UV.
 		* Operation can fail, returns success/failure, on success result is stored in *pResult */

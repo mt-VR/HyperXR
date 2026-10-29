@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <d3d10.h>
+#include <dxgi1_6.h>
 #include <mmsystem.h>
 
 #include <atomic>
@@ -28,6 +29,14 @@
 #include "encoder.h"
 
 using namespace vr;
+
+// SteamVR (MSVC) and this driver (MinGW) disagree on where a member function's struct return goes;
+// openvr_driver.h declares those methods with the return buffer as an argument under MinGW.
+#if defined(__MINGW32__) && defined(_WIN64)
+#define HX_POSE_RETURN(expr) DriverPose_t* GetPose(DriverPose_t* out) override { *out = (expr); return out; }
+#else
+#define HX_POSE_RETURN(expr) DriverPose_t GetPose() override { return (expr); }
+#endif
 
 namespace {
 
@@ -237,7 +246,7 @@ public:
     void EnterStandby() override {}
     void* GetComponent(const char*) override { return nullptr; }
     void DebugRequest(const char*, char* resp, uint32_t size) override { if (size) resp[0] = 0; }
-    DriverPose_t GetPose() override { return pose_; }
+    HX_POSE_RETURN(pose_)
 
     uint32_t Id() const { return id_; }
     VRInputComponentHandle_t Haptic() const { return haptic_; }
@@ -309,6 +318,16 @@ public:
         props->SetBoolProperty(c, Prop_HasVirtualDisplayComponent_Bool, true);
         props->SetBoolProperty(c, Prop_HasCameraComponent_Bool, false);
         props->SetBoolProperty(c, Prop_HasDriverDirectModeComponent_Bool, false);
+        // a virtual display has no real vsync: SteamVR paces itself on our VsyncEvent calls
+        props->SetBoolProperty(c, Prop_DriverDirectModeSendsVsyncEvents_Bool, true);
+        // SteamVR must render on the GPU we encode on: on a laptop with two GPUs it would otherwise
+        // pick one and hand us frames we can't open. The fast GPU it is.
+        adapter_ = PickAdapter();
+        if (adapter_) {
+            DXGI_ADAPTER_DESC ad; adapter_->GetDesc(&ad);
+            uint64_t luid = (uint64_t(uint32_t(ad.AdapterLuid.HighPart)) << 32) | ad.AdapterLuid.LowPart;
+            props->SetUint64Property(c, Prop_GraphicsAdapterLuid_Uint64, luid);
+        }
         pose_.poseIsValid = false;
         pose_.deviceIsConnected = true;
         pose_.result = TrackingResult_Uninitialized;
@@ -329,6 +348,7 @@ public:
         if (query_) { query_->Release(); query_ = nullptr; }
         if (context_) { context_->Release(); context_ = nullptr; }
         if (device_) { device_->Release(); device_ = nullptr; }
+        if (adapter_) { adapter_->Release(); adapter_ = nullptr; }
         id_ = k_unTrackedDeviceIndexInvalid;
     }
 
@@ -339,7 +359,8 @@ public:
         return nullptr;
     }
     void DebugRequest(const char*, char* resp, uint32_t size) override { if (size) resp[0] = 0; }
-    DriverPose_t GetPose() override { std::lock_guard<std::mutex> l(poseMutex_); return pose_; }
+    DriverPose_t CurrentPose() { std::lock_guard<std::mutex> l(poseMutex_); return pose_; }
+    HX_POSE_RETURN(CurrentPose())
 
     // ---- display (undistorted: the phone applies its own lens correction)
     void GetWindowBounds(int32_t* x, int32_t* y, uint32_t* w, uint32_t* h) override { *x = 0; *y = 0; *w = eyeW_ * 2; *h = eyeH_; }
@@ -355,12 +376,17 @@ public:
         if (eye == Eye_Right) std::swap(l, r);
         *left = -l; *right = r; *top = -cfg_.tanUp; *bottom = cfg_.tanDown;
     }
-    DistortionCoordinates_t ComputeDistortion(EVREye, float u, float v) override {
+    static DistortionCoordinates_t NoDistortion(float u, float v) {
         DistortionCoordinates_t d = {};
         d.rfRed[0] = d.rfGreen[0] = d.rfBlue[0] = u;
         d.rfRed[1] = d.rfGreen[1] = d.rfBlue[1] = v;
         return d;
     }
+#if defined(__MINGW32__) && defined(_WIN64)
+    DistortionCoordinates_t* ComputeDistortion(DistortionCoordinates_t* out, EVREye, float u, float v) override { *out = NoDistortion(u, v); return out; }
+#else
+    DistortionCoordinates_t ComputeDistortion(EVREye, float u, float v) override { return NoDistortion(u, v); }
+#endif
     bool ComputeInverseDistortion(HmdVector2_t* out, EVREye, uint32_t, float u, float v) override { out->v[0] = u; out->v[1] = v; return true; }
 
     // ---- virtual display: SteamVR hands over each finished frame here
@@ -471,10 +497,27 @@ private:
         }
     }
 
+    /** The high-performance GPU (the discrete one on a laptop), or the first one. */
+    static IDXGIAdapter1* PickAdapter() {
+        IDXGIFactory1* f1 = nullptr;
+        if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&f1))) return nullptr;
+        IDXGIAdapter1* a = nullptr;
+        IDXGIFactory6* f6 = nullptr;
+        if (SUCCEEDED(f1->QueryInterface(__uuidof(IDXGIFactory6), (void**)&f6))) {
+            f6->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, __uuidof(IDXGIAdapter1), (void**)&a);
+            f6->Release();
+        }
+        if (!a) f1->EnumAdapters1(0, &a);
+        f1->Release();
+        return a;
+    }
+
     bool EnsureDevice() {
         if (device_) return true;
         D3D_FEATURE_LEVEL fl[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
-        HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        // on the adapter SteamVR was told to render on (Prop_GraphicsAdapterLuid_Uint64)
+        HRESULT hr = D3D11CreateDevice(adapter_, adapter_ ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                       D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                                        fl, 2, D3D11_SDK_VERSION, &device_, nullptr, &context_);
         if (FAILED(hr)) { SetError("Direct3D 11 indisponível"); return false; }
         ID3D10Multithread* mt = nullptr;
@@ -590,6 +633,7 @@ private:
     uint64_t nextTag_ = 0;
     uint64_t frameId_ = 0;
 
+    IDXGIAdapter1* adapter_ = nullptr;
     ID3D11Device* device_ = nullptr;
     ID3D11DeviceContext* context_ = nullptr;
     ID3D11Query* query_ = nullptr;

@@ -39,6 +39,8 @@ bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, in
     device_->GetImmediateContext(&context_);
     width_ = width & ~1; height_ = height & ~1; fps_ = fps; out_ = std::move(out);
     frameDuration_ = 10000000LL / fps;
+    // Media Foundation needs COM on the threads that use it; SteamVR's present thread may have none
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) { error = "Media Foundation indisponível"; return false; }
     if (!InitConverter(error)) return false;
     std::string hwError;
@@ -57,7 +59,11 @@ bool VideoEncoder::Init(ID3D11Device* device, int width, int height, int fps, in
     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
     running_ = true;
-    thread_ = std::thread([this] { if (hardware_) AsyncLoop(); else SyncLoop(); });
+    thread_ = std::thread([this] {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (hardware_) AsyncLoop(); else SyncLoop();
+        CoUninitialize();
+    });
     return true;
 }
 
@@ -224,6 +230,31 @@ bool VideoEncoder::FeedInput(int slot, uint64_t tag) {
     return SUCCEEDED(hr);
 }
 
+/** Whether an Annex B stream carries its parameter sets: SPS (H.264 NAL 7) or VPS (HEVC NAL 32). */
+bool VideoEncoder::HasParameterSets(const uint8_t* d, size_t n) const {
+    for (size_t i = 0; i + 3 < n; i++) {
+        if (d[i] != 0 || d[i + 1] != 0) continue;
+        size_t h = d[i + 2] == 1 ? i + 3 : (d[i + 2] == 0 && d[i + 3] == 1 ? i + 4 : 0);
+        if (h == 0 || h >= n) continue;
+        int type = hevc_ ? (d[h] >> 1) & 0x3f : d[h] & 0x1f;
+        if (hevc_ ? type == 32 : type == 7) return true;
+        i = h;
+    }
+    return false;
+}
+
+/** The encoder's SPS/PPS as the output type has them (some encoders put them only there). */
+void VideoEncoder::LoadSequenceHeader() {
+    IMFMediaType* t = nullptr;
+    if (FAILED(mft_->GetOutputCurrentType(0, &t)) || !t) return;
+    UINT8* blob = nullptr; UINT32 size = 0;
+    if (SUCCEEDED(t->GetAllocatedBlob(MF_MT_MPEG_SEQUENCE_HEADER, &blob, &size)) && blob) {
+        seqHeader_.assign(blob, blob + size);
+        CoTaskMemFree(blob);
+    }
+    t->Release();
+}
+
 void VideoEncoder::Emit(IMFSample* s) {
     LONGLONG t = 0; s->GetSampleTime(&t);
     UINT32 clean = 0; s->GetUINT32(MFSampleExtension_CleanPoint, &clean);
@@ -233,7 +264,18 @@ void VideoEncoder::Emit(IMFSample* s) {
     IMFMediaBuffer* b = nullptr;
     if (FAILED(s->ConvertToContiguousBuffer(&b))) return;
     BYTE* data = nullptr; DWORD len = 0;
-    if (SUCCEEDED(b->Lock(&data, nullptr, &len))) { out_(data, len, clean != 0, tag); b->Unlock(); }
+    if (SUCCEEDED(b->Lock(&data, nullptr, &len))) {
+        // the phone's decoder can start only from a key frame with its parameter sets in front
+        if (clean && !HasParameterSets(data, len)) {
+            if (seqHeader_.empty()) LoadSequenceHeader();
+            if (!seqHeader_.empty()) {
+                keyBuf_.assign(seqHeader_.begin(), seqHeader_.end());
+                keyBuf_.insert(keyBuf_.end(), data, data + len);
+                out_(keyBuf_.data(), keyBuf_.size(), true, tag);
+            } else out_(data, len, true, tag);
+        } else out_(data, len, clean != 0, tag);
+        b->Unlock();
+    }
     b->Release();
 }
 
@@ -252,6 +294,7 @@ void VideoEncoder::DrainOutput() {
         if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
             IMFMediaType* t = nullptr;
             if (SUCCEEDED(mft_->GetOutputAvailableType(0, 0, &t))) { mft_->SetOutputType(0, t, 0); t->Release(); }
+            seqHeader_.clear();  // new parameter sets come with the new type
             if (own) own->Release();
             continue;
         }

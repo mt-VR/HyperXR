@@ -15,6 +15,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 #include <thread>
 
 class VideoEncoder {
@@ -66,6 +67,11 @@ private:
     bool providesSamples_ = false;
     DWORD outputSize_ = 0;
     std::string name_;
+    /** SPS/PPS (VPS for HEVC) from the output type, put in front of key frames that lack them. */
+    std::vector<uint8_t> seqHeader_;
+    std::vector<uint8_t> keyBuf_;
+    bool HasParameterSets(const uint8_t* data, size_t n) const;
+    void LoadSequenceHeader();
 
     int width_ = 0, height_ = 0, fps_ = 72;
     int64_t frameDuration_ = 0;
