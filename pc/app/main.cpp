@@ -205,6 +205,29 @@ void DiscoveryThread() {
     }
 }
 
+/**
+ * Closes SteamVR and opens it again. The driver asks for this once, when the phone's screen needs
+ * a different render size; SteamVR's own restart waits for a click on its window.
+ */
+void RestartSteamVr() {
+    static const wchar_t* kProcs[] = {L"vrcompositor.exe", L"vrdashboard.exe", L"vrwebhelper.exe", L"vrmonitor.exe", L"vrserver.exe", L"vrstartup.exe"};
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W e = {sizeof e};
+        for (BOOL ok = Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e)) {
+            for (auto* name : kProcs) {
+                if (_wcsicmp(e.szExeFile, name)) continue;
+                if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, e.th32ProcessID)) {
+                    TerminateProcess(h, 0); WaitForSingleObject(h, 3000); CloseHandle(h);
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    Sleep(1500);
+    ShellExecuteW(nullptr, L"open", L"steam://rungameid/250820", nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 /** Seconds since the driver last wrote status.txt (it writes about once a second), or -1. */
 double StatusAge() {
     WIN32_FILE_ATTRIBUTE_DATA d;
@@ -258,6 +281,13 @@ void RefreshStatus() {
         return s.substr(a, s.find(L'\n', a) - a);
     };
     std::wstring t = L"Celular: " + val(L"phone") + L"\r\nCodificador: " + val(L"encoder") + L"\r\nQuadros: " + val(L"fps") + L" por segundo   Vídeo: " + val(L"mbps") + L" Mb/s (alvo " + val(L"target") + L")";
+    static ULONGLONG lastRestart = 0;
+    if (val(L"restart") == L"1" && GetTickCount64() - lastRestart > 30000) {
+        lastRestart = GetTickCount64();
+        SetStatus(L"Reiniciando o SteamVR para a tela do celular (só na primeira vez)...");
+        RestartSteamVr();
+        return;
+    }
     std::wstring err = val(L"error");
     if (!err.empty()) t += L"\r\nProblema: " + err;
     SetStatus(t);

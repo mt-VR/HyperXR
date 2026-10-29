@@ -62,6 +62,7 @@ struct Status {
     std::string encoder = "-";
     std::string gpu = "-";
     std::string error;
+    bool restart = false;  // the PC app restarts SteamVR when this is set (no click needed)
     double fps = 0, mbps = 0, targetMbps = 0;
     void Write() {
         std::lock_guard<std::mutex> l(m);
@@ -69,6 +70,7 @@ struct Status {
         if (!f) return;
         fprintf(f, "gpu=%s\n", gpu.c_str());
         fprintf(f, "phone=%s\nencoder=%s\nfps=%.0f\nmbps=%.1f\ntarget=%.0f\nerror=%s\n", phone.c_str(), encoder.c_str(), fps, mbps, targetMbps, error.c_str());
+        fprintf(f, "restart=%d\n", restart ? 1 : 0);
         fclose(f);
     }
 };
@@ -781,6 +783,8 @@ private:
         saved.tanLeft = cfg_.tanLeft; saved.tanRight = cfg_.tanRight; saved.tanUp = cfg_.tanUp; saved.tanDown = cfg_.tanDown; saved.ipd = cfg_.ipd;
         saved.Save();
         Log("HyperMagic: phone %dx%d @ %d Hz -> rendering %dx%d @ %d fps; restarting SteamVR\n", h.eyeWidth, h.eyeHeight, h.refreshHz, eyeW, eyeH, fps);
+        { std::lock_guard<std::mutex> l(g_status.m); g_status.restart = true; g_status.phone = "reiniciando o SteamVR para a tela do celular"; }
+        g_status.Write();
         VRServerDriverHost()->RequestRestart("O HyperMagic ajustou o SteamVR para a tela do seu celular.", nullptr, nullptr, nullptr);
     }
 

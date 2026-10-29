@@ -295,6 +295,11 @@ class SteamVrContent(private val pcIp: String, private val plan: SteamVrProfiles
         override fun update(dt: Float) { t += dt; if (t > 1f) { t = 0f; dirty = true } }
         override fun draw(c: PanelCanvas) {
             c.paragraph(state, 32f, XrTheme.text, bold = true)
+            client?.takeIf { it.connected }?.let { cl ->
+                val cfg = cl.config
+                c.paragraph("Recebido: ${cl.bytesReceived / 1024} KB   quadros: ${cl.framesDecoded}" +
+                    (if (cfg != null) "   vídeo ${cfg.eyeWidth * 2}x${cfg.eyeHeight}" else "   aguardando a configuração do PC"), 24f, XrTheme.textDim)
+            }
             c.paragraph("IP deste celular (digite no HyperMagic PC): " + (localIp() ?: "sem Wi-Fi"), 26f, XrTheme.accent2)
             val found = client?.foundPc
             c.paragraph(when {
