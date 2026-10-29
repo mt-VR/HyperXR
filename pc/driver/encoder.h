@@ -33,6 +33,8 @@ public:
     void Shutdown();
     const std::string& Name() const { return name_; }
     bool Hardware() const { return hardware_; }
+    /** Why the last frame did not reach the encoder ("" when it did). */
+    std::string Problem() const { std::lock_guard<std::mutex> l(mutex_); return problem_; }
 
 private:
     bool InitConverter(std::string& error);
@@ -54,6 +56,7 @@ private:
     ID3D11VideoProcessorOutputView* outView_[kSlots] = {};
     ID3D11Texture2D* staging_ = nullptr;  // software path readback
     ID3D11Texture2D* lastInput_ = nullptr;
+    std::string problem_;
     ID3D11VideoProcessorInputView* inView_ = nullptr;
     int nextSlot_ = 0;
 
@@ -79,7 +82,7 @@ private:
     Output out_;
     std::map<int64_t, uint64_t> tags_;
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
     struct Pending { int slot; uint64_t tag; };
     std::deque<Pending> pending_;

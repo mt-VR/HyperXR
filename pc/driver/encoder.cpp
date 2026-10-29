@@ -175,14 +175,22 @@ void VideoEncoder::Submit(ID3D11Texture2D* rgba, uint64_t tag) {
     if (rgba != lastInput_) {
         SAFE_RELEASE(inView_);
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC id = {}; id.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
-        if (FAILED(vdev_->CreateVideoProcessorInputView(rgba, venum_, &id, &inView_))) return;
+        HRESULT hr = vdev_->CreateVideoProcessorInputView(rgba, venum_, &id, &inView_);
+        if (FAILED(hr)) {
+            D3D11_TEXTURE2D_DESC d; rgba->GetDesc(&d);
+            std::lock_guard<std::mutex> l(mutex_);
+            problem_ = "a GPU não converte o formato " + std::to_string(int(d.Format)) + " para vídeo (" + Hex(hr) + ")";
+            return;
+        }
         lastInput_ = rgba;
     }
     int slot = nextSlot_; nextSlot_ = (nextSlot_ + 1) % kSlots;
     D3D11_VIDEO_PROCESSOR_STREAM st = {}; st.Enable = TRUE; st.pInputSurface = inView_;
-    if (FAILED(vctx_->VideoProcessorBlt(vproc_, outView_[slot], 0, 1, &st))) return;
+    HRESULT hr = vctx_->VideoProcessorBlt(vproc_, outView_[slot], 0, 1, &st);
+    if (FAILED(hr)) { std::lock_guard<std::mutex> l(mutex_); problem_ = "conversão para vídeo falhou (" + Hex(hr) + ")"; return; }
     {
         std::lock_guard<std::mutex> l(mutex_);
+        problem_.clear();
         // the encoder takes the newest frame: an old one waiting would only add latency
         while (pending_.size() >= 2) pending_.pop_front();
         pending_.push_back({slot, tag});

@@ -62,6 +62,7 @@ struct Status {
     std::string encoder = "-";
     std::string gpu = "-";
     std::string error;
+    std::string image = "-";  // what SteamVR hands over: format and brightness of a sample
     bool restart = false;  // the PC app restarts SteamVR when this is set (no click needed)
     double fps = 0, mbps = 0, targetMbps = 0;
     void Write() {
@@ -70,7 +71,7 @@ struct Status {
         if (!f) return;
         fprintf(f, "gpu=%s\n", gpu.c_str());
         fprintf(f, "phone=%s\nencoder=%s\nfps=%.0f\nmbps=%.1f\ntarget=%.0f\nerror=%s\n", phone.c_str(), encoder.c_str(), fps, mbps, targetMbps, error.c_str());
-        fprintf(f, "restart=%d\n", restart ? 1 : 0);
+        fprintf(f, "restart=%d\nimage=%s\n", restart ? 1 : 0, image.c_str());
         fclose(f);
     }
 };
@@ -371,6 +372,7 @@ public:
         for (auto& s : shared_) if (s.tex) s.tex->Release();
         shared_.clear();
         if (copy_) { copy_->Release(); copy_ = nullptr; }
+        if (probe_) { probe_->Release(); probe_ = nullptr; }
         if (query_) { query_->Release(); query_ = nullptr; }
         if (context_) { context_->Release(); context_ = nullptr; }
         if (device_) { device_->Release(); device_ = nullptr; }
@@ -421,13 +423,13 @@ public:
         ID3D11Texture2D* src = OpenShared(info->backbufferTextureHandle);
         if (!src) return;
         D3D11_TEXTURE2D_DESC d; src->GetDesc(&d);
-        if (!copy_ || copyW_ != d.Width || copyH_ != d.Height) {
+        if (!copy_ || copyW_ != d.Width || copyH_ != d.Height || copyFormat_ != CopyFormat(d.Format)) {
             if (copy_) copy_->Release();
             D3D11_TEXTURE2D_DESC cd = d;
-            cd.Format = RgbFormat(d.Format); cd.MiscFlags = 0; cd.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            cd.Format = CopyFormat(d.Format); cd.MiscFlags = 0; cd.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
             cd.Usage = D3D11_USAGE_DEFAULT; cd.CPUAccessFlags = 0; cd.MipLevels = 1; cd.ArraySize = 1; cd.SampleDesc.Count = 1;
             if (FAILED(device_->CreateTexture2D(&cd, nullptr, &copy_))) { copy_ = nullptr; return; }
-            copyW_ = d.Width; copyH_ = d.Height;
+            copyW_ = d.Width; copyH_ = d.Height; copyFormat_ = cd.Format;
             StartEncoder(int(d.Width), int(d.Height));
         } else if (restartEncoder_.exchange(false)) {
             StartEncoder(int(copyW_), int(copyH_));
@@ -437,6 +439,7 @@ public:
             encoder_->RequestKeyFrame();
         }
         context_->CopyResource(copy_, src);
+        ProbeImage(d.Format);
         context_->End(query_);
         context_->Flush();
         presentPending_ = true;
@@ -516,11 +519,63 @@ private:
         return tag;
     }
 
-    static DXGI_FORMAT RgbFormat(DXGI_FORMAT f) {
+    /**
+     * The format of our copy: SteamVR's own, minus typeless and sRGB (the bytes stay gamma-encoded,
+     * as video wants). CopyResource silently does nothing between formats of different families,
+     * which streamed black frames when SteamVR used a 10-bit or half-float backbuffer.
+     */
+    static DXGI_FORMAT CopyFormat(DXGI_FORMAT f) {
         switch (f) {
             case DXGI_FORMAT_B8G8R8A8_TYPELESS: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: case DXGI_FORMAT_B8G8R8A8_UNORM: return DXGI_FORMAT_B8G8R8A8_UNORM;
+            case DXGI_FORMAT_B8G8R8X8_TYPELESS: case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: case DXGI_FORMAT_B8G8R8X8_UNORM: return DXGI_FORMAT_B8G8R8X8_UNORM;
+            case DXGI_FORMAT_R10G10B10A2_TYPELESS: case DXGI_FORMAT_R10G10B10A2_UNORM: return DXGI_FORMAT_R10G10B10A2_UNORM;
+            case DXGI_FORMAT_R16G16B16A16_TYPELESS: case DXGI_FORMAT_R16G16B16A16_FLOAT: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             default: return DXGI_FORMAT_R8G8B8A8_UNORM;
         }
+    }
+
+    /**
+     * Every 2 s: the average brightness of a patch in the middle of the left eye, read back one
+     * frame later (no GPU stall), so status.txt tells a black SteamVR image from a phone problem.
+     */
+    void ProbeImage(DXGI_FORMAT srcFormat) {
+        const UINT kSize = 64;
+        D3D11_TEXTURE2D_DESC cd; copy_->GetDesc(&cd);
+        if (probe_ && probeFormat_ != cd.Format) { probe_->Release(); probe_ = nullptr; probePending_ = false; }
+        if (probePending_) {
+            D3D11_MAPPED_SUBRESOURCE m;
+            if (context_->Map(probe_, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) == S_OK) {
+                double sum = 0; int n = 0;
+                bool eight = cd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || cd.Format == DXGI_FORMAT_B8G8R8X8_UNORM || cd.Format == DXGI_FORMAT_R8G8B8A8_UNORM;
+                for (UINT y = 0; y < kSize && eight; y += 4) {
+                    const uint8_t* row = static_cast<const uint8_t*>(m.pData) + y * m.RowPitch;
+                    for (UINT x = 0; x < kSize; x += 4) { sum += row[x * 4] + row[x * 4 + 1] + row[x * 4 + 2]; n += 3; }
+                }
+                context_->Unmap(probe_, 0);
+                probePending_ = false;
+                char buf[96];
+                if (n) snprintf(buf, sizeof buf, "formato %d, brilho %.0f%%", int(srcFormat), sum / n / 2.55);
+                else snprintf(buf, sizeof buf, "formato %d", int(srcFormat));
+                std::string problem = encoder_ ? encoder_->Problem() : std::string("sem codificador");
+                std::lock_guard<std::mutex> l(g_status.m);
+                g_status.image = buf + (problem.empty() ? std::string() : "; " + problem);
+            }
+            return;
+        }
+        double now = NowSeconds();
+        if (now - lastProbe_ < 2.0 || cd.Width < kSize * 2 || cd.Height < kSize) return;
+        lastProbe_ = now;
+        if (!probe_) {
+            D3D11_TEXTURE2D_DESC pd = {};
+            pd.Width = kSize; pd.Height = kSize; pd.MipLevels = 1; pd.ArraySize = 1; pd.Format = cd.Format;
+            pd.SampleDesc.Count = 1; pd.Usage = D3D11_USAGE_STAGING; pd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            if (FAILED(device_->CreateTexture2D(&pd, nullptr, &probe_))) { probe_ = nullptr; return; }
+            probeFormat_ = cd.Format;
+        }
+        UINT x0 = cd.Width / 4 - kSize / 2, y0 = cd.Height / 2 - kSize / 2;
+        D3D11_BOX box = {x0, y0, 0, x0 + kSize, y0 + kSize, 1};
+        context_->CopySubresourceRegion(probe_, 0, 0, 0, 0, copy_, 0, &box);
+        probePending_ = true;
     }
 
     /** The high-performance GPU (the discrete one on a laptop), or the first one. */
@@ -667,6 +722,11 @@ private:
     std::vector<Shared> shared_;
     ID3D11Texture2D* copy_ = nullptr;
     UINT copyW_ = 0, copyH_ = 0;
+    DXGI_FORMAT copyFormat_ = DXGI_FORMAT_UNKNOWN;
+    ID3D11Texture2D* probe_ = nullptr;
+    DXGI_FORMAT probeFormat_ = DXGI_FORMAT_UNKNOWN;
+    bool probePending_ = false;
+    double lastProbe_ = 0;
     VideoEncoder* encoder_ = nullptr;
     bool presentPending_ = false;
     std::atomic<bool> wantHevc_{false}, restartEncoder_{false}, announce_{false}, keyFrame_{false};

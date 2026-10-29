@@ -288,6 +288,12 @@ void RefreshStatus() {
         RestartSteamVr();
         return;
     }
+    std::wstring image = val(L"image");
+    if (!image.empty() && image != L"-") {
+        t += L"\r\nImagem do SteamVR: " + image;
+        if (image.find(L"brilho 0%") != std::wstring::npos)
+            t += L" (o SteamVR está desenhando preto: aperte o botão de sistema/menu ou abra um jogo)";
+    }
     std::wstring err = val(L"error");
     if (!err.empty()) t += L"\r\nProblema: " + err;
     SetStatus(t);
@@ -331,7 +337,7 @@ LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
             SendMessageW(fw, WM_SETFONT, (WPARAM)g_font, TRUE);
             HWND rm = CreateWindowW(L"BUTTON", L"Remover", WS_CHILD | WS_VISIBLE, 450, 266, 90, 40, w, (HMENU)ID_REMOVE, nullptr, nullptr);
             SendMessageW(rm, WM_SETFONT, (WPARAM)g_font, TRUE);
-            g_status = Label(w, L"", 20, 320, 520, 110, g_font);
+            g_status = Label(w, L"", 20, 320, 520, 160, g_font);
             SetTimer(w, ID_TIMER, 1000, nullptr);
             std::thread(DiscoveryThread).detach();
             RefreshStatus();
@@ -362,7 +368,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
     RegisterClassW(&wc);
     HWND w = CreateWindowW(L"HyperMagicPC", L"HyperMagic PC", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 580, 490, nullptr, nullptr, inst, nullptr);
+                           CW_USEDEFAULT, CW_USEDEFAULT, 580, 540, nullptr, nullptr, inst, nullptr);
     ShowWindow(w, show);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {
