@@ -112,6 +112,12 @@ A curvatura dos dedos também é enviada ao PC.
 - **Quadros-chave sem SPS/PPS.** Alguns codificadores da GPU só põem os parâmetros do vídeo no tipo
   de mídia; sem eles o celular não decodifica nada. Agora todo quadro-chave sai com eles.
 - **COM** inicializado nas threads do Media Foundation.
+- **Vídeo preto.** O SteamVR entrega cada quadro numa textura compartilhada protegida por um
+  *keyed mutex*; lida sem pegar o mutex, ela vem preta. O driver agora pega o mutex antes de
+  copiar, copia no mesmo tipo de formato do SteamVR (copiar entre famílias de formato não faz
+  nada) e mostra no programa do PC o formato e o brilho da imagem que recebe.
+- **Conexão:** o PC e o celular se acham pela rede (UDP 9945); o programa do PC reinicia o SteamVR
+  sozinho quando o driver pede (o pedido do próprio SteamVR espera um clique).
 - **Protocolo conferido dos dois lados:** `pc/tests/protocol_test.cpp` lê os bytes que o celular
   gera (`pc/tests/golden`, escritos pelo teste `HxvrGoldenTest` do core) e escreve os que o
   celular lê. Roda no workflow de release, que agora também publica o `HyperMagic-PC-<versão>.zip`.

@@ -369,7 +369,7 @@ public:
         running_ = false;
         if (vsyncThread_.joinable()) vsyncThread_.join();
         if (encoder_) { encoder_->Shutdown(); delete encoder_; encoder_ = nullptr; }
-        for (auto& s : shared_) if (s.tex) s.tex->Release();
+        for (auto& s : shared_) { if (s.mutex) s.mutex->Release(); if (s.tex) s.tex->Release(); }
         shared_.clear();
         if (copy_) { copy_->Release(); copy_ = nullptr; }
         if (probe_) { probe_->Release(); probe_ = nullptr; }
@@ -420,15 +420,17 @@ public:
     // ---- virtual display: SteamVR hands over each finished frame here
     void Present(const PresentInfo_t* info, uint32_t) override {
         if (!EnsureDevice()) return;
-        ID3D11Texture2D* src = OpenShared(info->backbufferTextureHandle);
-        if (!src) return;
+        Shared* sh = OpenShared(info->backbufferTextureHandle);
+        if (!sh) return;
+        ID3D11Texture2D* src = sh->tex;
+        if (sh->mutex && sh->mutex->AcquireSync(0, 10) != S_OK) return;  // SteamVR still drawing: skip this frame
         D3D11_TEXTURE2D_DESC d; src->GetDesc(&d);
         if (!copy_ || copyW_ != d.Width || copyH_ != d.Height || copyFormat_ != CopyFormat(d.Format)) {
             if (copy_) copy_->Release();
             D3D11_TEXTURE2D_DESC cd = d;
             cd.Format = CopyFormat(d.Format); cd.MiscFlags = 0; cd.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
             cd.Usage = D3D11_USAGE_DEFAULT; cd.CPUAccessFlags = 0; cd.MipLevels = 1; cd.ArraySize = 1; cd.SampleDesc.Count = 1;
-            if (FAILED(device_->CreateTexture2D(&cd, nullptr, &copy_))) { copy_ = nullptr; return; }
+            if (FAILED(device_->CreateTexture2D(&cd, nullptr, &copy_))) { copy_ = nullptr; if (sh->mutex) sh->mutex->ReleaseSync(0); return; }
             copyW_ = d.Width; copyH_ = d.Height; copyFormat_ = cd.Format;
             StartEncoder(int(d.Width), int(d.Height));
         } else if (restartEncoder_.exchange(false)) {
@@ -439,6 +441,7 @@ public:
             encoder_->RequestKeyFrame();
         }
         context_->CopyResource(copy_, src);
+        if (sh->mutex) sh->mutex->ReleaseSync(0);
         ProbeImage(d.Format);
         context_->End(query_);
         context_->Flush();
@@ -505,6 +508,7 @@ public:
     uint32_t Id() const { return id_; }
 
 private:
+    struct Shared { SharedTextureHandle_t handle; ID3D11Texture2D* tex; IDXGIKeyedMutex* mutex; };
     struct PoseSample { double at; uint64_t timeNs; float q[4]; };
 
     /** The pose SteamVR most likely rendered this frame with: the one reported about a frame ago. */
@@ -608,15 +612,18 @@ private:
         return true;
     }
 
-    ID3D11Texture2D* OpenShared(SharedTextureHandle_t handle) {
-        for (auto& s : shared_) if (s.handle == handle) return s.tex;
+    Shared* OpenShared(SharedTextureHandle_t handle) {
+        for (auto& s : shared_) if (s.handle == handle) return &s;
         ID3D11Texture2D* tex = nullptr;
         if (FAILED(device_->OpenSharedResource(reinterpret_cast<HANDLE>(handle), __uuidof(ID3D11Texture2D), (void**)&tex))) {
             SetError("não foi possível abrir a imagem do SteamVR (GPU diferente?)");
             return nullptr;
         }
-        shared_.push_back({handle, tex});
-        return tex;
+        // SteamVR shares its backbuffer behind a keyed mutex: without taking it, reads return black
+        IDXGIKeyedMutex* mutex = nullptr;
+        if (FAILED(tex->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)&mutex))) mutex = nullptr;
+        shared_.push_back({handle, tex, mutex});
+        return &shared_.back();
     }
 
     void StartEncoder(int w, int h) {
@@ -718,7 +725,6 @@ private:
     ID3D11Device* device_ = nullptr;
     ID3D11DeviceContext* context_ = nullptr;
     ID3D11Query* query_ = nullptr;
-    struct Shared { SharedTextureHandle_t handle; ID3D11Texture2D* tex; };
     std::vector<Shared> shared_;
     ID3D11Texture2D* copy_ = nullptr;
     UINT copyW_ = 0, copyH_ = 0;
