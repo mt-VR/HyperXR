@@ -178,6 +178,12 @@
             android:resizeableActivity="false"
             android:theme="@style/Theme.HyperXR.Immersive" />
 
+        <!-- Colour-marked controller calibrator, opened from the 2D settings. -->
+        <activity
+            android:name=".color.ColorCalibActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.HyperXR.Immersive" />
         <!-- Hand tracking test (camera + skeleton + live numbers), opened from the 2D settings. -->
         <activity
             android:name=".handtracking.HandTestActivity"

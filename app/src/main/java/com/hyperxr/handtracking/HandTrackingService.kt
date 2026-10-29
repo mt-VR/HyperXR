@@ -370,7 +370,11 @@ class HandTrackingService(private val context: Context) {
      */
     @Volatile var frameTap: ((Bitmap, CameraIntrinsics, Pose, DepthSampler?) -> Unit)? = null
 
+    /** The same frames for the colour-marked controller (its own callback, so it runs beside [frameTap]). */
+    @Volatile var colorTap: ((Bitmap, CameraIntrinsics, Pose, DepthSampler?) -> Unit)? = null
+
     private fun afterFrame(slot: Slot) {
+        colorTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; if (b != null && i != null) runCatching { tap(b, i, slot.pose ?: NO_POSE, null) } }
         frameTap?.let { tap -> val b = slot.bitmap; val i = slot.intr; val p = slot.pose; if (b != null && i != null && p != null) runCatching { tap(b, i, p, if (slot.depth.valid) slot.depth else null) } }
     }
 
@@ -809,6 +813,8 @@ class HandTrackingService(private val context: Context) {
         const val MODEL_ASSET = "models/hand_landmarker.task"
         const val DISPLAY_AHEAD_S = 0.012f
         private val ORIGIN = com.hyperxr.math.Vec3()
+        /** A frame without a camera pose: camera space is the world. */
+        private val NO_POSE = Pose()
         /** Full 640x480 frames: hands at arm's length are small, and downscaling cost landmark quality. */
         const val MAX_WIDTH = 640
     }

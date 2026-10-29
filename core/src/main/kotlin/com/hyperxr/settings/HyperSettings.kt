@@ -143,6 +143,8 @@ data class ControllerSettings(
     val hyperConnect: Boolean = true,
     /** HyperConnect: buzz the controller phone when the pointer reaches a button. */
     val hyperConnectHaptics: Boolean = true,
+    /** A controller (or any object) marked with coloured spots, tracked by the camera; calibrated in its own screen. */
+    val colorController: Boolean = false,
     /** A held controller shows as a VR controller model in the hand. */
     val controllerModel: Boolean = true,
     /** The hand stays drawn (closed around the controller) while it holds one. */

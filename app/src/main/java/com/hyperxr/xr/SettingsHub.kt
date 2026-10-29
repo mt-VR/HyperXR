@@ -101,6 +101,7 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Info("HyperConnect") { hyperConnectMessage.ifEmpty { a.hyperConnectStatus } },
             Item.Toggle("HyperConnect", "Outro celular como controle, por Bluetooth", { it.controllers.hyperConnect }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnect = v)) },
             Item.Toggle("Vibração no HyperConnect", "O celular controle vibra ao apontar um botão", { it.controllers.hyperConnectHaptics }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnectHaptics = v)) },
+            Item.Toggle("Controle por cor", "Controle com adesivos coloridos, achado pela câmera (calibre nas configurações 2D)", { it.controllers.colorController }) { s, v -> s.copy(controllers = s.controllers.copy(colorController = v)) },
             Item.Action("Enviar o app HyperConnect", "Instale no outro celular, pareie os dois e conecte") {
                 hyperConnectMessage = CompatLayer.shareHyperConnect(HyperXRApp.instance)
             },
