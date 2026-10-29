@@ -38,14 +38,23 @@ jobs:
         run: ./gradlew :core:test --no-daemon
 
       - name: APK (arm64)
-        run: ./gradlew :app:assembleDebug -PhxAbi=arm64-v8a --no-daemon
+        run: |
+          ./gradlew :app:assembleDebug -PhxAbi=arm64-v8a --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk HyperMagic-arm64.apk
 
-      - name: Name the APK
+      # phones with a 32-bit Android refuse an arm64-only APK ("invalid package")
+      - name: APK (32-bit ARM)
+        run: |
+          ./gradlew :app:assembleDebug -PhxAbi=armeabi-v7a --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk HyperMagic-armv7.apk
+
+      - name: Name the APKs
         id: names
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          cp app/build/outputs/apk/debug/app-debug.apk "HyperMagic-$TAG-arm64.apk"
+          mv HyperMagic-arm64.apk "HyperMagic-$TAG-arm64.apk"
+          mv HyperMagic-armv7.apk "HyperMagic-$TAG-armv7.apk"
           NOTES="docs/releases/$TAG.md"
           [ -f "$NOTES" ] || NOTES=README.md
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
@@ -55,4 +64,6 @@ jobs:
           tag_name: ${{ steps.names.outputs.tag }}
           name: HyperMagic ${{ steps.names.outputs.tag }}
           body_path: ${{ steps.names.outputs.notes }}
-          files: HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk
+          files: |
+            HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk
+            HyperMagic-${{ steps.names.outputs.tag }}-armv7.apk

@@ -1,5 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+/** The ABIs this APK is built for (-PhxAbi=arm64-v8a,...). */
+val hxAbis: List<String> = project.findProperty("hxAbi")?.toString()?.split(",") ?: listOf("arm64-v8a", "x86_64")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -16,10 +19,11 @@ android {
         applicationId = "com.hypermagic"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
-        // -PhxAbi=arm64-v8a builds a phone-only APK (x86_64 is for emulators)
-        ndk { abiFilters += (project.findProperty("hxAbi")?.toString()?.split(",") ?: listOf("arm64-v8a", "x86_64")) }
+        versionCode = 4
+        versionName = "0.3.1"
+        // -PhxAbi=arm64-v8a builds a phone-only APK (x86_64 is for emulators); -PhxAbi=armeabi-v7a
+        // the APK for phones with a 32-bit Android (they refuse an arm64-only APK as "invalid package")
+        ndk { abiFilters += hxAbis }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -149,8 +153,9 @@ dependencies {
     // signs games patched on the phone (APK Signature Scheme v1-v3)
     implementation("com.android.tools.build:apksig:8.13.2")
     implementation(libs.webkit)
-    // Browser engine (arm64 only; other ABIs fall back to the system WebView at runtime).
-    implementation(libs.geckoview)
+    // Browser engine, one build per ABI: arm64, or 32-bit ARM for the 32-bit APK (an x86_64
+    // emulator build falls back to the system WebView at runtime).
+    if ("armeabi-v7a" in hxAbis && "arm64-v8a" !in hxAbis) implementation(libs.geckoview.v7a) else implementation(libs.geckoview)
     implementation(libs.browser)
     testImplementation(libs.junit)
     // panel previews (UiPreviewTest): real Android Canvas drawing on the PC

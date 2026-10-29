@@ -1,7 +1,6 @@
 package com.hyperxr.browser
 
 import android.app.Activity
-import android.os.Build
 import com.hyperxr.diagnostics.Diagnostics
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -11,7 +10,8 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
  * Pages render straight into the Surface of a window's texture, like Wolvic does, so there is no
  * hidden Android View or screen capture in between.
  *
- * Only arm64 GeckoView is bundled (it is ~150 MB per ABI); other ABIs use the WebView fallback.
+ * One GeckoView per APK (it is ~150 MB per ABI): arm64 in the main APK, 32-bit ARM in the 32-bit
+ * one; anywhere else the WebView fallback is used.
  */
 object GeckoEngine {
     /** Virtual screen of every browser window (also the size reported to pages). */
@@ -23,12 +23,15 @@ object GeckoEngine {
     @Volatile private var runtime: GeckoRuntime? = null
     @Volatile var error: String? = null; private set
 
-    val supported: Boolean get() = Build.SUPPORTED_ABIS.contains("arm64-v8a")
+    /** The engine's native library is in this APK for the ABI the app runs as (arm64 or 32-bit ARM builds). */
+    val supported: Boolean by lazy {
+        runCatching { java.io.File(com.hyperxr.HyperXRApp.instance.applicationInfo.nativeLibraryDir, "libxul.so").exists() }.getOrDefault(false)
+    }
 
     /** UI thread. Returns null (with [error]) when the engine cannot run here. */
     fun runtime(activity: Activity): GeckoRuntime? {
         runtime?.let { return it }
-        if (!supported) { error = "GeckoView só está incluído para arm64"; return null }
+        if (!supported) { error = "GeckoView não está incluído para este processador"; return null }
         return try {
             val settings = GeckoRuntimeSettings.Builder()
                 .displayDensityOverride(DENSITY)

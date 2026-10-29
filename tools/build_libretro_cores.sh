@@ -10,7 +10,7 @@ NDK_DIR=${2:-${ANDROID_NDK_HOME:-${ANDROID_HOME:-/opt/android-sdk}/ndk/27.2.1247
 SDK_DIR=$(cd "$NDK_DIR/../.." && pwd)
 CMAKE_BIN=$(ls -d "$SDK_DIR"/cmake/*/bin | tail -1)
 OUT=$ROOT/app/src/main/jniLibs
-ABIS="arm64-v8a x86_64"
+ABIS=${ABIS:-"arm64-v8a armeabi-v7a x86_64"}
 # 16 KB pages (Android 15+ devices), as for the app's own libraries
 PAGE=-Wl,-z,max-page-size=16384
 

@@ -65,8 +65,12 @@ public final class McRuntime {
 
     private static volatile File natives;
 
-    /** The Java runtime and natives exist only for 64-bit ARM (every VR Box phone of the last years). */
+    /**
+     * The Java runtime and natives exist only for 64-bit ARM (every VR Box phone of the last
+     * years), and the app must run as a 64-bit process (not the 32-bit APK).
+     */
     public static boolean supported() {
+        if (!android.os.Process.is64Bit()) return false;
         for (String abi : Build.SUPPORTED_ABIS) if (abi.equals("arm64-v8a")) return true;
         return false;
     }
