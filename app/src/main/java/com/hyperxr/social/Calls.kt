@@ -1,42 +1,34 @@
 package com.hyperxr.social
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioManager
-import android.view.Surface
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
 import com.hyperxr.diagnostics.Diagnostics
 import org.json.JSONObject
-import org.webrtc.AudioTrack
-import org.webrtc.DataChannel
-import org.webrtc.DefaultVideoDecoderFactory
-import org.webrtc.DefaultVideoEncoderFactory
-import org.webrtc.EglBase
-import org.webrtc.IceCandidate
-import org.webrtc.MediaConstraints
-import org.webrtc.MediaStream
-import org.webrtc.MediaStreamTrack
-import org.webrtc.PeerConnection
-import org.webrtc.PeerConnectionFactory
-import org.webrtc.RtpReceiver
-import org.webrtc.RtpTransceiver
-import org.webrtc.SdpObserver
-import org.webrtc.SessionDescription
-import org.webrtc.SurfaceTextureHelper
-import org.webrtc.VideoSink
-import org.webrtc.VideoSource
-import org.webrtc.VideoTrack
-import org.webrtc.audio.JavaAudioDeviceModule
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.WebExtension
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Voice calls and screen sharing between HyperMagic users. Signalling (offer, answer, ICE, hang
- * up) goes over each user's Supabase Realtime channel; audio and video go straight between the
- * phones with WebRTC (STUN only: on some mobile networks a direct path can't be found and the call
- * fails to connect, which needs a TURN relay server). The shared screen is HyperMagic's 16:9
- * spectator view of the scene (the same one recordings use), so no Android screen-capture prompt.
+ * Voice calls and screen sharing between HyperMagic users, with the WebRTC of Firefox's engine
+ * (GeckoView, already in the app for the browser): a hidden page (assets/callext) holds the
+ * connection and plays the other person's voice; this object does the signalling over each
+ * user's Supabase Realtime channel and talks to the page through native messaging.
+ *
+ * Audio goes straight between the phones (STUN only: on some mobile networks no direct path
+ * exists and the call can't connect without a TURN relay). The shared screen is HyperMagic's 16:9
+ * spectator view sent as JPEG frames (about 8 per second) on the call's data channel.
  */
 object Calls {
     enum class State { IDLE, OUTGOING, INCOMING, ACTIVE }
@@ -51,44 +43,103 @@ object Calls {
     @Volatile var info = ""; private set
     @Volatile var startedAtMs = 0L; private set
 
-    /** The XR renderer: draws the spectator view into [Surface]s it is given (GL thread work inside). */
-    interface ScreenOutput {
-        fun attach(surface: Surface, width: Int, height: Int)
-        fun detach(surface: Surface)
-    }
-    @Volatile var screenOutput: ScreenOutput? = null
+    /** The XR renderer gives frames of its 16:9 view while [wantFrames] is true. */
+    @Volatile var wantFrames = false; private set
 
     private lateinit var ctx: Context
     private val io = Executors.newSingleThreadScheduledExecutor()
+    private val encoder = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
-    private var factory: PeerConnectionFactory? = null
-    private var egl: EglBase? = null
-    private var pc: PeerConnection? = null
-    private var audio: AudioTrack? = null
     private var callId = ""
     private var pendingOffer: JSONObject? = null
-    private val pendingIce = ArrayList<IceCandidate>()
-    private var remoteSet = false
-    private var screenSource: VideoSource? = null
-    private var screenTrack: VideoTrack? = null
-    private var screenHelper: SurfaceTextureHelper? = null
-    private var screenSurface: Surface? = null
     private var ringTimeout: java.util.concurrent.ScheduledFuture<*>? = null
+    // the call page
+    private var session: GeckoSession? = null
+    private var port: WebExtension.Port? = null
+    @Volatile private var ready = false
+    private val queue = ArrayList<JSONObject>()
+    @Volatile private var encoding = false
 
     fun init(c: Context) { ctx = c }
+
+    private var host: java.lang.ref.WeakReference<Activity>? = null
+
+    /** The activity that can start GeckoView; the call page itself loads only when a call starts or rings. */
+    fun setHost(activity: Activity) { host = java.lang.ref.WeakReference(activity) }
+
+    private fun ensurePage() { main.post { host?.get()?.let { attach(it) } } }
     fun addListener(l: () -> Unit) { listeners += l }
     fun removeListener(l: () -> Unit) { listeners -= l }
     private fun changed() = listeners.forEach { runCatching { it() } }
 
-    private fun factory(): PeerConnectionFactory {
-        factory?.let { return it }
-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
-        val e = EglBase.create().also { egl = it }
-        return PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(e.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(e.eglBaseContext))
-            .setAudioDeviceModule(JavaAudioDeviceModule.builder(ctx).setUseHardwareAcousticEchoCanceler(true).setUseHardwareNoiseSuppressor(true).createAudioDeviceModule())
-            .createPeerConnectionFactory().also { factory = it }
+    // ------------------------------------------------------------------ the call page
+
+    /**
+     * Starts the hidden call page (UI thread; GeckoView needs an Activity once for its runtime).
+     * GeckoResult callbacks run on the thread that made the result, here the UI thread.
+     */
+    @android.annotation.SuppressLint("WrongThread")
+    @androidx.annotation.UiThread
+    fun attach(activity: Activity) {
+        if (session != null) return
+        val runtime = com.hyperxr.browser.GeckoEngine.runtime(activity) ?: run { info = "Chamadas precisam do motor do navegador (GeckoView)"; return }
+        runtime.webExtensionController.ensureBuiltIn("resource://android/assets/callext/", "calls@hypermagic").accept({ ext ->
+            if (ext == null) return@accept
+            ext.setMessageDelegate(object : WebExtension.MessageDelegate {
+                override fun onConnect(p: WebExtension.Port) {
+                    port = p
+                    p.setDelegate(object : WebExtension.PortDelegate {
+                        override fun onPortMessage(message: Any, p: WebExtension.Port) { (message as? JSONObject)?.let { m -> io.execute { fromPage(m) } } }
+                        override fun onDisconnect(p: WebExtension.Port) { if (port === p) { port = null; ready = false } }
+                    })
+                }
+            }, "hxcall")
+            val s = GeckoSession(GeckoSessionSettings.Builder().usePrivateMode(false).build())
+            s.permissionDelegate = object : GeckoSession.PermissionDelegate {
+                override fun onMediaPermissionRequest(session: GeckoSession, uri: String, video: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                                                      audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?, callback: GeckoSession.PermissionDelegate.MediaCallback) {
+                    val mic = audio?.firstOrNull()
+                    if (mic != null) callback.grant(null as String?, mic.id) else callback.reject()
+                }
+                override fun onAndroidPermissionsRequest(session: GeckoSession, permissions: Array<out String>?, callback: GeckoSession.PermissionDelegate.Callback) {
+                    val ok = permissions.orEmpty().all { ctx.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+                    if (ok) callback.grant() else callback.reject()
+                }
+            }
+            s.open(runtime)
+            s.setActive(true)
+            s.loadUri(ext.metaData.baseUrl + "call.html")
+            session = s
+        }, { e -> Diagnostics.log("Call page: $e"); info = "Não deu para preparar as chamadas: ${e?.message}"; GeckoResult.fromValue(null) })
+    }
+
+    private fun toPage(o: JSONObject) {
+        main.post {
+            val p = port
+            if (p == null || !ready) { synchronized(queue) { queue += o } ; return@post }
+            p.postMessage(o)
+        }
+    }
+
+    private fun fromPage(m: JSONObject) {
+        when (m.optString("type")) {
+            "ready" -> { ready = true; main.post { val q = synchronized(queue) { queue.toList().also { queue.clear() } }; q.forEach { port?.postMessage(it) } } }
+            "offer", "answer" -> peerId?.let { signal(it, JSONObject().put("type", m.getString("type")).put("sdp", m.getString("sdp"))) }
+            "ice" -> peerId?.let { signal(it, JSONObject().put("type", "ice").put("candidate", m.optString("candidate")).put("mid", m.optString("mid")).put("index", m.optInt("index"))) }
+            "state" -> when (m.optString("state")) {
+                "connected" -> { if (state != State.ACTIVE) active() else { info = "Em chamada com $peerName"; changed() } }
+                "disconnected" -> { info = "Reconectando…"; changed() }
+                "failed" -> reset("Não deu para conectar com $peerName (a rede bloqueou a ligação direta)")
+            }
+            "frame" -> runCatching {
+                val bytes = Base64.decode(m.getString("jpeg"), Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { remoteScreen = it; remoteScreenSeq++; changed() }
+            }
+            "screenOff" -> { remoteScreen = null; remoteScreenSeq++; changed() }
+            "error" -> { Diagnostics.log("Call page error: ${m.optString("text")}"); info = "Erro na chamada: ${m.optString("text")}"; changed() }
+            "log" -> Diagnostics.log("Call page: ${m.optString("text")}")
+        }
     }
 
     private fun signal(to: String, o: JSONObject) {
@@ -97,23 +148,22 @@ object Calls {
         Social.sb.realtime().sendTo("user:$to", "signal", o)
     }
 
+    private fun micAllowed() = ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
     // ------------------------------------------------------------------ outgoing / incoming
 
     fun call(friend: Profile) = io.execute {
         if (state != State.IDLE) return@execute
         if (Social.me == null) { info = "Entre na sua conta em Pessoas"; changed(); return@execute }
+        if (!micAllowed()) { info = "Permita o microfone (Configurações 2D > Permissões) para ligar"; changed(); return@execute }
         callId = UUID.randomUUID().toString()
         peerId = friend.id; peerName = friend.name; state = State.OUTGOING; info = "Chamando ${friend.name}…"
         runCatching { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.MadeCall) }
         changed()
-        try {
-            val p = newPeer(friend.id)
-            p.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV))
-            p.createOffer(created { offer ->
-                p.setLocalDescription(applied { signal(friend.id, JSONObject().put("type", "offer").put("sdp", offer.description)) }, offer)
-            }, MediaConstraints())
-            ringTimeout = io.schedule({ if (state == State.OUTGOING) { info = "${friend.name} não atendeu"; hangUp() } }, 45, TimeUnit.SECONDS)
-        } catch (t: Throwable) { fail(t) }
+        audio(true)
+        ensurePage()
+        toPage(JSONObject().put("type", "call"))
+        ringTimeout = io.schedule({ if (state == State.OUTGOING) { info = "${friend.name} não atendeu"; hangUp() } }, 45, TimeUnit.SECONDS)
     }
 
     /** From Social: a message on this user's channel. */
@@ -123,45 +173,33 @@ object Calls {
             "offer" -> when {
                 state == State.IDLE -> {
                     callId = o.optString("call"); peerId = from; peerName = o.optString("name"); pendingOffer = o
-                    state = State.INCOMING; info = "${peerName} está te ligando"
+                    state = State.INCOMING; info = "$peerName está te ligando"
+                    ensurePage()
                     ringTimeout = io.schedule({ if (state == State.INCOMING) reset("Chamada perdida de $peerName") }, 45, TimeUnit.SECONDS)
                     changed()
                 }
                 from != peerId -> {
-                    // already in a call: tell them we're busy
                     val saved = callId; callId = o.optString("call")
-                    signal(from, JSONObject().put("type", "busy")); callId = saved
+                    val me = Social.me
+                    if (me != null) Social.sb.realtime().sendTo("user:$from", "signal", JSONObject().put("type", "busy").put("from", me.id).put("name", me.name).put("call", callId))
+                    callId = saved
                 }
                 else -> Unit
             }
-            "answer" -> if (from == peerId && o.optString("call") == callId) {
-                pc?.setRemoteDescription(applied { remoteSet = true; flushIce(); active() }, SessionDescription(SessionDescription.Type.ANSWER, o.getString("sdp")))
-            }
-            "ice" -> if (from == peerId && o.optString("call") == callId) {
-                val c = IceCandidate(o.optString("mid"), o.optInt("index"), o.getString("candidate"))
-                if (remoteSet) pc?.addIceCandidate(c) else synchronized(pendingIce) { pendingIce += c }
-            }
+            "answer" -> if (from == peerId && o.optString("call") == callId) toPage(JSONObject().put("type", "answer").put("sdp", o.getString("sdp")))
+            "ice" -> if (from == peerId && o.optString("call") == callId) toPage(JSONObject().put("type", "ice").put("candidate", o.getString("candidate")).put("mid", o.optString("mid")).put("index", o.optInt("index")))
             "busy" -> if (from == peerId) reset("$peerName está em outra chamada")
             "bye", "decline" -> if (from == peerId && o.optString("call") == callId) reset(if (o.optString("type") == "decline") "$peerName recusou" else "Chamada encerrada")
-            "screen" -> if (from == peerId) { if (!o.optBoolean("on")) { remoteScreen = null; remoteScreenSeq++ }; changed() }
         }
     }
 
     fun accept() = io.execute {
         val offer = pendingOffer ?: return@execute
-        val from = peerId ?: return@execute
+        if (!micAllowed()) { info = "Permita o microfone (Configurações 2D > Permissões) para atender"; changed(); return@execute }
         ringTimeout?.cancel(false)
-        try {
-            val p = newPeer(from)
-            p.setRemoteDescription(applied {
-                remoteSet = true; flushIce()
-                // our side of the video line may send too (screen sharing without renegotiating)
-                p.transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }?.direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV
-                p.createAnswer(created { answer ->
-                    p.setLocalDescription(applied { signal(from, JSONObject().put("type", "answer").put("sdp", answer.description)); active() }, answer)
-                }, MediaConstraints())
-            }, SessionDescription(SessionDescription.Type.OFFER, offer.getString("sdp")))
-        } catch (t: Throwable) { fail(t) }
+        audio(true)
+        info = "Conectando…"; changed()
+        toPage(JSONObject().put("type", "offer").put("sdp", offer.getString("sdp")))
     }
 
     fun decline() = io.execute {
@@ -174,150 +212,56 @@ object Calls {
         reset("Chamada encerrada")
     }
 
-    fun toggleMute() = io.execute { muted = !muted; audio?.setEnabled(!muted); changed() }
+    fun toggleMute() = io.execute { muted = !muted; toPage(JSONObject().put("type", "mute").put("on", muted)); changed() }
 
     private fun active() {
-        if (state == State.ACTIVE) return
         ringTimeout?.cancel(false)
         state = State.ACTIVE; startedAtMs = System.currentTimeMillis(); info = "Em chamada com $peerName"
         changed()
     }
 
-    private fun newPeer(to: String): PeerConnection {
-        val f = factory()
-        val am = ctx.getSystemService(AudioManager::class.java)
-        am?.mode = AudioManager.MODE_IN_COMMUNICATION
+    private fun audio(call: Boolean) {
+        val am = ctx.getSystemService(AudioManager::class.java) ?: return
+        am.mode = if (call) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
         @Suppress("DEPRECATION")
-        if (am != null) am.isSpeakerphoneOn = true
-        val cfg = PeerConnection.RTCConfiguration(listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
-        )).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
-        val p = f.createPeerConnection(cfg, object : PeerConnection.Observer {
-            override fun onIceCandidate(c: IceCandidate) {
-                signal(to, JSONObject().put("type", "ice").put("candidate", c.sdp).put("mid", c.sdpMid).put("index", c.sdpMLineIndex))
-            }
-            override fun onConnectionChange(s: PeerConnection.PeerConnectionState) {
-                if (s == PeerConnection.PeerConnectionState.FAILED) io.execute { reset("Não deu para conectar com $peerName (rede bloqueou a ligação direta)") }
-                if (s == PeerConnection.PeerConnectionState.DISCONNECTED) { info = "Reconectando…"; changed() }
-                if (s == PeerConnection.PeerConnectionState.CONNECTED) { info = "Em chamada com $peerName"; changed() }
-            }
-            override fun onTrack(t: RtpTransceiver) {
-                (t.receiver.track() as? VideoTrack)?.addSink(screenSink)
-            }
-            override fun onSignalingChange(s: PeerConnection.SignalingState) {}
-            override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {}
-            override fun onIceConnectionReceivingChange(b: Boolean) {}
-            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {}
-            override fun onIceCandidatesRemoved(c: Array<out IceCandidate>) {}
-            override fun onAddStream(s: MediaStream) {}
-            override fun onRemoveStream(s: MediaStream) {}
-            override fun onDataChannel(d: DataChannel) {}
-            override fun onRenegotiationNeeded() {}
-            override fun onAddTrack(r: RtpReceiver, s: Array<out MediaStream>) {}
-        }) ?: error("WebRTC não abriu")
-        val src = f.createAudioSource(MediaConstraints())
-        audio = f.createAudioTrack("hx-audio", src).also { p.addTrack(it, listOf("hx")) }
-        pc = p; remoteSet = false
-        return p
-    }
-
-    private fun flushIce() {
-        val list = synchronized(pendingIce) { pendingIce.toList().also { pendingIce.clear() } }
-        list.forEach { pc?.addIceCandidate(it) }
-    }
-
-    private fun fail(t: Throwable) {
-        Diagnostics.log("Call: $t")
-        reset("Erro na chamada: ${t.message}")
+        am.isSpeakerphoneOn = call
     }
 
     private fun reset(message: String) {
         ringTimeout?.cancel(false)
-        stopShareInternal()
-        runCatching { pc?.close() }; pc = null; audio = null
-        pendingOffer = null; synchronized(pendingIce) { pendingIce.clear() }; remoteSet = false
+        if (sharing) { sharing = false; wantFrames = false }
+        toPage(JSONObject().put("type", "hangup"))
+        pendingOffer = null
         state = State.IDLE; peerId = null; muted = false; remoteScreen = null; remoteScreenSeq++
         info = message
-        ctx.getSystemService(AudioManager::class.java)?.mode = AudioManager.MODE_NORMAL
+        audio(false)
         changed()
     }
 
     // ------------------------------------------------------------------ screen sharing
 
-    fun toggleShare() = io.execute { if (sharing) { stopShareInternal(); changed() } else startShare() }
-
-    private fun startShare() {
-        val p = pc ?: return
-        val out = screenOutput ?: run { info = "Abra o HyperMagic no modo XR para mostrar a tela"; changed(); return }
-        val f = factory()
-        val w = 1280; val h = 720
-        val helper = SurfaceTextureHelper.create("hx-screen", egl!!.eglBaseContext) ?: return
-        helper.setTextureSize(w, h)
-        val src = f.createVideoSource(true)
-        src.capturerObserver.onCapturerStarted(true)
-        helper.startListening { frame -> src.capturerObserver.onFrameCaptured(frame) }
-        val track = f.createVideoTrack("hx-screen", src)
-        val sender = p.transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }?.sender
-        if (sender == null) { helper.dispose(); src.dispose(); info = "Esta chamada não tem vídeo"; changed(); return }
-        sender.setTrack(track, false)
-        val surface = Surface(helper.surfaceTexture)
-        out.attach(surface, w, h)
-        screenHelper = helper; screenSource = src; screenTrack = track; screenSurface = surface
-        sharing = true
-        peerId?.let { signal(it, JSONObject().put("type", "screen").put("on", true)) }
+    fun toggleShare() = io.execute {
+        if (state != State.ACTIVE) return@execute
+        sharing = !sharing
+        wantFrames = sharing
+        if (!sharing) toPage(JSONObject().put("type", "screenOff"))
+        info = if (sharing) "Mostrando a sua tela para $peerName" else "Em chamada com $peerName"
         changed()
     }
 
-    private fun stopShareInternal() {
-        if (!sharing) return
-        screenSurface?.let { s -> screenOutput?.detach(s) }
-        pc?.transceivers?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }?.sender?.setTrack(null, false)
-        // the renderer lets go of the surface on its next frame before it is destroyed
-        val helper = screenHelper; val src = screenSource; val track = screenTrack; val surface = screenSurface
-        io.schedule({ runCatching { helper?.stopListening(); track?.dispose(); src?.dispose(); helper?.dispose(); surface?.release() } }, 300, TimeUnit.MILLISECONDS)
-        screenHelper = null; screenSource = null; screenTrack = null; screenSurface = null
-        sharing = false
-        peerId?.let { signal(it, JSONObject().put("type", "screen").put("on", false)) }
-    }
-
-    /** The other side's shared screen as bitmaps, up to ~12 per second, for the XR panel. */
-    private val screenSink = object : VideoSink {
-        private var last = 0L
-        private var bmp: Bitmap? = null
-        override fun onFrame(frame: org.webrtc.VideoFrame) {
-            val now = System.nanoTime()
-            if (now - last < 80_000_000L) return
-            last = now
-            val i420 = frame.buffer.toI420() ?: return
+    /** GL thread, while [wantFrames]: one 16:9 frame (the bitmap is ours to recycle). */
+    fun offerFrame(frame: Bitmap) {
+        if (!sharing || encoding) { frame.recycle(); return }
+        encoding = true
+        encoder.execute {
             try {
-                val w = i420.width; val h = i420.height
-                val b = bmp?.takeIf { it.width == w && it.height == h } ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                val ok = com.hyperxr.handtracking.YuvNative.available && com.hyperxr.handtracking.YuvNative.convert(
-                    i420.dataY, i420.dataU, i420.dataV, i420.strideY, 1, i420.strideU, 1, 1, frame.rotation == 180, b)
-                if (ok) {
-                    // two bitmaps alternate so the panel never reads one while it is written
-                    bmp = remoteScreen
-                    remoteScreen = b; remoteScreenSeq++
-                    changed()
-                }
-            } finally { i420.release() }
+                val small = Bitmap.createScaledBitmap(frame, 960, 540, true)
+                val out = ByteArrayOutputStream(64 * 1024)
+                small.compress(Bitmap.CompressFormat.JPEG, 60, out)
+                if (small !== frame) small.recycle()
+                toPage(JSONObject().put("type", "frame").put("jpeg", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)))
+            } catch (t: Throwable) { Diagnostics.log("Screen frame: $t") }
+            finally { frame.recycle(); encoding = false }
         }
-    }
-
-    // ------------------------------------------------------------------ helpers
-
-    private inline fun created(crossinline onCreated: (SessionDescription) -> Unit) = object : SdpObserver {
-        override fun onCreateSuccess(d: SessionDescription) { io.execute { onCreated(d) } }
-        override fun onSetSuccess() {}
-        override fun onCreateFailure(e: String) { io.execute { fail(IllegalStateException(e)) } }
-        override fun onSetFailure(e: String) { io.execute { fail(IllegalStateException(e)) } }
-    }
-
-    private inline fun applied(crossinline onSet: () -> Unit) = object : SdpObserver {
-        override fun onCreateSuccess(d: SessionDescription) {}
-        override fun onSetSuccess() { io.execute { onSet() } }
-        override fun onCreateFailure(e: String) { io.execute { fail(IllegalStateException(e)) } }
-        override fun onSetFailure(e: String) { io.execute { fail(IllegalStateException(e)) } }
     }
 }

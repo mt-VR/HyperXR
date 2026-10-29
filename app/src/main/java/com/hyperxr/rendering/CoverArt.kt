@@ -29,6 +29,8 @@ object CoverArt {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        // games with their own logo art (tools/make_logos.py)
+        if (key != null) decode(ctx, "cover_$key")?.let { art -> c.drawBitmap(art, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), p); return out }
         val provided = IconLibrary.isProvided(key)
         val bg = if (provided) decode(ctx, IconLibrary.bgResource(key!!)) else null
         if (bg != null) c.drawBitmap(bg, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), p)

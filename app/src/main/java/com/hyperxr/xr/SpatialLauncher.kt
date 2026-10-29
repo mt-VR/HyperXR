@@ -138,11 +138,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         File(app.filesDir, "crash").listFiles()?.forEach { Diagnostics.log("Package crash report: ${it.nameWithoutExtension}: ${it.readText().take(160)}") }
         Thread { com.hyperxr.progress.ProgressStore.record(com.hyperxr.progress.Activity.OpenedXr) }.start()
         com.hyperxr.progress.ProgressStore.addListener { out -> progressNotices += out }
-        // screen sharing in calls: the 16:9 spectator view also drawn into WebRTC's surface
-        com.hyperxr.social.Calls.screenOutput = object : com.hyperxr.social.Calls.ScreenOutput {
-            override fun attach(surface: android.view.Surface, width: Int, height: Int) { glTasks += { ctx.share.addSink(surface, width, height, recordable = false) } }
-            override fun detach(surface: android.view.Surface) { glTasks += { ctx.share.removeSink(surface) } }
-        }
+        // calls (Pessoas): the hidden call page on Firefox's WebRTC; the shared screen comes from ctx.share
+        com.hyperxr.social.Calls.setHost(activity)
     }
 
     override fun onResume() { if (::ctx.isInitialized) activity.runOnUiThread { refreshInstalled() }; ocean?.onResume() }
@@ -679,7 +676,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             "appworld" -> com.hyperxr.appworld.AppWorldPanel(appWorld, this)
             "workspaces" -> WorkspacesPanel(workspaces, this)
             "reality" -> RealityWindow(ctx)
-            "share" -> com.hyperxr.share.SharePanel(ctx.share, activity)
+            "share" -> com.hyperxr.share.SharePanel(ctx.share, activity) { capture() }
             "importapk" -> com.hyperxr.files.ApkPickerPanel(this)
             "opengames" -> com.hyperxr.files.OpenGamesPanel(this) { url -> openBrowser(url, false) }
             "loja" -> StorePanel(this, this) { url -> openBrowser(url, false) }

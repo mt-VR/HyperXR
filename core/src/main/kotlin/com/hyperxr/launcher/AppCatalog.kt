@@ -57,7 +57,7 @@ object IconLibrary {
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
-        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb",
+        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb", "qg_macacada", "qg_babuino", "qg_expediente",
         "mc_questcraft", "mc_gorillacraft", "shop", "people", "missions",
     )
 
@@ -143,7 +143,7 @@ object BuiltinApps {
             limitations = "Precisa de uma conta Microsoft com o Minecraft Java; instale e entre na conta em Configurações 2D > Minecraft"),
     ) + com.hyperxr.questgames.QuestGameCatalog.games.map { g ->
         AppEntry("game:${g.id}", g.title, AppKind.SYSTEM_PANEL, AppCategory.HYPERXR_GAME, "qg_${g.id}", g.id,
-            runtime = "HyperMagic (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id == "climb") "Mãos ou controle" else "Só as mãos (hand tracking)",
+            runtime = "HyperMagic (nativo)", compatibility = if (g.controller) "Precisa de controle (Joy-Con, HyperConnect ou gamepad)" else if (g.id in setOf("climb", "macacada", "babuino", "expediente", "slowtime")) "Mãos ou controle" else "Só as mãos (hand tracking)",
             limitations = "${g.howTo}. Inspirado em ${g.inspiredBy}; modelos 3D da Kenney (CC0)")
     } + listOf(
         AppEntry("web:youtube", "YouTube", AppKind.WEB, AppCategory.WEB, "youtube", "https://m.youtube.com"),

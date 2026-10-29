@@ -19,8 +19,8 @@ object QuestGameCatalog {
             "Suba de elevador a 90 m e ande na prancha até a ponta (andando de verdade ou com a pinça)"),
         Info("golf", "Minigolfe", "Walkabout Mini Golf", false, "golf_course",
             "Faça a pinça para segurar o taco e empurre a bola até o buraco; três buracos"),
-        Info("slowtime", "Tempo Parado", "SUPERHOT VR", true, "hourglass_bottom",
-            "O tempo só anda quando você se mexe: atire nos inimigos vermelhos e desvie das balas"),
+        Info("slowtime", "Tempo Parado", "SUPERHOT VR", false, "hourglass_bottom",
+            "O tempo só anda quando você se mexe: atire (pinça apontando o indicador, ou o gatilho), soque os que chegam perto e desvie das balas"),
         Info("drones", "Caçador de Drones", "Space Pirate Trainer", true, "rocket_launch",
             "Atire nos drones com o gatilho; segure o outro botão para o escudo"),
         Info("pingpong", "Tênis de Mesa", "Eleven Table Tennis", true, "sports_tennis",
@@ -31,6 +31,12 @@ object QuestGameCatalog {
             "Ande com o analógico num mundo em miniatura sobre a mesa, pule, pegue moedas e chegue à bandeira"),
         Info("climb", "Escalada", "The Climb", false, "hiking",
             "Feche a mão numa agarra (ou aperte o gatilho do controle) e puxe para subir um penhasco de 27 m; soltando tudo, você cai até a última plataforma"),
+        Info("macacada", "Macacada", "Gorilla Tag", false, "pets",
+            "Pega-pega de gorilas: ande e pule só com os braços (empurre o chão, escale árvores) e pegue todos; online com outros jogadores do HyperMagic"),
+        Info("babuino", "Babuíno da Meia-Noite", "jogos de terror de gorila (Scary Baboon)", false, "pets",
+            "Terror na floresta à noite: ache 8 bananas andando com os braços; se o babuíno te ver, suba numa árvore"),
+        Info("expediente", "Expediente", "Job Simulator", false, "work",
+            "Um emprego para um chefe robô: feche a mão para pegar, abra para soltar ou jogar; café, lixo, lanche, fruta e o botão vermelho"),
     )
 
     val ids = games.map { it.id }.toSet()

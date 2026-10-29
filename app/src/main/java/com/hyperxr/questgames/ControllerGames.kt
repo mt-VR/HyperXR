@@ -28,7 +28,7 @@ private fun drawBlaster(host: GameHost, tint: FloatArray? = null, gloss: Float =
  */
 class SlowTimeGame(host: GameHost) : QuestGame(host) {
     override val title = "Tempo Parado"
-    override val needsController = true
+    // hands work too: pinch to shoot where the index points, punch the ones that come close
     override val look = GameSky.Look(
         zenith = rgba(0.9f, 0.91f, 0.93f), horizon = rgba(0.97f, 0.97f, 0.98f), ground = rgba(0.92f, 0.92f, 0.93f),
         sunDir = floatArrayOf(0.45f, 0.8f, 0.35f), floor = GameSky.FLOOR_PLAIN, floorY = -0.01f, floorColor = rgba(0.86f, 0.86f, 0.88f),
@@ -60,11 +60,20 @@ class SlowTimeGame(host: GameHost) : QuestGame(host) {
 
     override fun update(dt: Float) {
         // the time scale: from how fast the head and the controller are moving
-        val target = SlowTime.scale(host.headSpeed, host.pad.velocity.length())
+        val handSpeed = host.hands.filter { it.usable }.maxOfOrNull { it.speed } ?: 0f
+        val target = SlowTime.scale(host.headSpeed, maxOf(host.pad.velocity.length(), handSpeed * 0.7f))
         scale += (target - scale) * min(1f, dt * 10f)
         host.timeScale = scale
         val g = dt * scale
-        if (host.pad.triggerDown) shoot()
+        if (host.pad.triggerDown) shoot(host.pad.aim.origin, host.pad.aim.direction)
+        for (i in 0..1) {
+            val hd = host.hands[i]
+            val pinchNow = hd.usable && hd.pinch
+            if (pinchNow && !wasPinch[i]) shoot(hd.tip, hd.dir)
+            wasPinch[i] = pinchNow
+            // a punch: a fast hand into an enemy's chest
+            if (hd.usable && hd.speed > 2.2f) for (e in enemies) if (e.alive && hypot(hd.palm.x - e.x, hd.palm.z - e.z) < 0.45f && hd.palm.y in 0.7f..1.9f) shatter(e)
+        }
         for (e in enemies) {
             if (!e.alive) { e.shatter += g; continue }
             val dx = host.head.x - e.x; val dz = host.head.z - e.z
@@ -98,8 +107,12 @@ class SlowTimeGame(host: GameHost) : QuestGame(host) {
         }
     }
 
-    private fun shoot() {
-        val r = host.pad.aim
+    private val wasPinch = BooleanArray(2)
+    private val shotRay = com.hyperxr.math.Ray()
+
+    private fun shoot(origin: com.hyperxr.math.Vec3, dir: com.hyperxr.math.Vec3) {
+        shotRay.origin.set(origin); shotRay.direction.set(dir).normalize()
+        val r = shotRay
         host.play(host.sShoot, r.origin.x, r.origin.y, r.origin.z)
         host.pad.buzz(30)
         var best = 30f; var hit: Enemy? = null
@@ -121,7 +134,11 @@ class SlowTimeGame(host: GameHost) : QuestGame(host) {
             host.particles.burst(Particles.DEBRIS, shotBullet.x, shotBullet.y, shotBullet.z, 6, 1.5f, rgba(0.1f, 0.1f, 0.1f), 1f, 0.012f, gravity = 9f)
             return
         }
-        hit?.let { e ->
+        hit?.let { shatter(it) }
+    }
+
+    private fun shatter(e: Enemy) {
+        run {
             e.alive = false; score++
             host.play(host.sBoom, e.x, 1.2f, e.z, 0.7f, 1.5f)
             // shatters into glass shards (they fly as slowly as time goes)

@@ -83,7 +83,7 @@ class ScreenShare(private val activity: Activity) {
         if (captureRequested) return true
         val now = System.nanoTime()
         // recordings, external displays and the stream run at up to 30 fps
-        val busy = sinks.isNotEmpty() || stream.clients > 0
+        val busy = sinks.isNotEmpty() || stream.clients > 0 || com.hyperxr.social.Calls.wantFrames
         return busy && now - lastSinkFrameNs >= 32_000_000L
     }
 
@@ -127,12 +127,16 @@ class ScreenShare(private val activity: Activity) {
             EGL14.eglMakeCurrent(dpy, draw, read, ctx)
             dead.forEach { removeSink(it) }
         }
-        if (stream.clients > 0 && now - lastStreamNs >= 66_000_000L) {
+        val call = com.hyperxr.social.Calls.wantFrames
+        if ((stream.clients > 0 || call) && now - lastStreamNs >= (if (stream.clients > 0) 66_000_000L else 120_000_000L)) {
             lastStreamNs = now
             // the stream is 720p whatever the recording quality: JPEG encoding is on the CPU
             val st = streamTarget ?: RenderTarget(1280, 720, depth = false).also { streamTarget = it }
             blit(t.texture, st.width, st.height, st.fbo)
-            stream.offer(read(st))
+            val frame = read(st)
+            // a call showing the screen gets its own copy (the stream recycles what it is given)
+            if (call) com.hyperxr.social.Calls.offerFrame(if (stream.clients > 0) frame.copy(android.graphics.Bitmap.Config.ARGB_8888, false) else frame)
+            if (stream.clients > 0) stream.offer(frame)
         }
     }
 

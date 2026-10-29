@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "name": "HyperMagic Calls",
+  "version": "1.0",
+  "description": "Voice calls and screen sharing for HyperMagic's Pessoas app, with Firefox's own WebRTC.",
+  "browser_specific_settings": { "gecko": { "id": "calls@hypermagic" } },
+  "permissions": ["nativeMessaging", "geckoViewAddons"]
+}
