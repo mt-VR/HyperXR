@@ -527,6 +527,7 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateApiLayerProperties(uint32_t capacity, ui
 }
 
 struct ExtDesc { const char* name; uint32_t version; };
+bool extEnabled(const Instance* inst, const char* name);
 const ExtDesc kExtensions[] = {
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME, XR_KHR_android_create_instance_SPEC_VERSION},
@@ -552,6 +553,9 @@ const ExtDesc kExtensions[] = {
     {XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME, XR_BD_controller_interaction_SPEC_VERSION},
     // hands: tracked by HyperMagic with the phone's camera while the game runs (hx_hands.h)
     {XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_EXT_hand_tracking_SPEC_VERSION},
+    // menus and video players of Quest apps: curved panels and 360/180 images
+    {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
+    {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
     {XR_FB_HAND_TRACKING_AIM_EXTENSION_NAME, XR_FB_hand_tracking_aim_SPEC_VERSION},
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME, XR_KHR_android_thread_settings_SPEC_VERSION},
@@ -1293,22 +1297,56 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
                 cv.fov = pv.fov;
             }
             if (located) viewCount = 2;
-        } else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
-            auto* q = reinterpret_cast<const XrCompositionLayerQuad*>(l);
-            Swapchain* sc = asSwapchain(q->subImage.swapchain);
+        } else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD || l->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR ||
+                   l->type == XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR) {
+            if (l->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR && !extEnabled(s->instance, XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME))
+                return XR_ERROR_LAYER_INVALID;
+            if (l->type == XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR && !extEnabled(s->instance, XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME))
+                return XR_ERROR_LAYER_INVALID;
+            // the three share eyeVisibility, subImage and pose at the same place after the header
+            const XrSwapchainSubImage* sub; XrPosef pose; XrEyeVisibility vis;
+            HxComposeQuad cq{};
+            if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
+                auto* q = reinterpret_cast<const XrCompositionLayerQuad*>(l);
+                sub = &q->subImage; pose = q->pose; vis = q->eyeVisibility;
+                cq.shape = HX_SHAPE_QUAD;
+                cq.size = q->size;
+            } else if (l->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR) {
+                auto* c = reinterpret_cast<const XrCompositionLayerCylinderKHR*>(l);
+                sub = &c->subImage; pose = c->pose; vis = c->eyeVisibility;
+                if (c->radius < 0 || c->centralAngle < 0 || c->centralAngle > 2 * static_cast<float>(M_PI) || !(c->aspectRatio > 0))
+                    return XR_ERROR_VALIDATION_FAILURE;
+                cq.shape = HX_SHAPE_CYLINDER;
+                cq.radius = c->radius; cq.centralAngle = c->centralAngle; cq.aspectRatio = c->aspectRatio;
+            } else {
+                auto* e = reinterpret_cast<const XrCompositionLayerEquirect2KHR*>(l);
+                sub = &e->subImage; pose = e->pose; vis = e->eyeVisibility;
+                const float half = static_cast<float>(M_PI) / 2;
+                if (e->radius < 0 || e->centralHorizontalAngle < 0 || e->centralHorizontalAngle > 2 * static_cast<float>(M_PI) ||
+                    e->upperVerticalAngle > half || e->lowerVerticalAngle < -half || e->lowerVerticalAngle > e->upperVerticalAngle)
+                    return XR_ERROR_VALIDATION_FAILURE;
+                cq.shape = HX_SHAPE_EQUIRECT;
+                cq.radius = e->radius; cq.centralAngle = e->centralHorizontalAngle;
+                cq.upperAngle = e->upperVerticalAngle; cq.lowerAngle = e->lowerVerticalAngle;
+            }
+            if (vis > XR_EYE_VISIBILITY_RIGHT) return XR_ERROR_VALIDATION_FAILURE;
+            Swapchain* sc = asSwapchain(sub->swapchain);
             if (!sc) return XR_ERROR_HANDLE_INVALID;
             if (sc->lastReleased < 0) return XR_ERROR_LAYER_INVALID;
-            if (!hx::poseValid(q->pose)) return XR_ERROR_POSE_INVALID;
+            if (!hx::poseValid(pose)) return XR_ERROR_POSE_INVALID;
             if (!located) continue;
-            HxComposeQuad& cq = quads[quadCount++];
+            // nothing to draw: a zero-size quad, a flat cylinder, an empty strip of sphere
+            if (cq.shape == HX_SHAPE_CYLINDER && (cq.radius <= 0 || cq.centralAngle <= 0)) continue;
+            if (cq.shape == HX_SHAPE_EQUIRECT && (cq.centralAngle <= 0 || cq.upperAngle <= cq.lowerAngle)) continue;
             cq.swapchain = sc->gfx;
             cq.imageIndex = static_cast<uint32_t>(sc->lastReleased);
-            cq.arraySlice = q->subImage.imageArrayIndex;
-            cq.rect = q->subImage.imageRect;
-            cq.pose = hx::compose(spacePose, q->pose);
-            cq.size = q->size;
+            cq.arraySlice = sub->imageArrayIndex;
+            cq.rect = sub->imageRect;
+            cq.pose = hx::compose(spacePose, pose);
             cq.headLocked = 0;
-            cq.blendAlpha = (q->layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0;
+            cq.blendAlpha = (l->layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0;
+            cq.eye = vis == XR_EYE_VISIBILITY_LEFT ? 0 : vis == XR_EYE_VISIBILITY_RIGHT ? 1 : -1;
+            quads[quadCount++] = cq;
         } else {
             return XR_ERROR_LAYER_INVALID;
         }

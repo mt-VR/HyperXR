@@ -55,7 +55,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Sistema | HMD, estéreo primário, blend OPAQUE, orientação rastreada (3DoF), posição por modelo de pescoço |
 | Espaços | VIEW, LOCAL (altura dos olhos), STAGE e LOCAL_FLOOR (chão em y = 0), espaços de ação |
 | Swapchains | `GL_SRGB8_ALPHA8`, `GL_RGBA8`, profundidade 16/24/24+8/32F, texturas array, imagem estática |
-| Camadas | projeção (com timewarp) e quad; até 16 camadas |
+| Camadas | projeção (com timewarp), quad, cilindro (`XR_KHR_composition_layer_cylinder`) e equirect (`XR_KHR_composition_layer_equirect2`, 180/360, raio finito ou infinito); `eyeVisibility` por olho; até 16 camadas |
 | Ciclo de quadros | wait/begin/end com ritmo da tela, `XR_FRAME_DISCARDED`, estados da sessão completos |
 | Ações | perfis Touch (Oculus/Meta), Pico 4/Neo 3/G3 e simple; gatilho, aperto, analógicos, A/B/X/Y, menu; poses de mira/empunhadura; fontes ligadas; háptico (sem efeito) |
 
@@ -78,17 +78,19 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
   de compra) dependem de serviços do óculos que não existem num celular.
 - **Sem Vulkan**: apps só-Vulkan não rodam.
 - **Sem 6DoF**: a posição vem de um modelo de pescoço.
-- **Sem cubo e cilindro**: camadas de cubo, cilindro e equirect são recusadas com `XR_ERROR_LAYER_INVALID`.
+- **Sem cubo**: camadas de cubo e o equirect antigo (v1) são recusados com `XR_ERROR_LAYER_INVALID`.
+  Cilindro e equirect2 são desenhados por raio a partir do olho (sem mipmaps: texturas grandes vistas
+  de longe podem serrilhar). A camada de projeção é sempre desenhada primeiro, antes das outras.
 - **Conformidade**: o runtime não passou pela suíte oficial de conformidade (CTS) da Khronos.
 
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 359 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 408 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
-  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada).
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) e camadas (geometria do cilindro e do equirect, validação).
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

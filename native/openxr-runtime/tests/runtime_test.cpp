@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "../src/hx_hands.h"
+#include "../src/hx_layers.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
@@ -801,6 +802,132 @@ static void testHands() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** Geometry of the cylinder and equirect layers (the compositor's shader does the same steps). */
+static void testLayerShapes() {
+    const float pi = 3.14159265f;
+    float uv[2];
+    // a cylinder of radius 2 m spanning 90 degrees, 1 m tall (width = 2 * pi/2 = pi m, aspect pi)
+    HxComposeQuad cyl{};
+    cyl.shape = HX_SHAPE_CYLINDER; cyl.radius = 2; cyl.centralAngle = pi / 2; cyl.aspectRatio = pi;
+    float o[3] = {0, 0, 0};
+    float ahead[3] = {0, 0, -1};
+    CHECK(hxlayers::hit(cyl, o, ahead, uv) && NEAR(uv[0], 0.5, 1e-5) && NEAR(uv[1], 0.5, 1e-5));
+    float right30[3] = {sinf(pi / 6), 0, -cosf(pi / 6)};  // 30 deg right: u = 30/90 + 0.5
+    CHECK(hxlayers::hit(cyl, o, right30, uv) && NEAR(uv[0], 0.5 + 1.0 / 3.0, 1e-4));
+    float right60[3] = {sinf(pi / 3), 0, -cosf(pi / 3)};  // outside the 90 degree arc
+    CHECK(!hxlayers::hit(cyl, o, right60, uv));
+    float up[3] = {0, 0.4f, -2};  // 0.4 m up at the wall (height 1 m): v = 0.9
+    CHECK(hxlayers::hit(cyl, o, up, uv) && NEAR(uv[1], 0.9, 1e-4));
+    float behind[3] = {0, 0, 1};
+    CHECK(!hxlayers::hit(cyl, o, behind, uv));
+    float off[3] = {0.5f, 0, 0};  // eye 0.5 m to the right still reaches the wall ahead
+    CHECK(hxlayers::hit(cyl, off, ahead, uv) && uv[0] > 0.5f);
+    // equirect 180 x 180, infinitely far: straight ahead is the centre, 45 deg up is v = 0.75
+    HxComposeQuad eq{};
+    eq.shape = HX_SHAPE_EQUIRECT; eq.radius = 0; eq.centralAngle = pi; eq.upperAngle = pi / 2; eq.lowerAngle = -pi / 2;
+    CHECK(hxlayers::hit(eq, o, ahead, uv) && NEAR(uv[0], 0.5, 1e-5) && NEAR(uv[1], 0.5, 1e-5));
+    float up45[3] = {0, 1, -1};
+    CHECK(hxlayers::hit(eq, o, up45, uv) && NEAR(uv[1], 0.75, 1e-4));
+    CHECK(!hxlayers::hit(eq, o, behind, uv));  // a 180 degree video has nothing behind
+    // an infinitely far sphere ignores where the eye is; a 10 m one does not
+    float far[3] = {5, 0, 0};
+    float uvFar[2];
+    CHECK(hxlayers::hit(eq, far, ahead, uvFar) && NEAR(uvFar[0], 0.5, 1e-5));
+    eq.radius = 10;
+    CHECK(hxlayers::hit(eq, far, ahead, uvFar) && uvFar[0] > 0.5f);
+    // full 360: behind is the left and right edges
+    eq.radius = 0; eq.centralAngle = 2 * pi;
+    float justRightOfBehind[3] = {0.001f, 0, 1};
+    CHECK(hxlayers::hit(eq, o, justRightOfBehind, uv) && uv[0] > 0.99f);
+    // quad: 1 x 1 m, 2 m ahead
+    HxComposeQuad quad{};
+    quad.shape = HX_SHAPE_QUAD; quad.size = {1, 1};
+    float oq[3] = {0, 0, 2};
+    CHECK(hxlayers::hit(quad, oq, ahead, uv) && NEAR(uv[0], 0.5, 1e-5));
+}
+
+/** The runtime accepts cylinder / equirect2 layers only from apps that enabled them, and checks their numbers. */
+static void testLayerValidation() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 2, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrBeginSession); LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame);
+    LOAD(inst, xrCreateReferenceSpace);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace local;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &local), XR_SUCCESS);
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    CHECK_RESULT(xrWaitFrame(s, nullptr, &fs), XR_SUCCESS);
+    CHECK_RESULT(xrBeginFrame(s, nullptr), XR_SUCCESS);
+
+    XrCompositionLayerCylinderKHR cyl{XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR};
+    cyl.space = local;
+    cyl.pose.orientation.w = 1;
+    cyl.radius = 2; cyl.centralAngle = 1; cyl.aspectRatio = 2;
+    cyl.subImage.swapchain = reinterpret_cast<XrSwapchain>(static_cast<uintptr_t>(0x1234));
+    const XrCompositionLayerBaseHeader* layers[1] = {reinterpret_cast<const XrCompositionLayerBaseHeader*>(&cyl)};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    ei.displayTime = fs.predictedDisplayTime;
+    ei.layerCount = 1; ei.layers = layers;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_HANDLE_INVALID);  // accepted as a layer; the swapchain is bogus
+    cyl.aspectRatio = 0;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_VALIDATION_FAILURE);
+    cyl.aspectRatio = 2; cyl.centralAngle = 7;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_VALIDATION_FAILURE);
+    // equirect2 was not enabled by this app
+    XrCompositionLayerEquirect2KHR eq{XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR};
+    eq.space = local;
+    eq.pose.orientation.w = 1;
+    eq.centralHorizontalAngle = 3.14f; eq.upperVerticalAngle = 1; eq.lowerVerticalAngle = -1;
+    layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&eq);
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_LAYER_INVALID);
+    ei.layerCount = 0;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_SUCCESS);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+
+    // with equirect2 enabled its numbers are checked
+    const char* exts2[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME};
+    inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts2, 2, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &local), XR_SUCCESS);
+    CHECK_RESULT(xrWaitFrame(s, nullptr, &fs), XR_SUCCESS);
+    CHECK_RESULT(xrBeginFrame(s, nullptr), XR_SUCCESS);
+    eq.space = local;
+    eq.subImage.swapchain = reinterpret_cast<XrSwapchain>(static_cast<uintptr_t>(0x1234));
+    ei.displayTime = fs.predictedDisplayTime;
+    ei.layerCount = 1;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_HANDLE_INVALID);
+    eq.lowerVerticalAngle = 1.5f;  // below the upper angle is required
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_VALIDATION_FAILURE);
+    eq.lowerVerticalAngle = -1; eq.eyeVisibility = (XrEyeVisibility)9;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_ERROR_VALIDATION_FAILURE);
+    ei.layerCount = 0;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_SUCCESS);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -824,6 +951,8 @@ int main() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
     testMetaAndPico();
     testHands();
+    testLayerShapes();
+    testLayerValidation();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

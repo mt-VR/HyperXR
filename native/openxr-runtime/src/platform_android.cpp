@@ -328,23 +328,52 @@ void main() {
     fragColor = vec4(c.rgb, 1.0);
 })";
 
-// Quad layer: ray from the current eye intersected with the quad's plane.
+// Quad, cylinder and equirect layers: the ray from the current eye, in the layer's space, hits a
+// plane, a vertical cylinder or a sphere (the same steps as hxlayers::hit, which the tests check).
 const char* kQuad = R"(
 uniform mat3 uEyeRot;      // current eye orientation (stage)
 uniform vec3 uEyePos;
-uniform mat3 uQuadRotInv;  // stage -> quad
+uniform mat3 uQuadRotInv;  // stage -> layer
 uniform vec3 uQuadPos;
 uniform vec2 uQuadSize;
+uniform int uShape;        // 0 quad, 1 cylinder, 2 equirect
+uniform float uRadius, uCentral, uAspect, uUpper, uLower;
 uniform vec4 uRect;
 uniform int uBlend;
 SAMPLER_DECL
 void main() {
     vec3 d = uQuadRotInv * (uEyeRot * eyeDir());
     vec3 o = uQuadRotInv * (uEyePos - uQuadPos);
-    if (abs(d.z) < 1e-6) discard;
-    float s = -o.z / d.z;
-    if (s <= 0.0) discard;
-    vec2 h = (o + d * s).xy / uQuadSize + 0.5;
+    vec2 h;
+    if (uShape == 0) {
+        if (abs(d.z) < 1e-6) discard;
+        float s = -o.z / d.z;
+        if (s <= 0.0) discard;
+        h = (o + d * s).xy / uQuadSize + 0.5;
+    } else if (uShape == 1) {
+        float a = dot(d.xz, d.xz);
+        if (a < 1e-9) discard;
+        float b = 2.0 * dot(o.xz, d.xz);
+        float c = dot(o.xz, o.xz) - uRadius * uRadius;
+        float disc = b * b - 4.0 * a * c;
+        if (disc < 0.0) discard;
+        float t = c > 0.0 ? (-b - sqrt(disc)) / (2.0 * a) : (-b + sqrt(disc)) / (2.0 * a);
+        if (t <= 0.0) discard;
+        vec3 p = o + d * t;
+        h = vec2(atan(p.x, -p.z) / uCentral + 0.5, p.y / (uRadius * uCentral / uAspect) + 0.5);
+    } else {
+        vec3 p = d;
+        if (uRadius > 0.0) {
+            float a = dot(d, d), b = 2.0 * dot(o, d), c = dot(o, o) - uRadius * uRadius;
+            float disc = b * b - 4.0 * a * c;
+            if (disc < 0.0) discard;
+            float t = (-b + sqrt(disc)) / (2.0 * a);
+            if (t <= 0.0) discard;
+            p = o + d * t;
+        }
+        p = normalize(p);
+        h = vec2(atan(p.x, -p.z) / uCentral + 0.5, (asin(clamp(p.y, -1.0, 1.0)) - uLower) / (uUpper - uLower));
+    }
     if (any(lessThan(h, vec2(0.0))) || any(greaterThan(h, vec2(1.0)))) discard;
     vec4 c = SAMPLE(uRect.xy + h * uRect.zw);
     if (uSrgb == 1) c.rgb = toSrgb(c.rgb);
@@ -749,6 +778,7 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
         }
         for (uint32_t i = 0; i < quadCount; i++) {
             const HxComposeQuad& q = quads[i];
+            if (q.eye >= 0 && q.eye != eye) continue;  // eyeVisibility (stereo 3D panels and videos)
             GLuint prog = q.swapchain->target == GL_TEXTURE_2D_ARRAY ? g->progQuadArray : g->progQuad;
             glUseProgram(prog);
             if (q.blendAlpha) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); } else glDisable(GL_BLEND);
@@ -761,6 +791,12 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             glUniformMatrix3fv(glGetUniformLocation(prog, "uQuadRotInv"), 1, GL_FALSE, m);
             glUniform3f(glGetUniformLocation(prog, "uQuadPos"), q.pose.position.x, q.pose.position.y, q.pose.position.z);
             glUniform2f(glGetUniformLocation(prog, "uQuadSize"), q.size.width, q.size.height);
+            glUniform1i(glGetUniformLocation(prog, "uShape"), q.shape);
+            glUniform1f(glGetUniformLocation(prog, "uRadius"), q.radius);
+            glUniform1f(glGetUniformLocation(prog, "uCentral"), q.centralAngle);
+            glUniform1f(glGetUniformLocation(prog, "uAspect"), q.aspectRatio);
+            glUniform1f(glGetUniformLocation(prog, "uUpper"), q.upperAngle);
+            glUniform1f(glGetUniformLocation(prog, "uLower"), q.lowerAngle);
             glUniform1i(glGetUniformLocation(prog, "uBlend"), q.blendAlpha);
             bindLayerTexture(prog, q.swapchain, q.imageIndex, q.arraySlice, q.rect);
             glDrawArrays(GL_TRIANGLES, 0, 3);

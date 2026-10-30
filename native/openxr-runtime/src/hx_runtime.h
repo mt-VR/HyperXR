@@ -118,16 +118,24 @@ struct HxComposeView {
     XrFovf fov;
 };
 
-/** A quad layer handed to the compositor. */
+/** Shape of a non-projection layer. */
+enum HxLayerShape : int { HX_SHAPE_QUAD = 0, HX_SHAPE_CYLINDER = 1, HX_SHAPE_EQUIRECT = 2 };
+
+/** A quad, cylinder or equirect layer handed to the compositor. */
 struct HxComposeQuad {
     HxSwapchainGfx* swapchain;
     uint32_t imageIndex;
     uint32_t arraySlice;
     XrRect2Di rect;
     XrPosef pose;        // stage space, or head space when headLocked
-    XrExtent2Df size;
+    XrExtent2Df size;    // quad: width and height in metres
     int headLocked;
     int blendAlpha;
+    int shape;           // HxLayerShape
+    int eye;             // -1 both, 0 left only, 1 right only (eyeVisibility)
+    // cylinder: radius, central angle, width / height; equirect: radius (0 = infinitely far),
+    // central horizontal angle, upper and lower vertical angles
+    float radius, centralAngle, aspectRatio, upperAngle, lowerAngle;
 };
 
 namespace hxp {
