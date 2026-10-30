@@ -104,6 +104,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Immersive session: spatial launcher in MR or VR SBS. -->
+        <activity
+            android:name=".xr.XrActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:theme="@style/Theme.HyperXR.Immersive">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+            </intent-filter>
+        </activity>
 
         <!-- .hyperx packages run in a separate process: a runaway script is killed with the process. -->
         <activity
