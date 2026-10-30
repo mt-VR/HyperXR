@@ -48,6 +48,10 @@ data class GraphicsSettings(
     val trayToLensMm: Float = 35f,
     /** Camera image fills each eye completely (centre crop). Off = true angular size (smaller image). */
     val passthroughFill: Boolean = true,
+    /** NPU passthrough enhancement: the camera image restored, tone-mapped, cleaned and sharpened live. */
+    val npuEnhance: Boolean = true,
+    /** How strong the enhancement is, 0..1. */
+    val enhanceStrength: Float = 0.8f,
     /** Stereo (IPD) for virtual content over the mono camera image. Off keeps it aligned with reality. */
     val stereoInMixedReality: Boolean = false,
     /** VR boundary warning: fade the camera in near real obstacles (needs ARCore Depth). */

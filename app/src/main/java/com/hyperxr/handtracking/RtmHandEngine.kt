@@ -73,6 +73,9 @@ class RtmHandEngine(private val context: Context) : HandEngine {
 
     /** Hands followed from the previous frame: their crop for this frame. */
     private val tracks = ArrayList<RtmHand.Crop>(2)
+    /** Where those hands really were (the crop from their joints, before prediction). */
+    private val trackSeen = ArrayList<RtmHand.Crop>(2)
+    private val prevSeen = ArrayList<RtmHand.Crop>(2)
     private var frame = 0L
 
     fun start(prefer: InferenceBackend = InferenceBackend.NNAPI): Boolean {
@@ -161,7 +164,8 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         }
         val t1 = System.nanoTime()
         val out = ArrayList<RawHand>(2)
-        tracks.clear()
+        prevSeen.clear(); prevSeen.addAll(trackSeen)
+        tracks.clear(); trackSeen.clear()
         for ((k, c0) in crops.withIndex()) {
             var c = c0
             var presence = runPose(p, bmp, c)
@@ -179,10 +183,27 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             RtmHand.toPipeline(joints, w, h, image, world)
             val right = RtmHand.rightScore(joints)
             out += RawHand(if (right >= 0.5f) "Right" else "Left", if (right >= 0.5f) right else 1 - right, presence, image, world, right, worldEstimated = true)
-            tracks += RtmHand.cropFromJoints(joints)
+            val seen = RtmHand.cropFromJoints(joints)
+            trackSeen += seen
+            tracks += predict(seen)
         }
         landmarkMs = (System.nanoTime() - t1) / 1e6f
         return out
+    }
+
+    /**
+     * Next frame's crop: where the hand will be if it keeps moving as it did since the last frame
+     * (half the motion, so a hand that stops is not overshot), a little wider when it moves fast.
+     * A hand that moves fast no longer leaves its crop, which cost a second, wider inference and
+     * then the detector.
+     */
+    private fun predict(seen: RtmHand.Crop): RtmHand.Crop {
+        val prev = prevSeen.minByOrNull { kotlin.math.hypot(it.cx - seen.cx, it.cy - seen.cy) } ?: return seen
+        val vx = seen.cx - prev.cx; val vy = seen.cy - prev.cy
+        val v = kotlin.math.hypot(vx, vy)
+        // a jump larger than the hand is another hand (or a detection), not motion
+        if (v > seen.side * 0.8f) return seen
+        return RtmHand.Crop(seen.cx + vx * 0.5f, seen.cy + vy * 0.5f, seen.side * (1f + (v / seen.side).coerceAtMost(0.25f)))
     }
 
     /** Runs RTMPose on [c]; joints and confidences land in [joints] / [conf]. Returns the presence. */

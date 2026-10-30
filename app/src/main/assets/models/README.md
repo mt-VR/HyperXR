@@ -35,3 +35,11 @@ MediaPipe Selfie Multiclass Segmentation (256x256, float32), used to see the for
 
 The skinned human arm and hand of the VR mode, made by `tools/make_hand_mesh.py` (HyperXR's own,
 from a signed distance field; no third-party art).
+
+# real_esrgan_x4v3_w8a8.tflite
+
+Passthrough enhancement (rendering/PassthroughEnhancer.kt): Real-ESRGAN general x4v3 (the compact
+SRVGG network, BSD-3-Clause, Xintao Wang et al.), int8 TFLite export by Qualcomm AI Hub
+(https://huggingface.co/qualcomm/Real-ESRGAN-General-x4v3, BSD-3-Clause), file
+`real_esrgan_general_x4v3-tflite-w8a8.zip` of release v0.65.0, unchanged. Input 128x128x3 uint8
+(scale 1/255), output 512x512x3 uint8 (scale 0.004972266, zero point 25).

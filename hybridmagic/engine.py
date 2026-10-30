@@ -106,6 +106,7 @@ class HandEngine:
         self.pose = _session(pose_path, provs)
         self.device = self.pose.get_providers()[0].replace("ExecutionProvider", "")
         self.tracks: list[Crop] = []
+        self.seen: list[Crop] = []
         self.last_ms = 0.0
         self.avg_ms = 0.0
         self.level = 3
@@ -116,6 +117,19 @@ class HandEngine:
 
     def reset(self):
         self.tracks = []
+        self.seen = []
+
+    @staticmethod
+    def _predict(seen: Crop, prev: list[Crop]) -> Crop:
+        """RtmHandEngine.predict: half of the last motion ahead, a little wider when fast."""
+        if not prev:
+            return seen
+        p = min(prev, key=lambda o: np.hypot(o.cx - seen.cx, o.cy - seen.cy))
+        vx, vy = seen.cx - p.cx, seen.cy - p.cy
+        v = float(np.hypot(vx, vy))
+        if v > seen.side * 0.8:
+            return seen
+        return Crop(seen.cx + vx * 0.5, seen.cy + vy * 0.5, seen.side * (1 + min(v / seen.side, 0.25)))
 
     # ------------------------------------------------------------------ detection
     def _detect(self, img: np.ndarray, x0: float = 0, y0: float = 0, zoom: float = 1.0) -> list[np.ndarray]:
@@ -217,7 +231,9 @@ class HandEngine:
         # second pass: each hand re-cropped around what the first pass found
         second = self._pose(rgb, [crop_from_joints(j) for j, _ in first], flip=True) if full >= 3 else first
         hands: list[Hand] = []
+        prev_seen = self.seen
         self.tracks = []
+        self.seen = []
         for k, c in enumerate(crops):
             j1, c1 = first[k]
             j2, c2 = second[k]
@@ -229,7 +245,9 @@ class HandEngine:
             if any(np.hypot(*(o.joints[0] - joints[0])) < c.side * 0.15 for o in hands):
                 continue
             hands.append(Hand(pres, joints, conf))
-            self.tracks.append(crop_from_joints(joints))
+            seen = crop_from_joints(joints)
+            self.seen.append(seen)
+            self.tracks.append(self._predict(seen, prev_seen))
         self.last_ms = (time.perf_counter() - t0) * 1000
         self._adapt()
         return hands

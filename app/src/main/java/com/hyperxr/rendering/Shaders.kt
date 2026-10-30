@@ -140,16 +140,47 @@ layout(location=2) in vec2 aUv;
 uniform mat4 uMvp;
 uniform mat4 uTexMatrix;
 out vec2 vUv;
-void main() { vUv = (uTexMatrix * vec4(aUv, 0.0, 1.0)).xy; gl_Position = uMvp * vec4(aPos, 1.0); }"""
+out vec2 vQuv;
+void main() { vQuv = aUv; vUv = (uTexMatrix * vec4(aUv, 0.0, 1.0)).xy; gl_Position = uMvp * vec4(aPos, 1.0); }"""
 
+    /**
+     * The camera image; with uEnhance (PassthroughEnhancer) also cleaned and enhanced: noise smoothed
+     * where neighbouring pixels differ little, edges sharpened where they differ a lot (both at the
+     * pixels of the screen), then the NPU's grid of local colour transforms (a * rgb + b, packed
+     * into two 8-bit textures with the ranges in uRange).
+     */
     const val OES_FS = """#version 300 es
 #extension GL_OES_EGL_image_external_essl3 : require
 precision mediump float;
 in vec2 vUv;
+in vec2 vQuv;
 uniform samplerExternalOES uTex;
 uniform float uAlpha;
+uniform float uEnhance;
+uniform float uSharp;
+uniform sampler2D uGain;
+uniform sampler2D uOffset;
+uniform vec4 uRange;
 out vec4 fragColor;
-void main() { fragColor = vec4(texture(uTex, vUv).rgb, uAlpha); }"""
+void main() {
+    vec3 c = texture(uTex, vUv).rgb;
+    if (uEnhance > 0.5) {
+        vec3 a = uRange.x + texture(uGain, vQuv).rgb * uRange.y;
+        vec3 b = uRange.z + texture(uOffset, vQuv).rgb * uRange.w;
+        vec2 dx = dFdx(vUv), dy = dFdy(vUv);
+        vec3 near = (texture(uTex, vUv + dx).rgb + texture(uTex, vUv - dx).rgb + texture(uTex, vUv + dy).rgb + texture(uTex, vUv - dy).rgb) * 0.25;
+        vec3 far = (texture(uTex, vUv + dx + dy).rgb + texture(uTex, vUv - dx - dy).rgb + texture(uTex, vUv + dx - dy).rgb + texture(uTex, vUv - dx + dy).rgb
+                  + texture(uTex, vUv + 2.0 * dx).rgb + texture(uTex, vUv - 2.0 * dx).rgb + texture(uTex, vUv + 2.0 * dy).rgb + texture(uTex, vUv - 2.0 * dy).rgb) * 0.125;
+        vec3 mean = near * 0.6 + far * 0.4;
+        vec3 detail = c - near;
+        // differences as they will look after the gain: brightened noise is smoothed harder
+        float d = length(c - mean) * a.g;
+        float flat_ = 1.0 - smoothstep(0.04, 0.16, d);
+        c = mix(c, mean, flat_ * 0.85) + detail * uSharp * (1.0 - flat_);
+        c = clamp(c * a + b, 0.0, 1.0);
+    }
+    fragColor = vec4(c, uAlpha);
+}"""
 
     /** Camera image covering the whole eye viewport (centre crop to the eye aspect). */
     const val OES_FULL_VS = """#version 300 es
@@ -157,9 +188,11 @@ layout(location=0) in vec3 aPos;
 uniform mat4 uTexMatrix;
 uniform vec2 uCrop;
 out vec2 vUv;
+out vec2 vQuv;
 void main() {
     vec2 uv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);   // top-left origin like the camera quad
     uv = 0.5 + (uv - 0.5) * uCrop;
+    vQuv = uv;
     vUv = (uTexMatrix * vec4(uv, 0.0, 1.0)).xy;
     gl_Position = vec4(aPos.xy, 0.999, 1.0);
 }"""

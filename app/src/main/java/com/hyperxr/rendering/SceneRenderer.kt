@@ -159,6 +159,8 @@ interface CameraImageSource {
 }
 
 class SceneRenderer {
+    /** NPU passthrough enhancement, when on (XrEngine sets it up). */
+    var enhancer: PassthroughEnhancer? = null
     private lateinit var lit: Program
     private lateinit var quadProg: Program
     private lateinit var oesProg: Program
@@ -395,6 +397,7 @@ class SceneRenderer {
         GLES30.glUniformMatrix4fv(oesProg.u("uMvp"), 1, false, mvp, 0)
         GLES30.glUniformMatrix4fv(oesProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
         GLES30.glUniform1f(oesProg.u("uAlpha"), 1f)
+        enhancer?.bind(oesProg) ?: GLES30.glUniform1f(oesProg.u("uEnhance"), 0f)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
         GLES30.glUniform1i(oesProg.u("uTex"), 0)
@@ -430,6 +433,7 @@ class SceneRenderer {
         GLES30.glUniformMatrix4fv(oesFullProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
         GLES30.glUniform2f(oesFullProg.u("uCrop"), cropU, cropV)
         GLES30.glUniform1f(oesFullProg.u("uAlpha"), 1f)
+        enhancer?.bind(oesFullProg) ?: GLES30.glUniform1f(oesFullProg.u("uEnhance"), 0f)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
         GLES30.glUniform1i(oesFullProg.u("uTex"), 0)
@@ -449,6 +453,7 @@ class SceneRenderer {
         GLES30.glUniformMatrix4fv(oesFullProg.u("uTexMatrix"), 1, false, camera.texMatrix, 0)
         GLES30.glUniform2f(oesFullProg.u("uCrop"), cropU, cropV)
         GLES30.glUniform1f(oesFullProg.u("uAlpha"), alpha.coerceIn(0f, 1f))
+        GLES30.glUniform1f(oesFullProg.u("uEnhance"), 0f)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
         GLES30.glUniform1i(oesFullProg.u("uTex"), 0)
@@ -716,6 +721,7 @@ class SceneRenderer {
                 GLES30.glUniformMatrix4fv(oesProg.u("uMvp"), 1, false, mvp, 0)
                 GLES30.glUniformMatrix4fv(oesProg.u("uTexMatrix"), 1, false, p.texMatrix ?: flipY, 0)
                 GLES30.glUniform1f(oesProg.u("uAlpha"), p.alpha)
+                GLES30.glUniform1f(oesProg.u("uEnhance"), 0f)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                 GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, p.texture)
                 GLES30.glUniform1i(oesProg.u("uTex"), 0)

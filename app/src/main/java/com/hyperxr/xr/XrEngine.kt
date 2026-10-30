@@ -232,6 +232,16 @@ class XrEngine(
             try { boot.init(); bootActive = true; bootPlayed = true } catch (t: Throwable) { Diagnostics.log("Boot animation off: ${t.message}") }
         }
         renderer.passthroughFill = settings.graphics.passthroughFill
+        renderer.enhancer?.release(); renderer.enhancer = null
+        if (settings.graphics.npuEnhance) {
+            renderer.enhancer = runCatching {
+                com.hyperxr.rendering.PassthroughEnhancer(activity).also {
+                    it.grid.strength = settings.graphics.enhanceStrength.coerceIn(0f, 1f)
+                    it.sharpness = 0.25f + 0.5f * settings.graphics.enhanceStrength.coerceIn(0f, 1f)
+                    it.init()
+                }
+            }.onFailure { Diagnostics.log("Passthrough enhancement off: ${it.message}") }.getOrNull()
+        }
         aura.init()
         compositor.init()
         aura.opacity = settings.handTracking.auraOpacity
@@ -444,6 +454,8 @@ class XrEngine(
         }
         renderer.renderShadows(scene)
         val camera: CameraImageSource? = arCore ?: passthrough
+        // the NPU enhancement looks at the camera image only while it is on screen
+        if (camera != null && scene.background == Background.PASSTHROUGH) renderer.enhancer?.capture(camera)
         // 16:9 spectator view (recording, screenshots, external screens, stream), rendered only
         // while something uses it
         val capture = ctx.captureRequest
@@ -917,6 +929,7 @@ class XrEngine(
     }
 
     fun onDestroy() {
+        renderer.enhancer?.shutdown(); renderer.enhancer = null
         joyCons.stop()
         hyperConnect.stop()
         hands.colorTap = null

@@ -113,6 +113,13 @@ fun GraphicsSection(a: MainActivity) {
     SectionCard("Renderização") {
         SliderRow("Escala de resolução por olho", g.renderScale, 0.5f..1.2f, { "%.0f%%".format(it * 100) }) { v -> a.update { it.copy(graphics = it.graphics.copy(renderScale = v)) } }
         SliderRow("Campo de visão (FOV)", g.fovDegrees, 70f..110f, { "%.0f°".format(it) }) { v -> a.update { it.copy(graphics = it.graphics.copy(fovDegrees = v)) } }
+        ToggleRow("Imagem da câmera melhorada pela NPU", g.npuEnhance,
+            "A NPU restaura a imagem (Real-ESRGAN) e ajusta brilho, contraste e cor por região, ao vivo; a GPU limpa o ruído e afia as bordas") { v ->
+            a.update { it.copy(graphics = it.graphics.copy(npuEnhance = v)) }
+        }
+        if (g.npuEnhance) SliderRow("Força da melhoria", g.enhanceStrength, 0f..1f, { "${(it * 100).toInt()}%" }) { v ->
+            a.update { it.copy(graphics = it.graphics.copy(enhanceStrength = v)) }
+        }
         ToggleRow("Câmera em tela cheia (MR)", g.passthroughFill, "Preenche cada olho com a câmera. Desligado: tamanho angular real, com bordas") { v ->
             a.update { it.copy(graphics = it.graphics.copy(passthroughFill = v)) }
         }
