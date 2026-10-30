@@ -313,6 +313,7 @@ class XrEngine(
         // the colour-marked controller is found in the frames hand tracking analyses
         if ((settings.handTracking.enabled || settings.controllers.colorController) && (arCore != null || passthrough != null)) {
             if (settings.handTracking.hybridMagic && !hybridStarted) { hands.hybrid = true; com.hyperxr.hybrid.HybridLink.start(android.os.Build.MODEL); hybridStarted = true }
+            hands.trackers.values.forEach { it.lightPinch = settings.handTracking.lightPinch }
             input.handsAvailable = hands.start(settings.handTracking.backend)
         }
         ctx.trackingDescription = when {

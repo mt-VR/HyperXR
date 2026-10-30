@@ -151,6 +151,11 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     /** Former Kalman process noise: now how fast the centre filter opens up with speed. */
     fun setProcessNoise(q: Float) { lateralBeta = 2f * q.coerceIn(0.5f, 20f) }
 
+    /** Light pinch (see [GestureRecognizer.lightPinch]). */
+    var lightPinch: Boolean
+        get() = gestures.lightPinch
+        set(v) { gestures.lightPinch = v }
+
     /** Pinch closes when thumb-index distance / palm length drops below this ratio (scale-free). */
     var pinchRatio: Float
         get() = gestures.pinchOn
@@ -374,6 +379,10 @@ class HandTracker(handedness: Handedness, minCutoff: Float = 1.2f, beta: Float =
     }
 }
 
+/** Light pinch: closing to this fraction of the relaxed gap clicks, at most at this ratio of the palm. */
+private const val LIGHT_FRACTION = 0.55f
+private const val LIGHT_MAX_ON = 0.62f
+
 private val PALM = intArrayOf(HandJoint.WRIST, HandJoint.INDEX_MCP, HandJoint.MIDDLE_MCP, HandJoint.RING_MCP, HandJoint.PINKY_MCP)
 
 /** Gesture classification from 3D joints, with hysteresis so states do not flicker. */
@@ -391,16 +400,32 @@ class GestureRecognizer {
     private var pinching = false
     private var openFrames = 0
 
-    fun reset() { pinch.reset(); pinching = false; openFrames = 0 }
+    /**
+     * Light pinch: the click comes when the thumb closes to about half of the hand's own relaxed
+     * thumb-index gap, without pressing the fingertips together. The relaxed gap is learnt as the
+     * hand moves (the widest recent gap, slowly forgotten), so it fits every hand and every error
+     * in the tracker's finger depth.
+     */
+    var lightPinch = false
+    private var openRef = Float.NaN
+
+    fun reset() { pinch.reset(); pinching = false; openFrames = 0; openRef = Float.NaN }
 
     fun update(s: HandState, rawRatio: Float = Float.NaN) {
         val j = s.joints
         val palm = j[HandJoint.WRIST].distanceTo(j[HandJoint.MIDDLE_MCP]).coerceAtLeast(1e-4f)
         val ratio = if (rawRatio.isFinite()) rawRatio else j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) / palm
-        pinch.onThreshold = pinchOn; pinch.offThreshold = pinchOff
+        var on = pinchOn; var off = pinchOff
+        if (lightPinch && ratio.isFinite()) {
+            // the widest recent gap, forgotten at ~2% a frame, never below a closed-ish hand
+            openRef = if (openRef.isNaN()) ratio.coerceAtLeast(0.7f) else maxOf(ratio, openRef - (openRef - 0.7f).coerceAtLeast(0f) * 0.02f)
+            on = maxOf(pinchOn, minOf(LIGHT_MAX_ON, openRef * LIGHT_FRACTION))
+            off = on * 1.35f
+        }
+        pinch.onThreshold = on; pinch.offThreshold = off
         pinch.update(ratio)
         s.pinchRatio = ratio
-        s.pinchStrength = (1f - (ratio - pinchOn) / (1.0f - pinchOn)).coerceIn(0f, 1f)
+        s.pinchStrength = (1f - (ratio - on) / (1.0f - on).coerceAtLeast(0.05f)).coerceIn(0f, 1f)
 
         val index = extended(j, HandJoint.INDEX_MCP, HandJoint.INDEX_PIP, HandJoint.INDEX_TIP)
         val middle = extended(j, HandJoint.MIDDLE_MCP, HandJoint.MIDDLE_PIP, HandJoint.MIDDLE_TIP)

@@ -229,6 +229,9 @@ fun HandsSection(a: MainActivity) {
             "Ligado: menos latência nas mãos; a Depth API só fica se o celular a oferecer a 60 fps. Desligado: Depth API mesmo a 30 fps") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(prefer60FpsOverDepth = v)) }
         }
+        ToggleRow("Pinça leve", h.lightPinch, "Clica quando o polegar chega na metade do caminho até o indicador, sem precisar apertar um dedo no outro") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(lightPinch = v)) }
+        }
         ToggleRow("Clicar apontando e empurrando", h.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH,
             "Ligado: aponte com o indicador e empurre o dedo para clicar (segure empurrado para arrastar). Desligado: pinça") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }

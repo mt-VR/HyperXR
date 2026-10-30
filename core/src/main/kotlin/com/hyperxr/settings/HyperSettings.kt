@@ -106,6 +106,8 @@ data class HandTrackingSettings(
     val directTouch: Boolean = true,
     /** How a hand clicks from a distance: pinch (default), or point with the index finger and push. */
     val clickGesture: ClickGesture = ClickGesture.PINCH,
+    /** Light pinch: clicks when the thumb closes halfway towards the index, no squeezing. */
+    val lightPinch: Boolean = true,
     /** Fingers that type on the table keyboard (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */
     val tableFingers: Set<Int> = setOf(1, 2),
     /** AI depth (Depth Anything V2 on the NPU) confirms table taps; the model is downloaded once. */
