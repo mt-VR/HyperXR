@@ -63,6 +63,13 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
 void recenter() {}
 void readInput(HxInput* out) { *out = gInput; }
 void passthroughWanted() { gPassthroughWantedNs = nowNs(); }
+bool readVoice(float* level, int64_t* timeNs) {
+    if (!gHandsSet) return false;
+    gHands.readerWantsVoiceNs = nowNs();
+    *level = gHands.voiceLevel;
+    *timeNs = gHands.voiceNs;
+    return gHands.voiceNs != 0;
+}
 void haptic(int hand, float amplitude, int64_t durationNs) {
     gHands.hapticSeq++; gHands.hapticHand = static_cast<uint32_t>(hand); gHands.hapticAmplitude = amplitude;
     gHands.hapticDurationMs = static_cast<int32_t>(durationNs / 1000000);

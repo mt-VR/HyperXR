@@ -725,6 +725,15 @@ void haptic(int hand, float amplitude, int64_t durationNs) {
     __atomic_fetch_add(&m->hapticSeq, 1u, __ATOMIC_RELEASE);
 }
 
+bool readVoice(float* level, int64_t* timeNs) {
+    HxHandShared* m = handsMap();
+    if (!m) return false;
+    __atomic_store_n(&m->readerWantsVoiceNs, nowNs(), __ATOMIC_RELAXED);
+    *timeNs = __atomic_load_n(&m->voiceNs, __ATOMIC_ACQUIRE);
+    *level = m->voiceLevel;
+    return *timeNs != 0;
+}
+
 bool readHands(HxHandShared* out, bool wantsHands) {
     HxHandShared* m = handsMap();
     if (!m) return false;

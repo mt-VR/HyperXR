@@ -74,8 +74,8 @@ static void testExtensionsAndInstance() {
     uint32_t n = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 0, &n, nullptr), XR_SUCCESS);
     CHECK(n >= 3);
-    XrExtensionProperties props[64];
-    CHECK(n <= 64);
+    XrExtensionProperties props[128];
+    CHECK(n <= 128);
     for (auto& p : props) { p = {XR_TYPE_EXTENSION_PROPERTIES}; }
     uint32_t small = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 1, &small, props), n > 1 ? XR_ERROR_SIZE_INSUFFICIENT : XR_SUCCESS);
@@ -2224,6 +2224,79 @@ static void testDepthGazeMicrogestures() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testFaceFromVoice() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_FACE_TRACKING_EXTENSION_NAME, XR_FB_FACE_TRACKING2_EXTENSION_NAME,
+                          XR_OCULUS_EXTERNAL_CAMERA_EXTENSION_NAME, XR_META_DETACHED_CONTROLLERS_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 5, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateFaceTrackerFB); LOAD(inst, xrGetFaceExpressionWeightsFB); LOAD(inst, xrDestroyFaceTrackerFB);
+    LOAD(inst, xrCreateFaceTracker2FB); LOAD(inst, xrGetFaceExpressionWeights2FB); LOAD(inst, xrEnumerateExternalCamerasOCULUS);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemFaceTrackingProperties2FB fp2{XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES2_FB};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &fp2;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(fp2.supportsAudioFaceTracking == XR_TRUE && fp2.supportsVisualFaceTracking == XR_FALSE);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    // speaking loudly opens the jaw
+    HxHandShared h{};
+    h.magic = HX_HANDS_MAGIC;
+    h.voiceLevel = 0.8f; h.voiceNs = monoNs();
+    hxTestSetHands(&h);
+    XrFaceTrackerCreateInfoFB fci{XR_TYPE_FACE_TRACKER_CREATE_INFO_FB};
+    fci.faceExpressionSet = XR_FACE_EXPRESSION_SET_DEFAULT_FB;
+    XrFaceTrackerFB face;
+    CHECK_RESULT(xrCreateFaceTrackerFB(s, &fci, &face), XR_SUCCESS);
+    float w[XR_FACE_EXPRESSION_COUNT_FB], c[XR_FACE_CONFIDENCE_COUNT_FB];
+    XrFaceExpressionWeightsFB ew{XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB};
+    ew.weightCount = XR_FACE_EXPRESSION_COUNT_FB; ew.weights = w; ew.confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB; ew.confidences = c;
+    XrFaceExpressionInfoFB ei{XR_TYPE_FACE_EXPRESSION_INFO_FB};
+    ei.time = monoNs();
+    CHECK_RESULT(xrGetFaceExpressionWeightsFB(face, &ei, &ew), XR_SUCCESS);
+    CHECK(ew.status.isValid && w[XR_FACE_EXPRESSION_JAW_DROP_FB] > 0.7f && w[XR_FACE_EXPRESSION_BROW_LOWERER_L_FB] == 0);
+    // silence (no recent level): not valid
+    h.voiceNs = monoNs() - 1000000000LL;
+    hxTestSetHands(&h);
+    CHECK_RESULT(xrGetFaceExpressionWeightsFB(face, &ei, &ew), XR_SUCCESS);
+    CHECK(!ew.status.isValid);
+    // v2: only the voice can be offered
+    XrFaceTrackingDataSource2FB visual = XR_FACE_TRACKING_DATA_SOURCE2_VISUAL_FB;
+    XrFaceTrackerCreateInfo2FB f2{XR_TYPE_FACE_TRACKER_CREATE_INFO2_FB};
+    f2.faceExpressionSet = XR_FACE_EXPRESSION_SET2_DEFAULT_FB; f2.requestedDataSourceCount = 1; f2.requestedDataSources = &visual;
+    XrFaceTracker2FB face2;
+    CHECK_RESULT(xrCreateFaceTracker2FB(s, &f2, &face2), XR_ERROR_FEATURE_UNSUPPORTED);
+    XrFaceTrackingDataSource2FB audio = XR_FACE_TRACKING_DATA_SOURCE2_AUDIO_FB;
+    f2.requestedDataSources = &audio;
+    CHECK_RESULT(xrCreateFaceTracker2FB(s, &f2, &face2), XR_SUCCESS);
+    h.voiceNs = monoNs(); h.voiceLevel = 0.3f;
+    hxTestSetHands(&h);
+    float w2[XR_FACE_EXPRESSION2_COUNT_FB], c2[XR_FACE_CONFIDENCE2_COUNT_FB];
+    XrFaceExpressionWeights2FB ew2{XR_TYPE_FACE_EXPRESSION_WEIGHTS2_FB};
+    ew2.weightCount = XR_FACE_EXPRESSION2_COUNT_FB; ew2.weights = w2; ew2.confidenceCount = XR_FACE_CONFIDENCE2_COUNT_FB; ew2.confidences = c2;
+    XrFaceExpressionInfo2FB ei2{XR_TYPE_FACE_EXPRESSION_INFO2_FB};
+    ei2.time = monoNs();
+    CHECK_RESULT(xrGetFaceExpressionWeights2FB(face2, &ei2, &ew2), XR_SUCCESS);
+    CHECK(ew2.isValid && ew2.dataSource == XR_FACE_TRACKING_DATA_SOURCE2_AUDIO_FB && w2[XR_FACE_EXPRESSION2_JAW_DROP_FB] > 0.2f &&
+          w2[XR_FACE_EXPRESSION2_JAW_DROP_FB] < w[XR_FACE_EXPRESSION_JAW_DROP_FB] + 1);
+    CHECK_RESULT(xrDestroyFaceTrackerFB(reinterpret_cast<XrFaceTrackerFB>(face2)), XR_ERROR_HANDLE_INVALID);  // a v2 tracker
+    CHECK_RESULT(xrDestroyFaceTrackerFB(face), XR_SUCCESS);
+    uint32_t n = 7;
+    CHECK_RESULT(xrEnumerateExternalCamerasOCULUS(s, 0, &n, nullptr), XR_SUCCESS);
+    CHECK(n == 0);
+    hxTestSetHands(nullptr);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -2260,6 +2333,7 @@ int main() {
     testBodyTracking();
     testRoomMeshAndPassthroughColor();
     testDepthGazeMicrogestures();
+    testFaceFromVoice();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

@@ -30,7 +30,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_FACE = 0x48584731, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -851,6 +851,11 @@ const ExtDesc kExtensions[] = {
     {XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, XR_META_environment_depth_SPEC_VERSION},
     {XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, XR_FB_eye_tracking_social_SPEC_VERSION},
     {XR_META_HAND_TRACKING_MICROGESTURES_EXTENSION_NAME, XR_META_hand_tracking_microgestures_SPEC_VERSION},
+    // face expressions from the voice (Meta's audio face tracking), no external cameras, no detached controllers
+    {XR_FB_FACE_TRACKING_EXTENSION_NAME, XR_FB_face_tracking_SPEC_VERSION},
+    {XR_FB_FACE_TRACKING2_EXTENSION_NAME, XR_FB_face_tracking2_SPEC_VERSION},
+    {XR_OCULUS_EXTERNAL_CAMERA_EXTENSION_NAME, XR_OCULUS_external_camera_SPEC_VERSION},
+    {XR_META_DETACHED_CONTROLLERS_EXTENSION_NAME, XR_META_detached_controllers_SPEC_VERSION},
     {XR_META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME, XR_META_body_tracking_full_body_SPEC_VERSION},
     {XR_BD_BODY_TRACKING_EXTENSION_NAME, XR_BD_body_tracking_SPEC_VERSION},
     {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
@@ -1063,6 +1068,11 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsEnvironmentDepth = XR_TRUE;
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsHandRemoval = XR_TRUE;  // the room's depth has no hands in it
         }
+        if (n->type == XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemFaceTrackingPropertiesFB*>(n)->supportsFaceTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES2_FB) {
+            reinterpret_cast<XrSystemFaceTrackingProperties2FB*>(n)->supportsVisualFaceTracking = XR_FALSE;  // no camera sees the face
+            reinterpret_cast<XrSystemFaceTrackingProperties2FB*>(n)->supportsAudioFaceTracking = XR_TRUE;
+        }
         if (n->type == XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemEyeTrackingPropertiesFB*>(n)->supportsEyeTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_COLOR_LUT_PROPERTIES_META)
             reinterpret_cast<XrSystemPassthroughColorLutPropertiesMETA*>(n)->maxColorLutResolution = 64;
@@ -1228,6 +1238,7 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
         static_cast<Passthrough*>(c)->magic = 0;
         free(c);
     }
+    while (void* c = takeChild(s, MAGIC_FACE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_EYE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_DEPTH)) {
         while (void* sc = takeChild(c, MAGIC_DEPTH_SC)) { destroyDepthSwapchain(sc); }
@@ -3807,6 +3818,105 @@ XRAPI_ATTR XrResult XRAPI_CALL GetEyeGazesFB(XrEyeTrackerFB h, const XrEyeGazesI
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ face from the voice (XR_FB_face_tracking, _2)
+/**
+ * Meta's audio face tracking: the mouth follows the voice HyperMagic hears on the microphone (the
+ * jaw opens with the level, the lips round a little). Nothing else of the face is known.
+ */
+struct FaceTracker { uint32_t magic; Session* session; bool v2; };
+constexpr int64_t VOICE_STALE_NS = 300000000LL;
+
+/** Fills [weights] (Meta's v1 and v2 share the mouth indices used here); false without a recent voice level. */
+bool voiceExpressions(float* weights, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) weights[i] = 0;
+    float level; int64_t t;
+    if (!hxp::readVoice(&level, &t) || hxp::nowNs() - t > VOICE_STALE_NS) return false;
+    float l = level < 0 ? 0 : (level > 1 ? 1 : level);
+    weights[XR_FACE_EXPRESSION_JAW_DROP_FB] = l > 0.05f ? (l - 0.05f) / 0.95f : 0;
+    weights[XR_FACE_EXPRESSION_LIP_FUNNELER_LB_FB + 0] = weights[XR_FACE_EXPRESSION_LIP_FUNNELER_LB_FB + 2] = 0.35f * l;  // LB, RB
+    weights[XR_FACE_EXPRESSION_LIP_FUNNELER_LT_FB + 0] = weights[XR_FACE_EXPRESSION_LIP_FUNNELER_LT_FB + 2] = 0.35f * l;  // LT, RT
+    weights[XR_FACE_EXPRESSION_LIPS_TOWARD_FB] = 0.2f * l;
+    return true;
+}
+
+XrResult createFace(XrSession h, bool v2, const void* ci, void** out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || !out) return XR_ERROR_VALIDATION_FAILURE;
+    if (!v2) {
+        auto* c = static_cast<const XrFaceTrackerCreateInfoFB*>(ci);
+        if (c->type != XR_TYPE_FACE_TRACKER_CREATE_INFO_FB || c->faceExpressionSet != XR_FACE_EXPRESSION_SET_DEFAULT_FB) return XR_ERROR_VALIDATION_FAILURE;
+    } else {
+        auto* c = static_cast<const XrFaceTrackerCreateInfo2FB*>(ci);
+        if (c->type != XR_TYPE_FACE_TRACKER_CREATE_INFO2_FB || c->faceExpressionSet != XR_FACE_EXPRESSION_SET2_DEFAULT_FB) return XR_ERROR_VALIDATION_FAILURE;
+        if (c->requestedDataSourceCount > 0 && !c->requestedDataSources) return XR_ERROR_VALIDATION_FAILURE;
+        bool audio = c->requestedDataSourceCount == 0;
+        for (uint32_t i = 0; i < c->requestedDataSourceCount; i++) if (c->requestedDataSources[i] == XR_FACE_TRACKING_DATA_SOURCE2_AUDIO_FB) audio = true;
+        if (!audio) return XR_ERROR_FEATURE_UNSUPPORTED;  // only the voice is available
+    }
+    FaceTracker* f = alloc<FaceTracker>(MAGIC_FACE, s);
+    if (!f) return XR_ERROR_OUT_OF_MEMORY;
+    f->session = s; f->v2 = v2;
+    float l; int64_t t;
+    hxp::readVoice(&l, &t);  // HyperMagic turns the microphone on now
+    *out = f;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateFaceTrackerFB(XrSession h, const XrFaceTrackerCreateInfoFB* ci, XrFaceTrackerFB* out) {
+    return createFace(h, false, ci, reinterpret_cast<void**>(out));
+}
+XRAPI_ATTR XrResult XRAPI_CALL CreateFaceTracker2FB(XrSession h, const XrFaceTrackerCreateInfo2FB* ci, XrFaceTracker2FB* out) {
+    return createFace(h, true, ci, reinterpret_cast<void**>(out));
+}
+
+XrResult destroyFace(uint64_t h, bool v2) {
+    FaceTracker* f = asObj<FaceTracker>(h, MAGIC_FACE);
+    if (!f || f->v2 != v2) return XR_ERROR_HANDLE_INVALID;
+    release(f);
+    return XR_SUCCESS;
+}
+XRAPI_ATTR XrResult XRAPI_CALL DestroyFaceTrackerFB(XrFaceTrackerFB h) { return destroyFace(reinterpret_cast<uint64_t>(h), false); }
+XRAPI_ATTR XrResult XRAPI_CALL DestroyFaceTracker2FB(XrFaceTracker2FB h) { return destroyFace(reinterpret_cast<uint64_t>(h), true); }
+
+XRAPI_ATTR XrResult XRAPI_CALL GetFaceExpressionWeightsFB(XrFaceTrackerFB h, const XrFaceExpressionInfoFB* info, XrFaceExpressionWeightsFB* w) {
+    FaceTracker* f = asObj<FaceTracker>(reinterpret_cast<uint64_t>(h), MAGIC_FACE);
+    if (!f || f->v2) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_FACE_EXPRESSION_INFO_FB || !w || w->type != XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (w->weightCount != XR_FACE_EXPRESSION_COUNT_FB || !w->weights || w->confidenceCount != XR_FACE_CONFIDENCE_COUNT_FB || !w->confidences)
+        return XR_ERROR_VALIDATION_FAILURE;
+    bool ok = voiceExpressions(w->weights, w->weightCount);
+    for (uint32_t i = 0; i < w->confidenceCount; i++) w->confidences[i] = ok ? (i == XR_FACE_CONFIDENCE_LOWER_FACE_FB ? 0.6f : 0) : 0;
+    w->status.isValid = ok ? XR_TRUE : XR_FALSE;
+    w->status.isEyeFollowingBlendshapesValid = XR_FALSE;
+    w->time = info->time;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetFaceExpressionWeights2FB(XrFaceTracker2FB h, const XrFaceExpressionInfo2FB* info, XrFaceExpressionWeights2FB* w) {
+    FaceTracker* f = asObj<FaceTracker>(reinterpret_cast<uint64_t>(h), MAGIC_FACE);
+    if (!f || !f->v2) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_FACE_EXPRESSION_INFO2_FB || !w || w->type != XR_TYPE_FACE_EXPRESSION_WEIGHTS2_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (w->weightCount != XR_FACE_EXPRESSION2_COUNT_FB || !w->weights || w->confidenceCount != XR_FACE_CONFIDENCE2_COUNT_FB || !w->confidences)
+        return XR_ERROR_VALIDATION_FAILURE;
+    bool ok = voiceExpressions(w->weights, w->weightCount);
+    for (uint32_t i = 0; i < w->confidenceCount; i++) w->confidences[i] = ok ? (i == XR_FACE_CONFIDENCE2_LOWER_FACE_FB ? 0.6f : 0) : 0;
+    w->isValid = ok ? XR_TRUE : XR_FALSE;
+    w->isEyeFollowingBlendshapesValid = XR_FALSE;
+    w->dataSource = XR_FACE_TRACKING_DATA_SOURCE2_AUDIO_FB;
+    w->time = info->time;
+    return XR_SUCCESS;
+}
+
+/** XR_OCULUS_external_camera: a phone has no external cameras for mixed reality capture. */
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateExternalCamerasOCULUS(XrSession h, uint32_t capacity, uint32_t* count, XrExternalCameraOCULUS* cameras) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = 0;
+    (void)capacity; (void)cameras;
+    return XR_SUCCESS;
+}
+
 // ------------------------------------------------------------------ smaller Meta extensions
 /** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
 const char* const kPerfCounters[] = {
@@ -4313,6 +4423,13 @@ const Entry kEntries[] = {
     HX_EXT(CreateEyeTrackerFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
     HX_EXT(DestroyEyeTrackerFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
     HX_EXT(GetEyeGazesFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
+    HX_EXT(CreateFaceTrackerFB, XR_FB_FACE_TRACKING_EXTENSION_NAME),
+    HX_EXT(DestroyFaceTrackerFB, XR_FB_FACE_TRACKING_EXTENSION_NAME),
+    HX_EXT(GetFaceExpressionWeightsFB, XR_FB_FACE_TRACKING_EXTENSION_NAME),
+    HX_EXT(CreateFaceTracker2FB, XR_FB_FACE_TRACKING2_EXTENSION_NAME),
+    HX_EXT(DestroyFaceTracker2FB, XR_FB_FACE_TRACKING2_EXTENSION_NAME),
+    HX_EXT(GetFaceExpressionWeights2FB, XR_FB_FACE_TRACKING2_EXTENSION_NAME),
+    HX_EXT(EnumerateExternalCamerasOCULUS, XR_OCULUS_EXTERNAL_CAMERA_EXTENSION_NAME),
     HX_EXT(CreateBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
     HX_EXT(DestroyBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
     HX_EXT(LocateBodyJointsFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),

@@ -52,6 +52,10 @@ object HandBridge {
     @JvmStatic external fun nativeWrite(map: Long, timeNs: Long, state: FloatArray, joints: FloatArray)
     @JvmStatic external fun nativeReaderAlive(map: Long): Long
     @JvmStatic external fun nativeReaderWantsHands(map: Long): Long
+    /** The voice level (0..1) for face tracking from audio. */
+    @JvmStatic external fun nativeVoice(map: Long, timeNs: Long, level: Float)
+    /** When a game's runtime last asked for the voice (a face tracker exists), CLOCK_MONOTONIC. */
+    @JvmStatic external fun nativeReaderWantsVoice(map: Long): Long
     /** The game's last vibration request: returns its sequence number; [out] = hand (0 left), amplitude, ms. */
     @JvmStatic external fun nativeHaptic(map: Long, out: FloatArray): Int
 }

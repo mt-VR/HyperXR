@@ -184,6 +184,8 @@ void readInput(HxInput* out);
 bool readHands(HxHandShared* out, bool wantsHands);
 /** A vibration for the controller of [hand] (amplitude 0 stops it), played by HyperMagic. */
 void haptic(int hand, float amplitude, int64_t durationNs);
+/** The voice level HyperMagic measures (0..1) and when; false when there is none. Asking keeps the microphone on. */
+bool readVoice(float* level, int64_t* timeNs);
 /** The app shows passthrough this frame: HyperMagic keeps the camera frames coming. */
 void passthroughWanted();
 /** Spatial anchors the app saved (XR_FB_spatial_entity_storage), kept in the app's own files. */

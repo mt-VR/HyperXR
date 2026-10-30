@@ -58,6 +58,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Extras Meta | `XR_META_performance_metrics` (tempo de CPU do app, do compositor, quadros atrasados), `XR_META_recommended_layer_resolution`, `XR_FB_composition_layer_secure_content`, `XR_META_automatic_layer_filter`, `XR_FB_keyboard_tracking` (nenhum teclado rastreado), `XR_META_passthrough_preferences`, `XR_META_passthrough_layer_resumed_event`, `XR_FB_spatial_entity_storage_batch`, `XR_OCULUS_android_session_state_enable` |
 | Corpo | `XR_FB_body_tracking` (70 juntas, com esqueleto de referência), `XR_META_body_tracking_full_body` (84, com pernas) e `XR_BD_body_tracking` (Pico, 16 ou 24): cabeça e mãos vistas, o resto inferido (tronco abaixo da cabeça, braços por IK até as mãos, pernas em pé ou sentado) |
 | Profundidade, olhar, microgestos | `XR_META_environment_depth` (profundidade da sala, paredes/chão/teto, para oclusão; 320x320 por olho, 3 imagens), `XR_FB_eye_tracking_social` (o olhar é a direção da cabeça, confiança baixa), `XR_META_hand_tracking_microgestures` (toque do polegar e deslizes para frente/trás/esquerda/direita sobre o indicador) |
+| Rosto e extras | `XR_FB_face_tracking` e `XR_FB_face_tracking2` (fonte de áudio: a boca segue a voz medida pelo HyperMagic no microfone, como o lip sync da Meta), `XR_OCULUS_external_camera` (nenhuma), `XR_META_detached_controllers` (nunca ativos) |
 | Passthrough | `XR_FB_passthrough` (camada de reconstrução, iniciar/pausar, opacidade, mapas de cor mono, brilho/contraste/saturação), `XR_META_passthrough_color_lut` (cubos de cor 3D, com mistura entre dois), `XR_FB_passthrough_keyboard_hands` e o modo `ALPHA_BLEND`: a câmera do celular atrás do jogo, com a projeção misturada pelo alfa |
 | Mãos | `XR_EXT_hand_tracking` (26 juntas, com raio) `XR_FB_hand_tracking_aim` (mira e pinça da Meta), `XR_FB_hand_tracking_mesh` (malha da mão para o SDK da Meta desenhar), `XR_FB_hand_tracking_capsules` (19 cápsulas para física) e a escala da mão (`XrHandTrackingScaleFB`), com as mãos que o HyperMagic rastreia pela câmera (veja abaixo) |
 | Sistema | HMD, estéreo primário, blend OPAQUE e ALPHA_BLEND, orientação rastreada (3DoF), posição por modelo de pescoço |
@@ -85,6 +86,9 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
   pernas não aparece. A orientação das juntas dos membros segue o osso (-Z ao longo dele).
 - **Profundidade e olhar**: a profundidade é a da sala conhecida (sem móveis, pessoas ou objetos soltos), e
   nenhuma câmera vê os olhos num VR Box: o "olhar" de cada olho é a direção da cabeça.
+- **Rosto**: só a boca, pela voz (abrir a mandíbula com o volume, arredondar os lábios); sobrancelhas,
+  olhos e o resto do rosto ficam neutros. O microfone só liga se o HyperMagic tiver a permissão e enquanto
+  o jogo tiver um rastreador de rosto; só o volume é medido, nada é gravado.
 - **Passthrough**: o serviço de mãos do HyperMagic também manda quadros RGBA de até 640x480 a ~30 fps
   (`hx_camera.h`, `content://com.hypermagic.runtime/camera`) enquanto o jogo mostra a câmera; só o jogo
   que o HyperMagic abriu (e o próprio HyperMagic) pode abrir esses arquivos. A imagem é tratada como
@@ -112,11 +116,11 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 1065 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 1096 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
-  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) modelo do controle (arquivo .glb válido, faces para fora) mãos como controle, vibração, proximidade, métricas e o sensoriamento espacial da Pico (futures, provedores, filtros, componentes, âncoras entre sessões) e corpo (proporções, braço alcançando a mão, sentado, esqueleto sem ciclos, Meta 70/84 e Pico 16/24), malha da sala (faces para dentro) cor do passthrough (LUTs, estilos), profundidade da sala, olhar e microgestos (toque, deslizes).
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) modelo do controle (arquivo .glb válido, faces para fora) mãos como controle, vibração, proximidade, métricas e o sensoriamento espacial da Pico (futures, provedores, filtros, componentes, âncoras entre sessões) e corpo (proporções, braço alcançando a mão, sentado, esqueleto sem ciclos, Meta 70/84 e Pico 16/24), malha da sala (faces para dentro) cor do passthrough (LUTs, estilos), profundidade da sala, olhar, microgestos (toque, deslizes) e rosto pela voz.
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

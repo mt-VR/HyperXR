@@ -88,6 +88,8 @@ object QuestApk {
         "XR_META_spatial_entity_mesh", "XR_META_passthrough_color_lut", "XR_FB_passthrough_keyboard_hands",
         // room depth for occlusion, gaze from the head, thumb microgestures
         "XR_META_environment_depth", "XR_FB_eye_tracking_social", "XR_META_hand_tracking_microgestures",
+        // the face from the voice, no external cameras, no detached controllers
+        "XR_FB_face_tracking", "XR_FB_face_tracking2", "XR_OCULUS_external_camera", "XR_META_detached_controllers",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */
