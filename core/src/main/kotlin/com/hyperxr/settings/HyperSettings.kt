@@ -104,8 +104,6 @@ data class HandTrackingSettings(
     /** Kalman process noise (m/s²)²: higher follows fast motion, lower smooths more. */
     val kalmanProcessNoise: Float = 3f,
     val directTouch: Boolean = true,
-    /** The thumb presses buttons too (its tip measured with depth), not only the index. */
-    val thumbTouch: Boolean = true,
     /** How a hand clicks from a distance: pinch (default), or point with the index finger and push. */
     val clickGesture: ClickGesture = ClickGesture.PINCH,
     /** Fingers that type on the table keyboard (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */

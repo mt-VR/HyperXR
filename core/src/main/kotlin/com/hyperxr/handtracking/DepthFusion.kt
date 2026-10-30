@@ -96,8 +96,8 @@ class DepthFusion(var palmLengthMeters: Float = 0.09f) {
             // relative z is in normalized-width units; convert to metres at the palm distance
             val dz = (img[i * 3 + 2] - zRef) * w * palmZ / intr.fx
             var zi = (palmZ + dz).coerceAtLeast(0.05f)
-            // the fingertips that touch (thumb and index) measured where they are, not only from
-            // the palm: what touches a button is the tip
+            // the index tip (what presses buttons) and the thumb tip (the other side of a pinch)
+            // measured where they are, not only from the palm
             if (source == DepthSource.DEPTH_MAP && depth != null && (i == HandJoint.THUMB_TIP || i == HandJoint.INDEX_TIP)) {
                 val d = tipDepth(depth, u, v, w, h, zi)
                 if (!d.isNaN()) zi = zi + (d - zi) * TIP_DEPTH_WEIGHT
