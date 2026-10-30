@@ -2081,6 +2081,149 @@ static void testRoomMeshAndPassthroughColor() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testDepthGazeMicrogestures() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME,
+                          XR_META_HAND_TRACKING_MICROGESTURES_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 4, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrBeginSession); LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame);
+    LOAD(inst, xrCreateEnvironmentDepthProviderMETA); LOAD(inst, xrStartEnvironmentDepthProviderMETA); LOAD(inst, xrStopEnvironmentDepthProviderMETA);
+    LOAD(inst, xrCreateEnvironmentDepthSwapchainMETA); LOAD(inst, xrEnumerateEnvironmentDepthSwapchainImagesMETA);
+    LOAD(inst, xrGetEnvironmentDepthSwapchainStateMETA); LOAD(inst, xrAcquireEnvironmentDepthImageMETA); LOAD(inst, xrDestroyEnvironmentDepthProviderMETA);
+    LOAD(inst, xrCreateEyeTrackerFB); LOAD(inst, xrGetEyeGazesFB); LOAD(inst, xrDestroyEyeTrackerFB);
+    LOAD(inst, xrCreateActionSet); LOAD(inst, xrCreateAction); LOAD(inst, xrStringToPath); LOAD(inst, xrSuggestInteractionProfileBindings);
+    LOAD(inst, xrAttachSessionActionSets); LOAD(inst, xrSyncActions); LOAD(inst, xrGetActionStateBoolean);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    hxTestSetHead(0, 0, 0, 1, 1);
+
+    // environment depth: images and two views at the eyes, depth = 1 - near / z
+    XrEnvironmentDepthProviderCreateInfoMETA dpi{XR_TYPE_ENVIRONMENT_DEPTH_PROVIDER_CREATE_INFO_META};
+    XrEnvironmentDepthProviderMETA dp;
+    CHECK_RESULT(xrCreateEnvironmentDepthProviderMETA(s, &dpi, &dp), XR_SUCCESS);
+    XrEnvironmentDepthSwapchainCreateInfoMETA dsi{XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_CREATE_INFO_META};
+    XrEnvironmentDepthSwapchainMETA dsc;
+    CHECK_RESULT(xrCreateEnvironmentDepthSwapchainMETA(dp, &dsi, &dsc), XR_SUCCESS);
+    struct GlesImage { XrStructureType type; void* next; uint32_t image; } imgs[3];
+    for (auto& im : imgs) { im.type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR; im.next = nullptr; im.image = 0; }
+    uint32_t n = 0;
+    CHECK_RESULT(xrEnumerateEnvironmentDepthSwapchainImagesMETA(dsc, 3, &n, reinterpret_cast<XrSwapchainImageBaseHeader*>(imgs)), XR_SUCCESS);
+    CHECK(n == 3 && imgs[2].image != 0);
+    XrEnvironmentDepthSwapchainStateMETA dst{XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META};
+    CHECK_RESULT(xrGetEnvironmentDepthSwapchainStateMETA(dsc, &dst), XR_SUCCESS);
+    CHECK(dst.width > 0 && dst.width == dst.height);
+    XrEnvironmentDepthImageAcquireInfoMETA ai{XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_ACQUIRE_INFO_META};
+    ai.space = stage; ai.displayTime = monoNs();
+    XrEnvironmentDepthImageMETA di{XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_META};
+    for (auto& v : di.views) v.type = XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_VIEW_META;
+    CHECK_RESULT(xrAcquireEnvironmentDepthImageMETA(dp, &ai, &di), XR_ERROR_CALL_ORDER_INVALID);  // not started
+    CHECK_RESULT(xrStartEnvironmentDepthProviderMETA(dp), XR_SUCCESS);
+    CHECK_RESULT(xrAcquireEnvironmentDepthImageMETA(dp, &ai, &di), XR_SUCCESS);
+    uint32_t first = di.swapchainIndex;
+    CHECK(di.nearZ > 0 && isinf(di.farZ));
+    CHECK(di.views[0].pose.position.x < di.views[1].pose.position.x && NEAR(di.views[0].pose.position.y, 1.6, 1e-4));
+    CHECK_RESULT(xrAcquireEnvironmentDepthImageMETA(dp, &ai, &di), XR_SUCCESS);
+    CHECK(di.swapchainIndex != first);
+    CHECK_RESULT(xrStopEnvironmentDepthProviderMETA(dp), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyEnvironmentDepthProviderMETA(dp), XR_SUCCESS);  // takes its swapchain with it
+
+    // gaze: where the head looks, from each eye
+    XrEyeTrackerCreateInfoFB eci{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
+    XrEyeTrackerFB et;
+    CHECK_RESULT(xrCreateEyeTrackerFB(s, &eci, &et), XR_SUCCESS);
+    XrEyeGazesInfoFB gi{XR_TYPE_EYE_GAZES_INFO_FB};
+    gi.baseSpace = stage; gi.time = monoNs();
+    XrEyeGazesFB gz{XR_TYPE_EYE_GAZES_FB};
+    CHECK_RESULT(xrGetEyeGazesFB(et, &gi, &gz), XR_SUCCESS);
+    CHECK(gz.gaze[0].isValid && gz.gaze[0].gazePose.position.x < 0 && gz.gaze[1].gazePose.position.x > 0 && NEAR(gz.gaze[0].gazePose.orientation.w, 1, 1e-5));
+    CHECK_RESULT(xrDestroyEyeTrackerFB(et), XR_SUCCESS);
+
+    // microgestures on the right hand
+    XrActionSetCreateInfo sci{XR_TYPE_ACTION_SET_CREATE_INFO};
+    strcpy(sci.actionSetName, "micro"); strcpy(sci.localizedActionSetName, "Micro");
+    XrActionSet set;
+    CHECK_RESULT(xrCreateActionSet(inst, &sci, &set), XR_SUCCESS);
+    auto make = [&](const char* name) {
+        XrActionCreateInfo aci{XR_TYPE_ACTION_CREATE_INFO};
+        strcpy(aci.actionName, name); strcpy(aci.localizedActionName, name);
+        aci.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
+        XrAction a = XR_NULL_HANDLE;
+        CHECK_RESULT(xrCreateAction(set, &aci, &a), XR_SUCCESS);
+        return a;
+    };
+    XrAction tap = make("tap"), fwd = make("fwd"), right = make("right");
+    auto path = [&](const char* p) { XrPath x; xrStringToPath(inst, p, &x); return x; };
+    XrActionSuggestedBinding mb[] = {{tap, path("/user/hand/right/input/tap_thumb_meta/click")},
+                                     {fwd, path("/user/hand/right/input/swipe_forward_meta/click")},
+                                     {right, path("/user/hand/right/input/swipe_right_meta/click")}};
+    XrInteractionProfileSuggestedBinding ipsb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    ipsb.interactionProfile = path("/interaction_profiles/meta/hand_tracking_microgestures"); ipsb.countSuggestedBindings = 3; ipsb.suggestedBindings = mb;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+    XrSessionActionSetsAttachInfo att{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    att.countActionSets = 1; att.actionSets = &set;
+    CHECK_RESULT(xrAttachSessionActionSets(s, &att), XR_SUCCESS);
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    for (int i = 0; i < 3; i++) { xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr); ei.displayTime = fs.predictedDisplayTime; xrEndFrame(s, &ei); }
+    XrActiveActionSet active{set, XR_NULL_PATH};
+    XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};
+    si.countActiveActionSets = 1; si.activeActionSets = &active;
+    HxHandShared h{};
+    h.magic = HX_HANDS_MAGIC;
+    h.tracked[1] = 1;
+    rightHandPalmDown(h.joints[1]);
+    // index finger: knuckle (0.07, -0.3, -0.39) to last joint (0.07, -0.3, -0.45)
+    auto thumbAt = [&](float x, float y, float z) {
+        h.joints[1][4][0] = x; h.joints[1][4][1] = y; h.joints[1][4][2] = z;
+        h.timeNs[1] = monoNs();
+        hxTestSetHands(&h);
+        CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    };
+    auto pressed = [&](XrAction a) {
+        XrActionStateGetInfo g{XR_TYPE_ACTION_STATE_GET_INFO};
+        g.action = a;
+        XrActionStateBoolean st{XR_TYPE_ACTION_STATE_BOOLEAN};
+        xrGetActionStateBoolean(s, &g, &st);
+        return st.currentState == XR_TRUE;
+    };
+    thumbAt(0.0f, -0.3f, -0.36f);   // away
+    CHECK(!pressed(tap));
+    thumbAt(0.07f, -0.29f, -0.41f);  // on the index
+    CHECK(!pressed(tap));
+    thumbAt(0.0f, -0.3f, -0.36f);   // lifted quickly: a tap
+    CHECK(pressed(tap) && !pressed(fwd));
+    thumbAt(0.0f, -0.3f, -0.36f);   // the pulse lasts one sync
+    CHECK(!pressed(tap));
+    thumbAt(0.07f, -0.29f, -0.40f);  // on the index, then 3 cm towards the fingertip
+    thumbAt(0.07f, -0.29f, -0.43f);
+    CHECK(pressed(fwd) && !pressed(right));
+    thumbAt(0.0f, -0.3f, -0.36f);   // lifting after a swipe is not a tap
+    CHECK(!pressed(tap));
+    thumbAt(0.07f, -0.29f, -0.41f);  // on the index, then across it to the right (still touching)
+    thumbAt(0.092f, -0.29f, -0.41f);
+    CHECK(pressed(right));
+    hxTestSetHands(nullptr);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -2116,6 +2259,7 @@ int main() {
     testBodySolver();
     testBodyTracking();
     testRoomMeshAndPassthroughColor();
+    testDepthGazeMicrogestures();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

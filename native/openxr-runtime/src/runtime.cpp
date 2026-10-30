@@ -30,7 +30,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -49,7 +49,7 @@ struct Instance {
     pthread_mutex_t lock;
     XrVersion apiVersion;
     bool extGles, extTimespec, extHeadless, extLocalFloor;
-    uint64_t extMeta;  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
+    uint64_t extMeta[2];  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
     XrAsyncRequestIdFB nextRequest;  // XR_FB_spatial_entity and friends: async request ids
     // XR_EXT_future: Pico's asynchronous calls (they all finish at once; the future holds the result)
     struct Future { uint64_t id; int kind; void* owner; XrResult result; int payload; } futures[64];
@@ -124,6 +124,8 @@ struct Session {
     int nextQuery;
     XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
     XrPath handProfile;      // hand_interaction_ext when the app has bindings for it (used alongside)
+    XrPath microProfile;     // hand_tracking_microgestures when the app has bindings for it
+    struct Micro { bool touching, fired; int64_t startNs; float start[3]; uint32_t pulses; } micro[2];
     HxInput input;           // snapshot taken by xrSyncActions
     HxHandShared hands;      // hands snapshot taken by xrSyncActions
     bool handsOk;
@@ -473,7 +475,10 @@ const char* const kProfiles[] = {
     "/interaction_profiles/khr/simple_controller",
     // the hands themselves (XR_EXT_hand_interaction): pinch, aim, grasp and poke from hand tracking
     "/interaction_profiles/ext/hand_interaction_ext",
+    // thumb microgestures on the index finger (XR_META_hand_tracking_microgestures)
+    "/interaction_profiles/meta/hand_tracking_microgestures",
 };
+const char* const kMicroProfile = "/interaction_profiles/meta/hand_tracking_microgestures";
 const char* const kHandProfile = "/interaction_profiles/ext/hand_interaction_ext";
 
 bool profileSupported(const char* p) {
@@ -582,6 +587,58 @@ SrcKind evalHandSource(const char* path, const HxHandShared& hands, bool handsOk
     return SRC_NONE;
 }
 
+enum MicroGesture : uint32_t { MICRO_LEFT = 1, MICRO_RIGHT = 2, MICRO_FORWARD = 4, MICRO_BACKWARD = 8, MICRO_TAP = 16 };
+
+/**
+ * Thumb microgestures of one hand from its landmarks (camera space, x right): the thumb tip
+ * touching the side of the index finger, then a tap (lift within half a second) or a swipe of
+ * 2 cm along the finger (forward / backward) or across it (left / right). Each gesture is one
+ * pulse for one xrSyncActions.
+ */
+uint32_t detectMicro(Session::Micro& m, const HxHandShared& h, int side, int64_t now) {
+    hxhands::V mcp = hxhands::v(h.joints[side][hxhands::INDEX_MCP]), dip = hxhands::v(h.joints[side][7]), tip = hxhands::v(h.joints[side][8]);
+    hxhands::V thumb = hxhands::v(h.joints[side][4]);
+    float palm = hxhands::len(hxhands::sub(hxhands::v(h.joints[side][hxhands::MIDDLE_MCP]), hxhands::v(h.joints[side][0])));
+    float scale = palm > 0.02f ? palm / 0.095f : 1;
+    // nearest point on the index finger from its knuckle to its last joint
+    hxhands::V seg = hxhands::sub(dip, mcp);
+    float t = hxhands::dot(hxhands::sub(thumb, mcp), seg) / (hxhands::dot(seg, seg) + 1e-9f);
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    float d = hxhands::len(hxhands::sub(thumb, hxhands::add(mcp, hxhands::mul(seg, t))));
+    uint32_t out = 0;
+    if (!m.touching) {
+        if (d < 0.025f * scale) { m.touching = true; m.fired = false; m.startNs = now; m.start[0] = thumb.x; m.start[1] = thumb.y; m.start[2] = thumb.z; }
+        return 0;
+    }
+    if (d > 0.035f * scale) {  // lifted
+        m.touching = false;
+        if (!m.fired && now - m.startNs < 500000000LL) out |= MICRO_TAP;
+        return out;
+    }
+    if (m.fired) return 0;
+    hxhands::V along = hxhands::norm(hxhands::sub(tip, mcp), {0, 0, -1});
+    hxhands::V across = hxhands::norm(hxhands::sub(hxhands::V{1, 0, 0}, hxhands::mul(along, along.x)), {1, 0, 0});
+    hxhands::V moved = hxhands::sub(thumb, hxhands::V{m.start[0], m.start[1], m.start[2]});
+    float a = hxhands::dot(moved, along), c = hxhands::dot(moved, across), limit = 0.02f * scale;
+    if (fabsf(a) > limit && fabsf(a) >= fabsf(c)) { out |= a > 0 ? MICRO_FORWARD : MICRO_BACKWARD; m.fired = true; }
+    else if (fabsf(c) > limit) { out |= c > 0 ? MICRO_RIGHT : MICRO_LEFT; m.fired = true; }
+    return out;
+}
+
+SrcKind evalMicroSource(const char* path, const Session* s, int* handOut, float v[2]) {
+    const char* rest = nullptr;
+    int h = handOf(path, &rest);
+    *handOut = h;
+    v[0] = v[1] = 0;
+    if (h < 0) return SRC_NONE;
+    struct { const char* path; uint32_t bit; } inputs[] = {
+        {"/input/swipe_left_meta/click", MICRO_LEFT}, {"/input/swipe_right_meta/click", MICRO_RIGHT},
+        {"/input/swipe_forward_meta/click", MICRO_FORWARD}, {"/input/swipe_backward_meta/click", MICRO_BACKWARD},
+        {"/input/tap_thumb_meta/click", MICRO_TAP}};
+    for (auto& in : inputs) if (strcmp(rest, in.path) == 0) { v[0] = (s->micro[h].pulses & in.bit) ? 1.f : 0.f; return SRC_BOOL; }
+    return SRC_NONE;
+}
+
 /** Pose kind of a hand_interaction_ext pose path, or -1. */
 int handPoseKind(const char* path) {
     const char* rest = nullptr;
@@ -602,18 +659,20 @@ bool isSimpleProfile(Instance* inst, XrPath profile) {
 ActionValue evalAction(Session* s, Action* a, int slot) {
     ActionValue r{};
     Instance* inst = s->instance;
-    if (s->profile == XR_NULL_PATH && s->handProfile == XR_NULL_PATH) return r;
+    if (s->profile == XR_NULL_PATH && s->handProfile == XR_NULL_PATH && s->microProfile == XR_NULL_PATH) return r;
     bool simple = isSimpleProfile(inst, s->profile);
     float best = -1;
     // the controller profile and, alongside it, the hands (simultaneous hands and controllers)
     for (int i = 0; i < inst->bindingCount; i++) {
         const auto& b = inst->bindings[i];
         bool hands = b.profile == s->handProfile && s->handProfile != XR_NULL_PATH;
-        if ((b.profile != s->profile && !hands) || b.action != a) continue;
+        bool micro = b.profile == s->microProfile && s->microProfile != XR_NULL_PATH;
+        if ((b.profile != s->profile && !hands && !micro) || b.action != a) continue;
         const char* path = pathString(inst, b.path);
         if (!path) continue;
         int hand; float v[2];
-        SrcKind k = hands ? evalHandSource(path, s->hands, s->handsOk, &hand, v) : evalSource(path, simple, s->input, &hand, v);
+        SrcKind k = micro ? evalMicroSource(path, s, &hand, v)
+                  : hands ? evalHandSource(path, s->hands, s->handsOk, &hand, v) : evalSource(path, simple, s->input, &hand, v);
         if (k == SRC_NONE || (slot < 2 && hand != slot)) continue;
         bool compatible = (a->type == XR_ACTION_TYPE_BOOLEAN_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
                           (a->type == XR_ACTION_TYPE_FLOAT_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
@@ -736,6 +795,7 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateApiLayerProperties(uint32_t capacity, ui
 
 struct ExtDesc { const char* name; uint32_t version; };
 bool extEnabled(const Instance* inst, const char* name);
+void destroyDepthSwapchain(void* p);
 const ExtDesc kExtensions[] = {
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME, XR_KHR_android_create_instance_SPEC_VERSION},
@@ -787,6 +847,10 @@ const ExtDesc kExtensions[] = {
     {XR_BD_SPATIAL_PLANE_EXTENSION_NAME, XR_BD_spatial_plane_SPEC_VERSION},
     // bodies (Meta upper body and full body, Pico): head and hands seen, the rest inferred (hx_body.h)
     {XR_FB_BODY_TRACKING_EXTENSION_NAME, XR_FB_body_tracking_SPEC_VERSION},
+    // depth of the room for occlusion; gaze (where the head looks); thumb microgestures from the hand joints
+    {XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, XR_META_environment_depth_SPEC_VERSION},
+    {XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, XR_FB_eye_tracking_social_SPEC_VERSION},
+    {XR_META_HAND_TRACKING_MICROGESTURES_EXTENSION_NAME, XR_META_hand_tracking_microgestures_SPEC_VERSION},
     {XR_META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME, XR_META_body_tracking_full_body_SPEC_VERSION},
     {XR_BD_BODY_TRACKING_EXTENSION_NAME, XR_BD_body_tracking_SPEC_VERSION},
     {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
@@ -821,7 +885,7 @@ const ExtDesc kExtensions[] = {
 #endif
 };
 constexpr uint32_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);
-static_assert(kExtensionCount <= 64, "Instance::extMeta has one bit per extension");
+static_assert(kExtensionCount <= 128, "Instance::extMeta has one bit per extension");
 
 XRAPI_ATTR XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(const char* layerName, uint32_t capacity, uint32_t* count, XrExtensionProperties* props) {
     if (layerName && layerName[0]) return XR_ERROR_API_LAYER_NOT_PRESENT;
@@ -853,11 +917,11 @@ XRAPI_ATTR XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* ci, Xr
     if (ci->applicationInfo.applicationName[0] == 0) return XR_ERROR_NAME_INVALID;
     if (ci->enabledApiLayerCount > 0) return XR_ERROR_API_LAYER_NOT_PRESENT;
     bool gles = false, timespec = false, headless = false, localFloor = false;
-    uint64_t extBits = 0;
+    uint64_t extBits[2] = {0, 0};
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++) {
         const char* e = ci->enabledExtensionNames[i];
         bool known = false;
-        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) { known = true; extBits |= 1ull << k; }
+        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) { known = true; extBits[k >> 6] |= 1ull << (k & 63); }
         if (!known) return XR_ERROR_EXTENSION_NOT_PRESENT;
         if (strcmp(e, "XR_KHR_opengl_es_enable") == 0) gles = true;
         if (strcmp(e, XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME) == 0) timespec = true;
@@ -879,7 +943,8 @@ XRAPI_ATTR XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* ci, Xr
     pthread_mutex_init(&inst->lock, nullptr);
     inst->apiVersion = v;
     inst->extGles = gles; inst->extTimespec = timespec; inst->extHeadless = headless; inst->extLocalFloor = localFloor;
-    inst->extMeta = extBits;
+    inst->extMeta[0] = extBits[0];
+    inst->extMeta[1] = extBits[1];
     copyStr(inst->appName, sizeof(inst->appName), ci->applicationInfo.applicationName);
     hxp::loadConfig(&inst->cfg);
     gInstance = inst;
@@ -994,6 +1059,11 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemSimultaneousHandsAndControllersPropertiesMETA*>(n)->supportsSimultaneousHandsAndControllers = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_KEYBOARD_TRACKING_PROPERTIES_FB)
             reinterpret_cast<XrSystemKeyboardTrackingPropertiesFB*>(n)->supportsKeyboardTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_ENVIRONMENT_DEPTH_PROPERTIES_META) {
+            reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsEnvironmentDepth = XR_TRUE;
+            reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsHandRemoval = XR_TRUE;  // the room's depth has no hands in it
+        }
+        if (n->type == XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemEyeTrackingPropertiesFB*>(n)->supportsEyeTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_COLOR_LUT_PROPERTIES_META)
             reinterpret_cast<XrSystemPassthroughColorLutPropertiesMETA*>(n)->maxColorLutResolution = 64;
         if (n->type == XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemBodyTrackingPropertiesFB*>(n)->supportsBodyTracking = XR_TRUE;
@@ -1156,6 +1226,12 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) {
         while (void* l = takeChild(c, MAGIC_LUT)) { ColorLut* lut = static_cast<ColorLut*>(l); free(lut->rgba); lut->magic = 0; free(lut); }
         static_cast<Passthrough*>(c)->magic = 0;
+        free(c);
+    }
+    while (void* c = takeChild(s, MAGIC_EYE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_DEPTH)) {
+        while (void* sc = takeChild(c, MAGIC_DEPTH_SC)) { destroyDepthSwapchain(sc); }
+        static_cast<uint32_t*>(c)[0] = 0;
         free(c);
     }
     while (void* c = takeChild(s, MAGIC_BODY)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
@@ -1852,13 +1928,17 @@ XRAPI_ATTR XrResult XRAPI_CALL AttachSessionActionSets(XrSession h, const XrSess
         }
         if (s->profile != XR_NULL_PATH) break;
     }
-    s->handProfile = XR_NULL_PATH;
-    XrPath hp;
-    if (stringToPath(inst, kHandProfile, &hp) == XR_SUCCESS)
+    s->handProfile = s->microProfile = XR_NULL_PATH;
+    const char* const alongside[2] = {kHandProfile, kMicroProfile};
+    for (int k = 0; k < 2; k++) {
+        XrPath hp;
+        if (stringToPath(inst, alongside[k], &hp) != XR_SUCCESS) continue;
         for (int i = 0; i < inst->bindingCount; i++) {
             const auto& bd = inst->bindings[i];
-            if (bd.profile == hp && isLive(bd.action, MAGIC_ACTION) && actionAttachedTo(s, static_cast<Action*>(bd.action))) s->handProfile = hp;
+            if (bd.profile == hp && isLive(bd.action, MAGIC_ACTION) && actionAttachedTo(s, static_cast<Action*>(bd.action)))
+                (k == 0 ? s->handProfile : s->microProfile) = hp;
         }
+    }
     XrEventDataInteractionProfileChanged ev{XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED};
     ev.session = h;
     pushEvent(s->instance, &ev, sizeof(ev));
@@ -1949,8 +2029,15 @@ XRAPI_ATTR XrResult XRAPI_CALL SyncActions(XrSession h, const XrActionsSyncInfo*
     bool focused = s->state == XR_SESSION_STATE_FOCUSED;
     if (focused) hxp::readInput(&s->input);
     // hands for hand_interaction_ext (asking for them keeps HyperMagic's camera on)
-    if (focused && s->handProfile != XR_NULL_PATH) s->handsOk = hxp::readHands(&s->hands, true);
+    if (focused && (s->handProfile != XR_NULL_PATH || s->microProfile != XR_NULL_PATH)) s->handsOk = hxp::readHands(&s->hands, true);
     else s->handsOk = false;
+    int64_t handNow = hxp::nowNs();
+    for (int h = 0; h < 2; h++) {
+        s->micro[h].pulses = 0;
+        bool fresh = s->handsOk && s->hands.tracked[h] && handNow - s->hands.timeNs[h] <= HAND_STALE_NS;
+        if (s->microProfile != XR_NULL_PATH && fresh) s->micro[h].pulses = detectMicro(s->micro[h], s->hands, h, handNow);
+        else if (!fresh) s->micro[h].touching = false;
+    }
     XrTime now = hxp::nowNs();
     // every attached action is updated; those outside the active sets (or unfocused) go inactive
     for (uint32_t k = 0; k < s->attachedCount; k++) {
@@ -3533,6 +3620,193 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateBodyJointsBD(XrBodyTrackerBD h, const XrBod
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ environment depth (XR_META_environment_depth)
+/** The room's depth, drawn for both eyes on every acquire (the walls, floor and ceiling HyperMagic knows). */
+struct DepthProvider { uint32_t magic; Session* session; bool running; struct DepthSwapchain* swapchain; uint32_t next; };
+struct DepthSwapchain { uint32_t magic; DepthProvider* provider; HxDepthGfx* gfx; uint32_t textures[3]; };
+constexpr uint32_t DEPTH_SIZE = 320, DEPTH_IMAGES = 3;
+constexpr float DEPTH_NEAR = 0.1f;
+
+void destroyDepthSwapchain(void* p) {
+    DepthSwapchain* d = static_cast<DepthSwapchain*>(p);
+    hxp::gfxDestroyDepth(d->gfx);
+    d->magic = 0;
+    free(d);
+}
+
+DepthProvider* asDepth(XrEnvironmentDepthProviderMETA h) { return asObj<DepthProvider>(reinterpret_cast<uint64_t>(h), MAGIC_DEPTH); }
+DepthSwapchain* asDepthSc(XrEnvironmentDepthSwapchainMETA h) { return asObj<DepthSwapchain>(reinterpret_cast<uint64_t>(h), MAGIC_DEPTH_SC); }
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateEnvironmentDepthProviderMETA(XrSession h, const XrEnvironmentDepthProviderCreateInfoMETA* ci, XrEnvironmentDepthProviderMETA* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_ENVIRONMENT_DEPTH_PROVIDER_CREATE_INFO_META || !out) return XR_ERROR_VALIDATION_FAILURE;
+    DepthProvider* d = alloc<DepthProvider>(MAGIC_DEPTH, s);
+    if (!d) return XR_ERROR_OUT_OF_MEMORY;
+    d->session = s;
+    *out = reinterpret_cast<XrEnvironmentDepthProviderMETA>(d);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyEnvironmentDepthProviderMETA(XrEnvironmentDepthProviderMETA h) {
+    DepthProvider* d = asDepth(h);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    while (void* sc = takeChild(d, MAGIC_DEPTH_SC)) destroyDepthSwapchain(sc);
+    release(d);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL StartEnvironmentDepthProviderMETA(XrEnvironmentDepthProviderMETA h) {
+    DepthProvider* d = asDepth(h);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    if (d->running) return XR_ERROR_CALL_ORDER_INVALID;
+    ensureScene(d->session);
+    d->running = true;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL StopEnvironmentDepthProviderMETA(XrEnvironmentDepthProviderMETA h) {
+    DepthProvider* d = asDepth(h);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    if (!d->running) return XR_ERROR_CALL_ORDER_INVALID;
+    d->running = false;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateEnvironmentDepthSwapchainMETA(XrEnvironmentDepthProviderMETA h, const XrEnvironmentDepthSwapchainCreateInfoMETA* ci, XrEnvironmentDepthSwapchainMETA* out) {
+    DepthProvider* d = asDepth(h);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_CREATE_INFO_META || !out) return XR_ERROR_VALIDATION_FAILURE;
+    if (d->swapchain) return XR_ERROR_LIMIT_REACHED;  // one per provider
+    DepthSwapchain* sc = alloc<DepthSwapchain>(MAGIC_DEPTH_SC, d);
+    if (!sc) return XR_ERROR_OUT_OF_MEMORY;
+    sc->provider = d;
+    XrResult r = d->session->gfx || d->session->headless ? hxp::gfxCreateDepth(d->session->gfx, DEPTH_SIZE, DEPTH_IMAGES, &sc->gfx, sc->textures)
+                                                         : XR_ERROR_GRAPHICS_DEVICE_INVALID;
+    if (r != XR_SUCCESS) { release(sc); return r; }
+    d->swapchain = sc;
+    *out = reinterpret_cast<XrEnvironmentDepthSwapchainMETA>(sc);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyEnvironmentDepthSwapchainMETA(XrEnvironmentDepthSwapchainMETA h) {
+    DepthSwapchain* sc = asDepthSc(h);
+    if (!sc) return XR_ERROR_HANDLE_INVALID;
+    sc->provider->swapchain = nullptr;
+    unregisterHandle(sc);
+    destroyDepthSwapchain(sc);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateEnvironmentDepthSwapchainImagesMETA(XrEnvironmentDepthSwapchainMETA h, uint32_t capacity, uint32_t* count, XrSwapchainImageBaseHeader* images) {
+    DepthSwapchain* sc = asDepthSc(h);
+    if (!sc) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = DEPTH_IMAGES;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < DEPTH_IMAGES) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!images) return XR_ERROR_VALIDATION_FAILURE;
+    // XrSwapchainImageOpenGLESKHR: type, next, image
+    struct GlesImage { XrStructureType type; void* next; uint32_t image; };
+    auto* out = reinterpret_cast<GlesImage*>(images);
+    for (uint32_t i = 0; i < DEPTH_IMAGES; i++) {
+        if (out[i].type != XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR) return XR_ERROR_VALIDATION_FAILURE;
+        out[i].image = sc->textures[i];
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetEnvironmentDepthSwapchainStateMETA(XrEnvironmentDepthSwapchainMETA h, XrEnvironmentDepthSwapchainStateMETA* state) {
+    if (!asDepthSc(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!state || state->type != XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META) return XR_ERROR_VALIDATION_FAILURE;
+    state->width = DEPTH_SIZE;
+    state->height = DEPTH_SIZE;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL AcquireEnvironmentDepthImageMETA(XrEnvironmentDepthProviderMETA h, const XrEnvironmentDepthImageAcquireInfoMETA* info, XrEnvironmentDepthImageMETA* image) {
+    DepthProvider* d = asDepth(h);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_ACQUIRE_INFO_META || !image || image->type != XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_META)
+        return XR_ERROR_VALIDATION_FAILURE;
+    Space* base = asSpace(info->space);
+    if (!base) return XR_ERROR_HANDLE_INVALID;
+    if (!d->running || !d->swapchain) return XR_ERROR_CALL_ORDER_INVALID;
+    Session* s = d->session;
+    XrTime t = info->displayTime > 0 ? info->displayTime : hxp::nowNs();
+    XrPosef head, basePose; bool bt;
+    if (!hxp::headPose(t, s->instance->cfg, &head) || !spaceInStage(base, t, &basePose, &bt)) return XR_ENVIRONMENT_DEPTH_NOT_AVAILABLE_META;
+    // a wide square view per eye (Meta's depth views are wider than the display's)
+    const float half = 1.0f;  // 45 degrees each way
+    XrPosef eyes[2];
+    XrFovf fov[2];
+    for (int e = 0; e < 2; e++) {
+        eyes[e] = hx::compose(head, XrPosef{{0, 0, 0, 1}, {(e == 0 ? -0.5f : 0.5f) * s->instance->cfg.ipdM, 0, 0}});
+        fov[e] = {-atanf(half), atanf(half), -atanf(half), atanf(half)};
+    }
+    uint32_t index = d->next;
+    d->next = (d->next + 1) % DEPTH_IMAGES;
+    static float tris[3 * 3 * (4 * hxscene::MAX_POLY)];
+    int n = hxscene::roomTriangles(s->room, tris, 4 * hxscene::MAX_POLY * 3);
+    hxp::gfxRenderDepth(s->gfx, d->swapchain->gfx, index, eyes, fov, DEPTH_NEAR, tris, n);
+    image->swapchainIndex = index;
+    image->nearZ = DEPTH_NEAR;
+    image->farZ = INFINITY;  // depth = 1 - near / z
+    XrPosef inv = hx::inverse(basePose);
+    for (int e = 0; e < 2; e++) {
+        image->views[e].pose = hx::compose(inv, eyes[e]);
+        image->views[e].fov = fov[e];
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SetEnvironmentDepthHandRemovalMETA(XrEnvironmentDepthProviderMETA h, const XrEnvironmentDepthHandRemovalSetInfoMETA* info) {
+    if (!asDepth(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_ENVIRONMENT_DEPTH_HAND_REMOVAL_SET_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;  // the room's depth never has hands in it
+}
+
+// ------------------------------------------------------------------ gaze (XR_FB_eye_tracking_social)
+/** No camera sees the eyes in a viewer: each eye looks where the head looks (low confidence). */
+struct EyeTracker { uint32_t magic; Session* session; };
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateEyeTrackerFB(XrSession h, const XrEyeTrackerCreateInfoFB* ci, XrEyeTrackerFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_EYE_TRACKER_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    EyeTracker* e = alloc<EyeTracker>(MAGIC_EYE, s);
+    if (!e) return XR_ERROR_OUT_OF_MEMORY;
+    e->session = s;
+    *out = reinterpret_cast<XrEyeTrackerFB>(e);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyEyeTrackerFB(XrEyeTrackerFB h) {
+    EyeTracker* e = asObj<EyeTracker>(reinterpret_cast<uint64_t>(h), MAGIC_EYE);
+    if (!e) return XR_ERROR_HANDLE_INVALID;
+    release(e);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetEyeGazesFB(XrEyeTrackerFB h, const XrEyeGazesInfoFB* info, XrEyeGazesFB* gazes) {
+    EyeTracker* e = asObj<EyeTracker>(reinterpret_cast<uint64_t>(h), MAGIC_EYE);
+    if (!e) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_EYE_GAZES_INFO_FB || !gazes || gazes->type != XR_TYPE_EYE_GAZES_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (info->time <= 0) return XR_ERROR_TIME_INVALID;
+    Space* base = asSpace(info->baseSpace);
+    if (!base) return XR_ERROR_HANDLE_INVALID;
+    gazes->time = info->time;
+    XrPosef head, basePose; bool bt;
+    bool ok = hxp::headPose(info->time, e->session->instance->cfg, &head) && spaceInStage(base, info->time, &basePose, &bt);
+    for (int i = 0; i < XR_EYE_POSITION_COUNT_FB; i++) {
+        gazes->gaze[i].isValid = ok ? XR_TRUE : XR_FALSE;
+        gazes->gaze[i].gazeConfidence = ok ? 0.2f : 0;
+        gazes->gaze[i].gazePose = ok ? hx::compose(hx::inverse(basePose),
+            hx::compose(head, XrPosef{{0, 0, 0, 1}, {(i == 0 ? -0.5f : 0.5f) * e->session->instance->cfg.ipdM, 0, 0}})) : hx::identity();
+    }
+    return XR_SUCCESS;
+}
+
 // ------------------------------------------------------------------ smaller Meta extensions
 /** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
 const char* const kPerfCounters[] = {
@@ -4026,6 +4300,19 @@ const Entry kEntries[] = {
     HX_EXT(SaveSpaceListFB, XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME),
     HX_EXT(ResumeSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
     HX_EXT(PauseSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
+    HX_EXT(CreateEnvironmentDepthProviderMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(DestroyEnvironmentDepthProviderMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(StartEnvironmentDepthProviderMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(StopEnvironmentDepthProviderMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(CreateEnvironmentDepthSwapchainMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(DestroyEnvironmentDepthSwapchainMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(EnumerateEnvironmentDepthSwapchainImagesMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(GetEnvironmentDepthSwapchainStateMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(AcquireEnvironmentDepthImageMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(SetEnvironmentDepthHandRemovalMETA, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME),
+    HX_EXT(CreateEyeTrackerFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
+    HX_EXT(DestroyEyeTrackerFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
+    HX_EXT(GetEyeGazesFB, XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME),
     HX_EXT(CreateBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
     HX_EXT(DestroyBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
     HX_EXT(LocateBodyJointsFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
@@ -4087,7 +4374,7 @@ const Entry kEntries[] = {
 
 /** Whether the app enabled the extension [name] (functions of extensions it did not enable are unsupported). */
 bool extEnabled(const Instance* inst, const char* name) {
-    for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(kExtensions[k].name, name) == 0) return (inst->extMeta >> k) & 1ull;
+    for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(kExtensions[k].name, name) == 0) return (inst->extMeta[k >> 6] >> (k & 63)) & 1ull;
     return false;
 }
 

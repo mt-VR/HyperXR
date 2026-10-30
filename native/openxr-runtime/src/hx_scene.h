@@ -101,6 +101,31 @@ inline int build(const Room& r, Plane* planes, XrVector2f* floorOutline, XrVecto
     return 2 + r.count;
 }
 
+/**
+ * The room as a triangle list in stage space (floor, ceiling, walls; for depth, so the facing does
+ * not matter): writes up to [capacity] vertices (xyz each) and returns how many it wrote.
+ */
+inline int roomTriangles(const Room& r, float* out, int capacity) {
+    int v = 0;
+    auto put = [&](float x, float y, float z) { if (v < capacity) { out[v * 3] = x; out[v * 3 + 1] = y; out[v * 3 + 2] = z; v++; } };
+    float cx = 0, cz = 0;
+    for (int i = 0; i < r.count; i++) { cx += r.x[i]; cz += r.z[i]; }
+    cx /= r.count; cz /= r.count;
+    for (int level = 0; level < 2; level++) {
+        float y = level == 0 ? 0 : r.height;
+        for (int i = 0; i < r.count; i++) {
+            int j = (i + 1) % r.count;
+            put(cx, y, cz); put(r.x[i], y, r.z[i]); put(r.x[j], y, r.z[j]);
+        }
+    }
+    for (int i = 0; i < r.count; i++) {
+        int j = (i + 1) % r.count;
+        put(r.x[i], 0, r.z[i]); put(r.x[j], 0, r.z[j]); put(r.x[j], r.height, r.z[j]);
+        put(r.x[i], 0, r.z[i]); put(r.x[j], r.height, r.z[j]); put(r.x[i], r.height, r.z[i]);
+    }
+    return v;
+}
+
 /** A stable UUID for a scene entity: the same room gives the same UUIDs from run to run. */
 inline XrUuidEXT sceneUuid(const Room& r, int kind, int index) {
     uint64_t h1 = 0xcbf29ce484222325ull, h2 = 0x84222325cbf29ce4ull;

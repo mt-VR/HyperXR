@@ -86,6 +86,8 @@ object QuestApk {
         "XR_FB_body_tracking", "XR_META_body_tracking_full_body", "XR_BD_body_tracking",
         // the room as a mesh, passthrough colour cubes, keyboard-hands passthrough layers
         "XR_META_spatial_entity_mesh", "XR_META_passthrough_color_lut", "XR_FB_passthrough_keyboard_hands",
+        // room depth for occlusion, gaze from the head, thumb microgestures
+        "XR_META_environment_depth", "XR_FB_eye_tracking_social", "XR_META_hand_tracking_microgestures",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */

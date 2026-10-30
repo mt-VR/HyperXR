@@ -911,6 +911,115 @@ void gfxReleaseImage(HxSwapchainGfx* sc, uint32_t index) {
     glFlush();
 }
 
+// ------------------------------------------------------------------ environment depth
+}  // namespace hxp
+struct HxDepthGfx { HxSessionGfx* g; uint32_t count, size; GLuint tex[3]; GLuint fbo; GLuint prog; GLuint vbo; };
+namespace hxp {
+
+const char* kDepthVs = R"(#version 300 es
+layout(location = 0) in vec3 aPos;
+uniform mat4 uMvp;
+void main() { gl_Position = uMvp * vec4(aPos, 1.0); })";
+const char* kDepthFs = R"(#version 300 es
+precision mediump float;
+void main() {})";
+
+XrResult gfxCreateDepth(HxSessionGfx* g, uint32_t size, uint32_t count, HxDepthGfx** out, uint32_t* textures) {
+    if (!g || count > 3) return XR_ERROR_RUNTIME_FAILURE;
+    HxDepthGfx* d = static_cast<HxDepthGfx*>(calloc(1, sizeof(HxDepthGfx)));
+    if (!d) return XR_ERROR_OUT_OF_MEMORY;
+    d->g = g; d->count = count; d->size = size;
+    Saved s = saveCurrent();
+    eglMakeCurrent(g->dpy, g->pbuffer, g->pbuffer, g->ctx);
+    glGenTextures(static_cast<GLsizei>(count), d->tex);
+    for (uint32_t i = 0; i < count; i++) {
+        glBindTexture(GL_TEXTURE_2D_ARRAY, d->tex[i]);
+        glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_DEPTH_COMPONENT16, size, size, 2);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        textures[i] = d->tex[i];
+    }
+    glGenFramebuffers(1, &d->fbo);
+    glGenBuffers(1, &d->vbo);
+    GLuint vs = compile(GL_VERTEX_SHADER, &kDepthVs, 1), fs = compile(GL_FRAGMENT_SHADER, &kDepthFs, 1);
+    d->prog = glCreateProgram();
+    glAttachShader(d->prog, vs); glAttachShader(d->prog, fs);
+    glLinkProgram(d->prog);
+    glDeleteShader(vs); glDeleteShader(fs);
+    GLenum err = glGetError();
+    glFlush();
+    restore(s, g->dpy);
+    if (err != GL_NO_ERROR) { LOGW("environment depth textures failed: 0x%x", err); gfxDestroyDepth(d); return XR_ERROR_RUNTIME_FAILURE; }
+    *out = d;
+    return XR_SUCCESS;
+}
+
+void gfxDestroyDepth(HxDepthGfx* d) {
+    if (!d) return;
+    HxSessionGfx* g = d->g;
+    Saved s = saveCurrent();
+    eglMakeCurrent(g->dpy, g->pbuffer, g->pbuffer, g->ctx);
+    glDeleteTextures(static_cast<GLsizei>(d->count), d->tex);
+    glDeleteFramebuffers(1, &d->fbo);
+    glDeleteBuffers(1, &d->vbo);
+    glDeleteProgram(d->prog);
+    restore(s, g->dpy);
+    free(d);
+}
+
+/** Column-major projection with an infinitely far plane (depth = 1 - near / z), and a view matrix. */
+void depthMvp(const XrPosef& eye, const XrFovf& fov, float n, float* m) {
+    float l = tanf(fov.angleLeft) * n, r = tanf(fov.angleRight) * n, b = tanf(fov.angleDown) * n, t = tanf(fov.angleUp) * n;
+    float p[16] = {2 * n / (r - l), 0, 0, 0,  0, 2 * n / (t - b), 0, 0,  (r + l) / (r - l), (t + b) / (t - b), -1, -1,  0, 0, -2 * n, 0};
+    XrPosef inv = hx::inverse(eye);
+    float rot[9];
+    mat3FromQuat(inv.orientation, rot);
+    float v[16] = {rot[0], rot[1], rot[2], 0, rot[3], rot[4], rot[5], 0, rot[6], rot[7], rot[8], 0, inv.position.x, inv.position.y, inv.position.z, 1};
+    for (int c = 0; c < 4; c++)
+        for (int rr = 0; rr < 4; rr++) {
+            float sum = 0;
+            for (int k = 0; k < 4; k++) sum += p[k * 4 + rr] * v[c * 4 + k];
+            m[c * 4 + rr] = sum;
+        }
+}
+
+void gfxRenderDepth(HxSessionGfx* g, HxDepthGfx* d, uint32_t index, const XrPosef eyes[2], const XrFovf fov[2], float nearZ,
+                    const float* tris, int vertexCount) {
+    if (!d || index >= d->count) return;
+    Saved s = saveCurrent();
+    eglMakeCurrent(g->dpy, g->pbuffer, g->pbuffer, g->ctx);
+    glBindFramebuffer(GL_FRAMEBUFFER, d->fbo);
+    glBindBuffer(GL_ARRAY_BUFFER, d->vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertexCount * 3 * sizeof(float), tris, GL_STREAM_DRAW);
+    glUseProgram(d->prog);
+    glBindVertexArray(0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glViewport(0, 0, static_cast<GLsizei>(d->size), static_cast<GLsizei>(d->size));
+    float m[16];
+    for (int eye = 0; eye < 2; eye++) {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, d->tex[index], 0, eye);
+        glClearDepthf(1.0f);  // nothing there: infinitely far
+        glClear(GL_DEPTH_BUFFER_BIT);
+        depthMvp(eyes[eye], fov[eye], nearZ, m);
+        glUniformMatrix4fv(glGetUniformLocation(d->prog, "uMvp"), 1, GL_FALSE, m);
+        glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    }
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDisable(GL_DEPTH_TEST);
+    glDisableVertexAttribArray(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glFinish();  // the app samples the image right after acquiring it, from its own context
+    restore(s, g->dpy);
+}
+
 /** XR_FB_composition_layer_alpha_blend: turns blending on with the layer's factors; false if it has none. */
 bool applyCustomBlend(const int f[4]) {
     if (f[0] < 0) return false;

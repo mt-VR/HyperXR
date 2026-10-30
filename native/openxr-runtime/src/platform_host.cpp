@@ -101,6 +101,13 @@ XrResult gfxCreateSwapchain(HxSessionGfx*, const XrSwapchainCreateInfo*, HxSwapc
 void gfxDestroySwapchain(HxSwapchainGfx*) {}
 XrResult gfxEnumerateImages(HxSwapchainGfx*, uint32_t, uint32_t*, XrSwapchainImageBaseHeader*) { return XR_ERROR_FUNCTION_UNSUPPORTED; }
 void gfxReleaseImage(HxSwapchainGfx*, uint32_t) {}
+XrResult gfxCreateDepth(HxSessionGfx*, uint32_t, uint32_t count, HxDepthGfx** out, uint32_t* textures) {
+    for (uint32_t i = 0; i < count; i++) textures[i] = 100 + i;  // names only: nothing is drawn on the host
+    *out = nullptr;
+    return XR_SUCCESS;
+}
+void gfxDestroyDepth(HxDepthGfx*) {}
+void gfxRenderDepth(HxSessionGfx*, HxDepthGfx*, uint32_t, const XrPosef*, const XrFovf*, float, const float*, int) {}
 void gfxCompose(HxSessionGfx*, const HxConfig&, const XrPosef&, const HxComposeView*, uint32_t, const HxComposeQuad*, uint32_t,
                 const HxPassthroughState&) {}
 }  // namespace hxp

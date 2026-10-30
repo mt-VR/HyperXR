@@ -113,6 +113,7 @@ struct HxSavedAnchor {
 };
 
 struct HxSwapchainGfx;  // platform swapchain data
+struct HxDepthGfx;      // platform environment depth images (XR_META_environment_depth)
 struct HxSessionGfx;    // platform compositor data
 
 /** One projection view handed to the compositor. */
@@ -201,6 +202,15 @@ void gfxDestroySwapchain(HxSwapchainGfx* s);
 XrResult gfxEnumerateImages(HxSwapchainGfx* s, uint32_t capacity, uint32_t* count, XrSwapchainImageBaseHeader* images);
 /** Called when the app releases an image (rendering into it is complete on the app's context). */
 void gfxReleaseImage(HxSwapchainGfx* s, uint32_t index);
+/**
+ * Environment depth: [count] depth textures of two layers (one per eye), [size] x [size]; their GL
+ * names go to [textures]. The host build makes no textures (headless sessions).
+ */
+XrResult gfxCreateDepth(HxSessionGfx* g, uint32_t size, uint32_t count, HxDepthGfx** out, uint32_t* textures);
+void gfxDestroyDepth(HxDepthGfx* d);
+/** Renders the depth of [tris] (xyz triangles, stage space) seen from two eyes into image [index]. */
+void gfxRenderDepth(HxSessionGfx* g, HxDepthGfx* d, uint32_t index, const XrPosef eyes[2], const XrFovf fov[2], float nearZ,
+                    const float* tris, int vertexCount);
 /** Composites one frame (projection views + quads) to the viewer, predicted head pose [head]. */
 void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const HxComposeView* views, uint32_t viewCount,
                 const HxComposeQuad* quads, uint32_t quadCount, const HxPassthroughState& passthrough);
