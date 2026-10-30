@@ -1903,6 +1903,7 @@
 "há {0} hora": "{0} hour ago",
 "há {0} min": "{0} min ago",
 "imagem da câmera melhorada pela NPU": "camera image enhanced by the NPU",
+"imagem da câmera para o hand tracking (NEON, filtro box)": "camera image for hand tracking (NEON, box filter)",
 "inclinação e passos pelo acelerômetro, fotos 3D": "leaning and steps from the accelerometer, 3D photos",
 "indisponível": "unavailable",
 "instalado": "installed",

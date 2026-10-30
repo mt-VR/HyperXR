@@ -11,6 +11,7 @@ licenças) e no README.
 | # | Projeto | Onde |
 |---|---|---|
 | 81 | Resonance Audio | som 3D (HRTF) de todos os sons posicionados, `app/src/main/cpp/spatial_audio.cpp` |
+| 86 | libyuv | câmera -> hand tracking com NEON e filtro box (0,21 ms contra 0,94 ms por quadro no teste), `yuv_convert.cpp` |
 | 06/07 | OpenXR-SDK / SDK-Source | loader e headers do runtime OpenXR |
 | 15 | Godot | o Open Saber da Loja é compilado com ele |
 | 39/40/41 | MediaPipe, TensorFlow Lite | mãos, IA no celular |
@@ -23,7 +24,6 @@ licenças) e no README.
 | # | Projeto | Para quê |
 |---|---|---|
 | 46 | AprilTag | Joy-Con e controles com marcadores impressos: posição exata, sem depender de cor |
-| 86 | libyuv | conversão da câmera mais rápida para o hand tracking |
 | 30/31 | WebXR Polyfill e Input Profiles | jogos WebXR no navegador em estéreo, com controles certos |
 | 09 | OpenXR-CTS | testes oficiais de conformidade do runtime OpenXR do HyperMagic |
 | 11 | Cardboard SDK | perfis de lente de qualquer óculos pelo QR code, distorção oficial |

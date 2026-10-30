@@ -20,6 +20,7 @@ object Credits {
         Entry("RTMDet-nano e RTMPose-m", "OpenMMLab", "Apache-2.0", "rastreamento das mãos"),
         Entry("Real-ESRGAN general x4v3", "Xintao Wang et al. (export Qualcomm AI Hub)", "BSD-3-Clause", "imagem da câmera melhorada pela NPU"),
         Entry("Resonance Audio", "Google", "Apache-2.0", "som 3D (HRTF) em tudo o que toca no VR"),
+        Entry("libyuv", "Google / Chromium", "BSD-3-Clause", "imagem da câmera para o hand tracking (NEON, filtro box)"),
         Entry("Eigen, PFFFT, base HRTF SADIE", "Eigen, Julien Pommier, Univ. de York", "MPL-2.0, BSD, Apache-2.0", "partes do Resonance Audio"),
         Entry("Depth Anything V2 Small", "Lihe Yang et al. (export Qualcomm AI Hub)", "Apache-2.0", "profundidade por IA, fotos 3D"),
         Entry("GorillaLocomotion", "Another Axiom", "MIT", "movimento dos jogos de gorila"),

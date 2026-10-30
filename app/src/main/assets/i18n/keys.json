@@ -2199,6 +2199,7 @@
 "ic_app_{0}_fg",
 "if(!document.execCommand('insertText',false,t)){if('value' in e){e.value+=t;e.dispatchEvent(new Event('input',{bubbles:true}));}}})(",
 "imagem da câmera melhorada pela NPU",
+"imagem da câmera para o hand tracking (NEON, filtro box)",
 "inclinação e passos pelo acelerômetro, fotos 3D",
 "indisponível",
 "instalado",

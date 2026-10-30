@@ -1,10 +1,58 @@
 // YUV_420_888 -> RGBA bitmap for hand tracking, written straight into the Bitmap's pixels.
-// Same integer BT.601 math as the Kotlin fallback (YuvToBitmap), with nearest-neighbour
-// downscaling by [step] and optional 180 degree rotation; ~10x faster than per-byte ByteBuffer
-// access from Kotlin, so the camera thread hands frames to MediaPipe sooner.
+// libyuv (BSD-3-Clause, built from source by tools/build_libyuv.sh) does the work with NEON: the
+// planes are gathered into I420, scaled down by [step] with a box filter (every source pixel counts,
+// so the hand model sees no aliasing, unlike nearest-neighbour), turned 180 degrees when asked and
+// converted with BT.601, the same colours as the Kotlin fallback (YuvToBitmap). A Y plane with a
+// pixel stride other than 1 (never seen on a real camera) takes the plain loop below.
 #include <android/bitmap.h>
 #include <jni.h>
 #include <stdint.h>
+
+#include <vector>
+
+#include "libyuv/convert.h"
+#include "libyuv/convert_argb.h"
+#include "libyuv/rotate.h"
+#include "libyuv/scale.h"
+
+namespace {
+struct I420 {
+    std::vector<uint8_t> data;
+    int w = 0, h = 0;
+    uint8_t* y() { return data.data(); }
+    uint8_t* u() { return data.data() + w * h; }
+    uint8_t* v() { return data.data() + w * h + ((w + 1) / 2) * ((h + 1) / 2); }
+    int uvStride() const { return (w + 1) / 2; }
+    void size(int width, int height) {
+        w = width; h = height;
+        data.resize(static_cast<size_t>(w) * h + 2 * static_cast<size_t>((w + 1) / 2) * ((h + 1) / 2));
+    }
+};
+// the camera thread converts one frame at a time: its buffers are kept between frames
+thread_local I420 tFull, tSmall, tTurned;
+
+bool convertLibyuv(const uint8_t* y, const uint8_t* u, const uint8_t* v, int yRow, int uvRow, int uvPix, int step, bool rotate180,
+                   uint8_t* dst, int dstStride, int ow, int oh) {
+    const int sw = ow * step, sh = oh * step;
+    tFull.size(sw, sh);
+    if (libyuv::Android420ToI420(y, yRow, u, uvRow, v, uvRow, uvPix, tFull.y(), sw, tFull.u(), tFull.uvStride(), tFull.v(), tFull.uvStride(), sw, sh) != 0) return false;
+    I420* cur = &tFull;
+    if (step > 1) {
+        tSmall.size(ow, oh);
+        if (libyuv::I420Scale(tFull.y(), sw, tFull.u(), tFull.uvStride(), tFull.v(), tFull.uvStride(), sw, sh,
+                              tSmall.y(), ow, tSmall.u(), tSmall.uvStride(), tSmall.v(), tSmall.uvStride(), ow, oh, libyuv::kFilterBox) != 0) return false;
+        cur = &tSmall;
+    }
+    if (rotate180) {
+        tTurned.size(ow, oh);
+        if (libyuv::I420Rotate(cur->y(), ow, cur->u(), cur->uvStride(), cur->v(), cur->uvStride(),
+                               tTurned.y(), ow, tTurned.u(), tTurned.uvStride(), tTurned.v(), tTurned.uvStride(), ow, oh, libyuv::kRotate180) != 0) return false;
+        cur = &tTurned;
+    }
+    // libyuv's "ABGR" is R, G, B, A in memory: Android's RGBA_8888
+    return libyuv::I420ToABGR(cur->y(), ow, cur->u(), cur->uvStride(), cur->v(), cur->uvStride(), dst, dstStride, ow, oh) == 0;
+}
+}  // namespace
 
 static inline uint8_t clamp8(int v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); }
 
@@ -25,6 +73,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_hyperxr_handtracking_YuvNative_co
     if (lastY >= yCap || lastUv >= uCap || lastUv >= vCap) return JNI_FALSE;
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS || !pixels) return JNI_FALSE;
+    if (yPix == 1 && (uvPix == 1 || uvPix == 2) &&
+        convertLibyuv(y, u, v, yRow, uvRow, uvPix, step, rotate180 == JNI_TRUE, static_cast<uint8_t*>(pixels), static_cast<int>(info.stride), ow, oh)) {
+        AndroidBitmap_unlockPixels(env, bitmap);
+        return JNI_TRUE;
+    }
     for (int oy = 0; oy < oh; oy++) {
         const int sy = oy * step;
         const uint8_t* yr = y + static_cast<long>(sy) * yRow;

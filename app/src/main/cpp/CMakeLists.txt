@@ -38,10 +38,15 @@ target_link_options(hyperxr_openxr PRIVATE -nostdlib++ -Wl,--no-undefined -Wl,-z
 target_link_libraries(hyperxr_openxr EGL GLESv3 android log dl m)
 
 # Camera frame conversion for hand tracking (hot path: optimised even in debug builds).
+# libyuv (BSD-3-Clause) built from source by tools/build_libyuv.sh: NEON YUV conversion and scaling.
+set(LIBYUV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/libyuv)
+add_library(libyuv STATIC IMPORTED)
+set_target_properties(libyuv PROPERTIES IMPORTED_LOCATION ${LIBYUV_DIR}/${ANDROID_ABI}/libyuv.a)
 add_library(hyperxr_image SHARED yuv_convert.cpp)
+target_include_directories(hyperxr_image PRIVATE ${LIBYUV_DIR}/include)
 target_compile_options(hyperxr_image PRIVATE -O3 -Wall -Wextra -fno-exceptions -fno-rtti)
-target_link_options(hyperxr_image PRIVATE -Wl,-z,max-page-size=16384)
-target_link_libraries(hyperxr_image jnigraphics)
+target_link_options(hyperxr_image PRIVATE -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
+target_link_libraries(hyperxr_image libyuv jnigraphics)
 
 # libretro frontend for the embedded emulator cores (jniLibs/libcore_*.so, loaded with dlopen).
 add_library(hyperxr_retro SHARED retro_frontend.cpp)

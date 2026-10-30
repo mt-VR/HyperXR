@@ -1903,6 +1903,7 @@
 "há {0} hora": "{0} ч назад",
 "há {0} min": "{0} мин назад",
 "imagem da câmera melhorada pela NPU": "изображение камеры, улучшенное NPU",
+"imagem da câmera para o hand tracking (NEON, filtro box)": "изображение камеры для отслеживания рук (NEON, box-фильтр)",
 "inclinação e passos pelo acelerômetro, fotos 3D": "наклоны и шаги по акселерометру, 3D-фото",
 "indisponível": "недоступно",
 "instalado": "установлено",

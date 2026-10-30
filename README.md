@@ -511,6 +511,7 @@ HyperMagic is free software: you can redistribute it and/or modify it under the 
 - GeckoView (Mozilla): MPL-2.0 (Maven `geckoview-arm64-v8a` and `geckoview-armeabi-v7a`)
 - Shizuku API: Apache-2.0
 - Resonance Audio (Google), spatial audio, built from source by `tools/build_resonance_audio.sh`: Apache-2.0, with Eigen (MPL-2.0 parts only), PFFFT (BSD-like) and the SADIE HRTF set (Apache-2.0); licences and commits in `native/resonance-audio`
+- libyuv (Google/Chromium), camera frames for hand tracking, built from source by `tools/build_libyuv.sh`: BSD-3-Clause (`native/libyuv`)
 - Real-ESRGAN general x4v3 (Xintao Wang et al.), passthrough enhancement: BSD-3-Clause; int8 TFLite export by Qualcomm AI Hub (`app/src/main/assets/models/README.md`)
 - Depth Anything V2 Small (AI depth, 3D photos; downloaded once by the app): Apache-2.0, Qualcomm AI Hub release
 - Open Saber (leandrodreamer, port of NeoSpark314's Beep Saber), built from source for the HyperMagic runtime: MIT (`ports/opensaber`)
