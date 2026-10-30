@@ -45,7 +45,7 @@ class QuestApkTest {
     @Test fun khronosLoaderGlesGameMayRun() {
         val r = QuestApk.inspect(apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
-            "lib/arm64-v8a/libunity.so" to bin("XR_FB_passthrough", "XR_FB_display_refresh_rate", "XR_EXT_hand_tracking"),
+            "lib/arm64-v8a/libunity.so" to bin("XR_FB_passthrough", "XR_FB_display_refresh_rate", "XR_EXT_hand_tracking", "XR_FB_spatial_entity"),
             "lib/arm64-v8a/libil2cpp.so" to ByteArray(10),
         )))
         assertEquals("com.example.questgame", r.packageName)
@@ -56,7 +56,7 @@ class QuestApkTest {
         assertTrue(r.questApp)
         assertEquals("com.example.questgame.MainActivity", r.launchActivity)
         assertTrue("XR_FB_passthrough" in r.extensions && "XR_EXT_hand_tracking" in r.extensions)
-        assertEquals(Verdict.MAY_RUN, r.verdict) // Meta extensions referenced
+        assertEquals(Verdict.MAY_RUN, r.verdict) // a Meta extension the runtime lacks (spatial anchors)
     }
 
     @Test fun metaExtensionsTheRuntimeHasNoLongerHoldAGameBack() {
@@ -71,10 +71,11 @@ class QuestApkTest {
     @Test fun handTrackingGameIsServed() {
         val r = QuestApk.inspect(apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
-            "lib/arm64-v8a/libunity.so" to bin("XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim"),
+            "lib/arm64-v8a/libunity.so" to bin("XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim", "XR_FB_passthrough"),
         )))
         assertEquals(Verdict.LIKELY_RUNS, r.verdict)
         assertTrue(r.reasons.any { "hand tracking" in it })
+        assertTrue(r.reasons.any { "passthrough" in it })
     }
 
     @Test fun picoAppIsRecognised() {

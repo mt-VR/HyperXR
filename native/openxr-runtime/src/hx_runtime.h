@@ -21,6 +21,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "hx_hands.h"
+#include "hx_camera.h"
 
 // ------------------------------------------------------------------ math
 namespace hx {
@@ -116,6 +117,14 @@ struct HxComposeView {
     XrRect2Di rect;
     XrPosef pose;        // pose the app rendered with (stage space)
     XrFovf fov;
+    int blendAlpha;      // drawn over what is behind it (passthrough) with the image's alpha
+    int premultiplied;   // the alpha is already multiplied into the colour (OpenXR's default)
+};
+
+/** Passthrough for one frame: the phone's camera behind the app's layers. */
+struct HxPassthroughState {
+    int on;
+    float opacity;
 };
 
 /** Shape of a non-projection layer. */
@@ -155,6 +164,8 @@ void readInput(HxInput* out);
  * camera on (it turns it off a few seconds after the last call that wanted hands).
  */
 bool readHands(HxHandShared* out, bool wantsHands);
+/** The app shows passthrough this frame: HyperMagic keeps the camera frames coming. */
+void passthroughWanted();
 
 // Graphics. All return XrResult; the host build only supports headless sessions.
 XrResult gfxCreateSession(const void* binding, HxSessionGfx** out);
@@ -167,5 +178,5 @@ XrResult gfxEnumerateImages(HxSwapchainGfx* s, uint32_t capacity, uint32_t* coun
 void gfxReleaseImage(HxSwapchainGfx* s, uint32_t index);
 /** Composites one frame (projection views + quads) to the viewer, predicted head pose [head]. */
 void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const HxComposeView* views, uint32_t viewCount,
-                const HxComposeQuad* quads, uint32_t quadCount);
+                const HxComposeQuad* quads, uint32_t quadCount, const HxPassthroughState& passthrough);
 }  // namespace hxp

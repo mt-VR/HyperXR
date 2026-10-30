@@ -25,7 +25,8 @@ namespace {
 enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
-    MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831,
+    MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
+    MAGIC_PT_LAYER = 0x48584C31,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -111,6 +112,10 @@ struct Session {
 
 /** XR_FB_foveation profile: kept only so its handle is valid (the whole image is always drawn). */
 struct Foveation { uint32_t magic; };
+
+/** XR_FB_passthrough: the feature (started / paused) and its layers (running / paused, style). */
+struct Passthrough { uint32_t magic; Session* session; bool running; };
+struct PassthroughLayer { uint32_t magic; Session* session; Passthrough* passthrough; bool running; float opacity; };
 
 /** XR_EXT_hand_tracking tracker: one hand, joints from HyperMagic's camera hand tracking. */
 struct HandTracker { uint32_t magic; Session* session; XrHandEXT hand; };
@@ -553,6 +558,8 @@ const ExtDesc kExtensions[] = {
     {XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME, XR_BD_controller_interaction_SPEC_VERSION},
     // hands: tracked by HyperMagic with the phone's camera while the game runs (hx_hands.h)
     {XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_EXT_hand_tracking_SPEC_VERSION},
+    // mixed reality: the phone's camera behind the app (HyperMagic sends the frames, hx_camera.h)
+    {XR_FB_PASSTHROUGH_EXTENSION_NAME, XR_FB_passthrough_SPEC_VERSION},
     // menus and video players of Quest apps: curved panels and 360/180 images
     {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
     {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
@@ -732,6 +739,9 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(p->next); n; n = n->next) {
         if (n->type == XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB) reinterpret_cast<XrSystemColorSpacePropertiesFB*>(n)->colorSpace = XR_COLOR_SPACE_REC709_FB;
         if (n->type == XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT) reinterpret_cast<XrSystemHandTrackingPropertiesEXT*>(n)->supportsHandTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB) reinterpret_cast<XrSystemPassthroughPropertiesFB*>(n)->supportsPassthrough = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB)
+            reinterpret_cast<XrSystemPassthroughProperties2FB*>(n)->capabilities = XR_PASSTHROUGH_CAPABILITY_BIT_FB | XR_PASSTHROUGH_CAPABILITY_COLOR_BIT_FB;
     }
     return XR_SUCCESS;
 }
@@ -741,10 +751,13 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateEnvironmentBlendModes(XrInstance h, XrSy
     if (sys != SYSTEM_ID) return XR_ERROR_SYSTEM_INVALID;
     if (vct != XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) return XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
     if (!count) return XR_ERROR_VALIDATION_FAILURE;
-    *count = 1;
+    // OPAQUE first (the preferred one); ALPHA_BLEND shows the phone's camera behind the app
+    *count = 2;
     if (capacity == 0) return XR_SUCCESS;
     if (!modes) return XR_ERROR_VALIDATION_FAILURE;
+    if (capacity < 2) return XR_ERROR_SIZE_INSUFFICIENT;
     modes[0] = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    modes[1] = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
     return XR_SUCCESS;
 }
 
@@ -871,6 +884,8 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_SPACE)) { static_cast<Space*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_FOVEATION)) { static_cast<Foveation*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_PT_LAYER)) { static_cast<PassthroughLayer*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) { static_cast<Passthrough*>(c)->magic = 0; free(c); }
     if (s->gfx) hxp::gfxDestroySession(s->gfx);
     pthread_mutex_destroy(&s->frameLock);
     pthread_cond_destroy(&s->frameCond);
@@ -1255,18 +1270,33 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
     if (!s->running) return XR_ERROR_SESSION_NOT_RUNNING;
     if (!s->frameBegun) return XR_ERROR_CALL_ORDER_INVALID;
     if (info->displayTime <= 0) return XR_ERROR_TIME_INVALID;
-    if (info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_OPAQUE) return XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED;
+    if (info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_OPAQUE && info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+        return XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED;
     if (info->layerCount > MAX_LAYERS) return XR_ERROR_LAYER_LIMIT_EXCEEDED;
     if (info->layerCount > 0 && !info->layers) return XR_ERROR_VALIDATION_FAILURE;
 
-    HxComposeView views[2];
+    HxComposeView views[2] = {};
     uint32_t viewCount = 0;
+    HxPassthroughState passthrough = {};
+    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) { passthrough.on = 1; passthrough.opacity = 1; }
     HxComposeQuad quads[MAX_LAYERS];
     uint32_t quadCount = 0;
     const HxConfig& cfg = s->instance->cfg;
     for (uint32_t i = 0; i < info->layerCount; i++) {
         const XrCompositionLayerBaseHeader* l = info->layers[i];
         if (!l) return XR_ERROR_LAYER_INVALID;
+        if (l->type == XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB) {
+            // the camera, drawn behind everything (wherever it is in the list); no space needed
+            if (!extEnabled(s->instance, XR_FB_PASSTHROUGH_EXTENSION_NAME)) return XR_ERROR_LAYER_INVALID;
+            auto* p = reinterpret_cast<const XrCompositionLayerPassthroughFB*>(l);
+            auto* pl = asObj<PassthroughLayer>(reinterpret_cast<uint64_t>(p->layerHandle), MAGIC_PT_LAYER);
+            if (!pl || pl->session != s) return XR_ERROR_HANDLE_INVALID;
+            if (pl->running && isLive(pl->passthrough, MAGIC_PASSTHROUGH) && pl->passthrough->running && pl->opacity > 0) {
+                passthrough.on = 1;
+                passthrough.opacity = pl->opacity > passthrough.opacity ? pl->opacity : passthrough.opacity;
+            }
+            continue;
+        }
         Space* sp = asSpace(l->space);
         if (!sp) return XR_ERROR_HANDLE_INVALID;
         XrPosef spacePose; bool tracked;
@@ -1295,6 +1325,8 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
                 cv.rect = r;
                 cv.pose = hx::compose(spacePose, pv.pose);
                 cv.fov = pv.fov;
+                cv.blendAlpha = (p->layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0;
+                cv.premultiplied = (p->layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT) == 0;
             }
             if (located) viewCount = 2;
         } else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD || l->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR ||
@@ -1351,13 +1383,17 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
             return XR_ERROR_LAYER_INVALID;
         }
     }
+    // ALPHA_BLEND: the app's alpha decides where the room shows, whatever the layer flags say
+    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+        for (uint32_t v = 0; v < viewCount; v++) views[v].blendAlpha = 1;
     if (s->gfx) {
         XrPosef head;
         // late latch: the newest head pose for timewarp, predicted to this frame's display time
         if (!hxp::headPose(info->displayTime, cfg, &head)) head = s->lastHead;
         s->lastHead = head;
-        hxp::gfxCompose(s->gfx, cfg, head, views, viewCount, quads, quadCount);
+        hxp::gfxCompose(s->gfx, cfg, head, views, viewCount, quads, quadCount, passthrough);
     }
+    if (passthrough.on) hxp::passthroughWanted();
     s->frameCount++;
     pthread_mutex_lock(&s->frameLock);
     s->frameBegun = false;
@@ -1860,6 +1896,104 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ passthrough (XR_FB_passthrough)
+XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughFB(XrSession h, const XrPassthroughCreateInfoFB* ci, XrPassthroughFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_PASSTHROUGH_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    Passthrough* p = alloc<Passthrough>(MAGIC_PASSTHROUGH, s);
+    if (!p) return XR_ERROR_OUT_OF_MEMORY;
+    p->session = s;
+    p->running = (ci->flags & XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB) != 0;
+    if (p->running) hxp::passthroughWanted();  // HyperMagic turns the camera on now
+    *out = reinterpret_cast<XrPassthroughFB>(p);
+    return XR_SUCCESS;
+}
+
+Passthrough* asPassthrough(XrPassthroughFB h) { return asObj<Passthrough>(reinterpret_cast<uint64_t>(h), MAGIC_PASSTHROUGH); }
+PassthroughLayer* asPtLayer(XrPassthroughLayerFB h) { return asObj<PassthroughLayer>(reinterpret_cast<uint64_t>(h), MAGIC_PT_LAYER); }
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyPassthroughFB(XrPassthroughFB h) {
+    Passthrough* p = asPassthrough(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    release(p);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughStartFB(XrPassthroughFB h) {
+    Passthrough* p = asPassthrough(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    p->running = true;
+    hxp::passthroughWanted();
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughPauseFB(XrPassthroughFB h) {
+    Passthrough* p = asPassthrough(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    p->running = false;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughLayerFB(XrSession h, const XrPassthroughLayerCreateInfoFB* ci, XrPassthroughLayerFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    Passthrough* p = asPassthrough(ci->passthrough);
+    if (!p || p->session != s) return XR_ERROR_HANDLE_INVALID;
+    // only the whole camera view: surfaces projected onto app meshes need XR_FB_triangle_mesh
+    if (ci->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB) return XR_ERROR_FEATURE_UNSUPPORTED;
+    PassthroughLayer* l = alloc<PassthroughLayer>(MAGIC_PT_LAYER, s);
+    if (!l) return XR_ERROR_OUT_OF_MEMORY;
+    l->session = s;
+    l->passthrough = p;
+    l->running = (ci->flags & XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB) != 0;
+    l->opacity = 1;
+    *out = reinterpret_cast<XrPassthroughLayerFB>(l);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyPassthroughLayerFB(XrPassthroughLayerFB h) {
+    PassthroughLayer* l = asPtLayer(h);
+    if (!l) return XR_ERROR_HANDLE_INVALID;
+    release(l);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerPauseFB(XrPassthroughLayerFB h) {
+    PassthroughLayer* l = asPtLayer(h);
+    if (!l) return XR_ERROR_HANDLE_INVALID;
+    l->running = false;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerResumeFB(XrPassthroughLayerFB h) {
+    PassthroughLayer* l = asPtLayer(h);
+    if (!l) return XR_ERROR_HANDLE_INVALID;
+    l->running = true;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerSetStyleFB(XrPassthroughLayerFB h, const XrPassthroughStyleFB* style) {
+    PassthroughLayer* l = asPtLayer(h);
+    if (!l) return XR_ERROR_HANDLE_INVALID;
+    if (!style || style->type != XR_TYPE_PASSTHROUGH_STYLE_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (style->textureOpacityFactor < 0 || style->textureOpacityFactor > 1) return XR_ERROR_VALIDATION_FAILURE;
+    // opacity is honoured; edge rendering and colour maps are accepted and not drawn
+    l->opacity = style->textureOpacityFactor;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateGeometryInstanceFB(XrSession h, const XrGeometryInstanceCreateInfoFB* ci, XrGeometryInstanceFB* out) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_ERROR_FEATURE_UNSUPPORTED;  // no projected-surface layers (see CreatePassthroughLayerFB)
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyGeometryInstanceFB(XrGeometryInstanceFB) { return XR_ERROR_HANDLE_INVALID; }
+
+XRAPI_ATTR XrResult XRAPI_CALL GeometryInstanceSetTransformFB(XrGeometryInstanceFB, const XrGeometryInstanceTransformFB*) { return XR_ERROR_HANDLE_INVALID; }
+
 XRAPI_ATTR XrResult XRAPI_CALL PerfSettingsSetPerformanceLevelEXT(XrSession h, XrPerfSettingsDomainEXT domain, XrPerfSettingsLevelEXT level) {
     if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
     if (domain != XR_PERF_SETTINGS_DOMAIN_CPU_EXT && domain != XR_PERF_SETTINGS_DOMAIN_GPU_EXT) return XR_ERROR_VALIDATION_FAILURE;
@@ -1956,6 +2090,18 @@ const Entry kEntries[] = {
     HX_EXT(CreateFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(DestroyFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(PerfSettingsSetPerformanceLevelEXT, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME),
+    HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(PassthroughPauseFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(CreatePassthroughLayerFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(DestroyPassthroughLayerFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(PassthroughLayerPauseFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(PassthroughLayerResumeFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(PassthroughLayerSetStyleFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(CreateGeometryInstanceFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(DestroyGeometryInstanceFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
+    HX_EXT(GeometryInstanceSetTransformFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(CreateHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
     HX_EXT(DestroyHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
     HX_EXT(LocateHandJointsEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),

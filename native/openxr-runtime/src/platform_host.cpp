@@ -14,6 +14,8 @@ bool gHandsSet = false;
 
 extern "C" void hxTestSetHands(const HxHandShared* h) { if (h) { gHands = *h; gHandsSet = true; } else gHandsSet = false; }
 extern "C" int64_t hxTestHandsWanted() { return gHands.readerWantsHandsNs; }
+int64_t gPassthroughWantedNs = 0;
+extern "C" int64_t hxTestPassthroughWanted() { return gPassthroughWantedNs; }
 
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch) {
     gInput.buttons = buttons;
@@ -48,6 +50,7 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
 }
 void recenter() {}
 void readInput(HxInput* out) { *out = gInput; }
+void passthroughWanted() { gPassthroughWantedNs = nowNs(); }
 bool readHands(HxHandShared* out, bool wantsHands) {
     if (!gHandsSet) return false;
     gHands.readerAliveNs = nowNs();
@@ -62,5 +65,6 @@ XrResult gfxCreateSwapchain(HxSessionGfx*, const XrSwapchainCreateInfo*, HxSwapc
 void gfxDestroySwapchain(HxSwapchainGfx*) {}
 XrResult gfxEnumerateImages(HxSwapchainGfx*, uint32_t, uint32_t*, XrSwapchainImageBaseHeader*) { return XR_ERROR_FUNCTION_UNSUPPORTED; }
 void gfxReleaseImage(HxSwapchainGfx*, uint32_t) {}
-void gfxCompose(HxSessionGfx*, const HxConfig&, const XrPosef&, const HxComposeView*, uint32_t, const HxComposeQuad*, uint32_t) {}
+void gfxCompose(HxSessionGfx*, const HxConfig&, const XrPosef&, const HxComposeView*, uint32_t, const HxComposeQuad*, uint32_t,
+                const HxPassthroughState&) {}
 }  // namespace hxp

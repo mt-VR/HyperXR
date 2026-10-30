@@ -450,7 +450,8 @@ ao lado do APK é copiado para `Android/obb`; sem ele, o instalador do Android p
 
 Jogos com **hand tracking** (Quest e Pico, `XR_EXT_hand_tracking` e a mira `XR_FB_hand_tracking_aim`) recebem
 suas mãos: enquanto o jogo roda, o HyperMagic rastreia as mãos pela câmera num serviço em primeiro plano
-e o runtime as entrega ao jogo (detalhes em `docs/OPENXR_RUNTIME.md`). Ainda não testado com um jogo real.
+e o runtime as entrega ao jogo (detalhes em `docs/OPENXR_RUNTIME.md`). Jogos de realidade mista (`XR_FB_passthrough` ou o modo `ALPHA_BLEND`) mostram a câmera do celular atrás
+do jogo, em baixa resolução e sem profundidade. Ainda não testado com um jogo real.
 
 Para apps OpenXR acharem o runtime HyperMagic instale também o APK pequeno **HyperMagic OpenXR Broker**
 (`broker/`); se ele não instalar por conflito, o celular já tem um broker OpenXR: escolha "HyperMagic

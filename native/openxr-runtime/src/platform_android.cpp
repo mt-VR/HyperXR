@@ -18,6 +18,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <stdio.h>
 
 #define LOG_TAG "HyperMagic-Runtime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -160,29 +162,55 @@ void* sensorMain(void*) {
 }
 
 // ------------------------------------------------------------------ hands
-/** Maps content://com.hypermagic.runtime/hands (read-write: the runtime reports it is alive). */
-HxHandShared* mapHands() {
+/** Maps content://com.hypermagic.runtime/<name> read-write ([size] bytes), or null. */
+void* mapShared(const char* name, size_t size) {
     JNIEnv* e = env();
     if (!e || !gContext) return nullptr;
     jclass ctxCls = e->GetObjectClass(gContext);
     jobject cr = e->CallObjectMethod(gContext, e->GetMethodID(ctxCls, "getContentResolver", "()Landroid/content/ContentResolver;"));
     if (clearException(e) || !cr) return nullptr;
     jclass uriCls = e->FindClass("android/net/Uri");
-    jstring s = e->NewStringUTF("content://com.hypermagic.runtime/hands");
+    char url[96];
+    snprintf(url, sizeof(url), "content://com.hypermagic.runtime/%s", name);
+    jstring s = e->NewStringUTF(url);
     jobject uri = e->CallStaticObjectMethod(uriCls, e->GetStaticMethodID(uriCls, "parse", "(Ljava/lang/String;)Landroid/net/Uri;"), s);
     jstring mode = e->NewStringUTF("rw");
     jclass crCls = e->GetObjectClass(cr);
     jobject pfd = e->CallObjectMethod(cr, e->GetMethodID(crCls, "openFileDescriptor", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;"), uri, mode);
-    if (clearException(e) || !pfd) { LOGI("HyperMagic hands not reachable (hand bridge off)"); return nullptr; }
+    if (clearException(e) || !pfd) { LOGI("HyperMagic %s not reachable", name); return nullptr; }
     int fd = e->CallIntMethod(pfd, e->GetMethodID(e->GetObjectClass(pfd), "detachFd", "()I"));
     if (clearException(e) || fd < 0) return nullptr;
-    void* p = mmap(nullptr, sizeof(HxHandShared), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || static_cast<size_t>(st.st_size) < size) { close(fd); LOGW("%s: wrong size", name); return nullptr; }
+    void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
-    if (p == MAP_FAILED) { LOGW("hands: mmap failed"); return nullptr; }
-    HxHandShared* h = static_cast<HxHandShared*>(p);
-    if (h->magic != HX_HANDS_MAGIC) { munmap(p, sizeof(HxHandShared)); LOGW("hands: unknown format"); return nullptr; }
-    LOGI("hands from HyperMagic mapped");
-    return h;
+    if (p == MAP_FAILED) { LOGW("%s: mmap failed", name); return nullptr; }
+    LOGI("%s from HyperMagic mapped", name);
+    return p;
+}
+
+HxHandShared* mapHands() {
+    void* p = mapShared("hands", sizeof(HxHandShared));
+    if (p && static_cast<HxHandShared*>(p)->magic != HX_HANDS_MAGIC) { munmap(p, sizeof(HxHandShared)); return nullptr; }
+    return static_cast<HxHandShared*>(p);
+}
+
+/** Camera frames for passthrough, mapped on first use (retried at most every 2 s). */
+HxCameraShared* cameraFrames() {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static HxCameraShared* map = nullptr;
+    static int64_t lastTryNs = 0;
+    pthread_mutex_lock(&lock);
+    int64_t now = clockNs(CLOCK_MONOTONIC);
+    if (!map && now - lastTryNs > 2000000000LL) {
+        lastTryNs = now;
+        void* p = mapShared("camera", sizeof(HxCameraShared));
+        if (p && static_cast<HxCameraShared*>(p)->magic != HX_CAMERA_MAGIC) { munmap(p, sizeof(HxCameraShared)); p = nullptr; }
+        map = static_cast<HxCameraShared*>(p);
+    }
+    HxCameraShared* m = map;
+    pthread_mutex_unlock(&lock);
+    return m;
 }
 
 // ------------------------------------------------------------------ config
@@ -266,8 +294,13 @@ struct HxSessionGfx {
     ANativeWindow* nativeWindow;
     jobject surfaceHelper;     // RuntimeSurface (global ref)
     jobject lastSurface;       // android.view.Surface (global ref) the window was made from
-    GLuint progProj, progProjArray, progQuad, progQuadArray;
+    GLuint progProj, progProjArray, progQuad, progQuadArray, progCamera;
     GLuint vao;
+    GLuint cameraTex;          // latest passthrough frame
+    uint32_t cameraSeq;        // HxCameraShared::seq of the frame in cameraTex
+    uint32_t cameraW, cameraH;
+    float cameraIntr[4];       // fx, fy, cx, cy
+    int64_t cameraTimeNs;
     bool glReady;
     uint64_t frames;
 };
@@ -316,16 +349,36 @@ const char* kProj = R"(
 uniform mat3 uDelta;    // current eye direction -> rendered view direction
 uniform vec4 uFovTan;   // tan(left), tan(right), tan(down), tan(up)
 uniform vec4 uRect;     // sub-image offset.xy and extent.xy in texture UV
+uniform int uKeepAlpha; // over passthrough: the image's alpha decides how much camera shows
 SAMPLER_DECL
 void main() {
+    vec4 none = vec4(0.0, 0.0, 0.0, uKeepAlpha == 1 ? 0.0 : 1.0);
     vec3 d = uDelta * eyeDir();
-    if (d.z > -1e-4) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    if (d.z > -1e-4) { fragColor = none; return; }
     vec2 p = d.xy / -d.z;
     vec2 uv = vec2((p.x - uFovTan.x) / (uFovTan.y - uFovTan.x), (p.y - uFovTan.z) / (uFovTan.w - uFovTan.z));
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { fragColor = none; return; }
     vec4 c = SAMPLE(uRect.xy + uv * uRect.zw);
     if (uSrgb == 1) c.rgb = toSrgb(c.rgb);
-    fragColor = vec4(c.rgb, 1.0);
+    fragColor = vec4(c.rgb, uKeepAlpha == 1 ? c.a : 1.0);
+})";
+
+// Passthrough: the phone's camera frame, treated as infinitely far (rotation only): the current
+// eye direction is turned into the camera's frame and projected with its pinhole intrinsics.
+const char* kCamera = R"(
+uniform mat3 uEyeRot;      // current eye orientation (stage)
+uniform mat3 uCamRotInv;   // stage -> camera at capture time
+uniform vec4 uIntr;        // fx, fy, cx, cy (pixels, image y down)
+uniform vec2 uSize;        // frame size, pixels
+uniform float uOpacity;
+SAMPLER_DECL
+void main() {
+    vec3 d = uCamRotInv * (uEyeRot * eyeDir());
+    if (d.z > -1e-4) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    vec2 px = vec2(uIntr.z + uIntr.x * d.x / -d.z, uIntr.w - uIntr.y * d.y / -d.z);
+    vec2 uv = px / uSize;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    fragColor = vec4(SAMPLE(uv).rgb * uOpacity, 1.0);
 })";
 
 // Quad, cylinder and equirect layers: the ray from the current eye, in the layer's space, hits a
@@ -444,7 +497,9 @@ void initGl(HxSessionGfx* g) {
     g->progProjArray = program(kProj, true);
     g->progQuad = program(kQuad, false);
     g->progQuadArray = program(kQuad, true);
+    g->progCamera = program(kCamera, false);
     glGenVertexArrays(1, &g->vao);
+    glGenTextures(1, &g->cameraTex);
     g->glReady = true;
 }
 
@@ -541,6 +596,10 @@ void recenter() { pthread_mutex_lock(&gTrackLock); gRecenter = true; pthread_mut
  * Hands from HyperMagic: the app's shared file, opened through its provider (any thread; the
  * mapping is made once and kept for the life of the process).
  */
+void passthroughWanted() {
+    if (HxCameraShared* c = cameraFrames()) __atomic_store_n(&c->readerWantsNs, nowNs(), __ATOMIC_RELAXED);
+}
+
 bool readHands(HxHandShared* out, bool wantsHands) {
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
     static HxHandShared* map = nullptr;
@@ -639,8 +698,9 @@ void gfxDestroySession(HxSessionGfx* g) {
     eglMakeCurrent(g->dpy, g->pbuffer, g->pbuffer, g->ctx);
     if (g->glReady) {
         glDeleteProgram(g->progProj); glDeleteProgram(g->progProjArray);
-        glDeleteProgram(g->progQuad); glDeleteProgram(g->progQuadArray);
+        glDeleteProgram(g->progQuad); glDeleteProgram(g->progQuadArray); glDeleteProgram(g->progCamera);
         glDeleteVertexArrays(1, &g->vao);
+        glDeleteTextures(1, &g->cameraTex);
     }
     restore(s, g->dpy);
     if (g->window != EGL_NO_SURFACE) eglDestroySurface(g->dpy, g->window);
@@ -733,8 +793,35 @@ void gfxReleaseImage(HxSwapchainGfx* sc, uint32_t index) {
     glFlush();
 }
 
+/** Uploads the newest passthrough frame into g->cameraTex; false when there is none yet. */
+bool updateCameraTexture(HxSessionGfx* g) {
+    HxCameraShared* c = cameraFrames();
+    if (!c) return false;
+    uint32_t seq = __atomic_load_n(&c->seq, __ATOMIC_ACQUIRE);
+    if (seq == 0) return false;
+    if (seq == g->cameraSeq) return true;
+    uint32_t idx = c->latest & 1u, w = c->width, h = c->height;
+    if (w == 0 || h == 0 || w > HX_CAMERA_MAX_W || h > HX_CAMERA_MAX_H) return g->cameraSeq != 0;
+    glBindTexture(GL_TEXTURE_2D, g->cameraTex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (w != g->cameraW || h != g->cameraH) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, c->pixels[idx]);
+        g->cameraW = w; g->cameraH = h;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, c->pixels[idx]);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    g->cameraIntr[0] = c->fx; g->cameraIntr[1] = c->fy; g->cameraIntr[2] = c->cx; g->cameraIntr[3] = c->cy;
+    g->cameraTimeNs = c->timeNs;
+    g->cameraSeq = seq;
+    return true;
+}
+
 void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const HxComposeView* views, uint32_t viewCount,
-                const HxComposeQuad* quads, uint32_t quadCount) {
+                const HxComposeQuad* quads, uint32_t quadCount, const HxPassthroughState& passthrough) {
     updateWindow(g);
     if (g->window == EGL_NO_SURFACE) return;
     Saved s = saveCurrent();
@@ -759,14 +846,40 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
     float tanH = tanV * static_cast<float>(half) / static_cast<float>(h > 0 ? h : 1);
     float k1 = cfg.lensDistortion ? cfg.k1 : 0, k2 = cfg.lensDistortion ? cfg.k2 : 0;
     float m[9];
+    bool camera = passthrough.on && updateCameraTexture(g);
+    // the camera rides with the head: it looked where the head looked when the frame was taken
+    XrPosef cameraHead = head;
+    if (camera && !headPose(g->cameraTimeNs, cfg, &cameraHead)) cameraHead = head;
     for (int eye = 0; eye < 2; eye++) {
         glViewport(eye * half, 0, half, h);
         XrPosef eyePose = hx::compose(head, XrPosef{{0, 0, 0, 1}, {(eye == 0 ? -0.5f : 0.5f) * cfg.ipdM, 0, 0}});
+        if (camera) {
+            glUseProgram(g->progCamera);
+            glDisable(GL_BLEND);
+            glUniform2f(glGetUniformLocation(g->progCamera, "uEyeTan"), tanH, tanV);
+            glUniform2f(glGetUniformLocation(g->progCamera, "uK"), k1, k2);
+            mat3FromQuat(eyePose.orientation, m);
+            glUniformMatrix3fv(glGetUniformLocation(g->progCamera, "uEyeRot"), 1, GL_FALSE, m);
+            mat3FromQuat(hx::qconj(cameraHead.orientation), m);
+            glUniformMatrix3fv(glGetUniformLocation(g->progCamera, "uCamRotInv"), 1, GL_FALSE, m);
+            glUniform4f(glGetUniformLocation(g->progCamera, "uIntr"), g->cameraIntr[0], g->cameraIntr[1], g->cameraIntr[2], g->cameraIntr[3]);
+            glUniform2f(glGetUniformLocation(g->progCamera, "uSize"), static_cast<float>(g->cameraW), static_cast<float>(g->cameraH));
+            glUniform1f(glGetUniformLocation(g->progCamera, "uOpacity"), passthrough.opacity);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uSrgb"), 0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, g->cameraTex);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uTex"), 0);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
         if (viewCount == 2) {
             const HxComposeView& v = views[eye];
             GLuint prog = v.swapchain->target == GL_TEXTURE_2D_ARRAY ? g->progProjArray : g->progProj;
             glUseProgram(prog);
-            glDisable(GL_BLEND);
+            // over the camera, the app's alpha says how much of the room shows through
+            bool over = camera && v.blendAlpha;
+            if (over) { glEnable(GL_BLEND); glBlendFunc(v.premultiplied ? GL_ONE : GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
+            else glDisable(GL_BLEND);
+            glUniform1i(glGetUniformLocation(prog, "uKeepAlpha"), over ? 1 : 0);
             glUniform2f(glGetUniformLocation(prog, "uEyeTan"), tanH, tanV);
             glUniform2f(glGetUniformLocation(prog, "uK"), k1, k2);
             // timewarp: where the app rendered this view vs where the eye looks now

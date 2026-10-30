@@ -16,6 +16,7 @@ extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInf
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
 extern "C" void hxTestSetHands(const HxHandShared* h);
 extern "C" int64_t hxTestHandsWanted();
+extern "C" int64_t hxTestPassthroughWanted();
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch);
 
 static int gFailures = 0;
@@ -168,7 +169,7 @@ static XrSystemId testSystem(XrInstance inst) {
     LOAD(inst, xrEnumerateEnvironmentBlendModes);
     XrEnvironmentBlendMode modes[4];
     CHECK_RESULT(xrEnumerateEnvironmentBlendModes(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 4, &n, modes), XR_SUCCESS);
-    CHECK(n == 1 && modes[0] == XR_ENVIRONMENT_BLEND_MODE_OPAQUE);
+    CHECK(n == 2 && modes[0] == XR_ENVIRONMENT_BLEND_MODE_OPAQUE && modes[1] == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND);
     return sys;
 }
 
@@ -928,6 +929,104 @@ static void testLayerValidation() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testPassthrough() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_PASSTHROUGH_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 2, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance); LOAD(inst, xrBeginSession); LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame);
+    LOAD(inst, xrCreatePassthroughFB); LOAD(inst, xrDestroyPassthroughFB); LOAD(inst, xrPassthroughStartFB); LOAD(inst, xrPassthroughPauseFB);
+    LOAD(inst, xrCreatePassthroughLayerFB); LOAD(inst, xrDestroyPassthroughLayerFB); LOAD(inst, xrPassthroughLayerPauseFB);
+    LOAD(inst, xrPassthroughLayerResumeFB); LOAD(inst, xrPassthroughLayerSetStyleFB); LOAD(inst, xrCreateGeometryInstanceFB);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemPassthroughProperties2FB pp2{XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB};
+    XrSystemPassthroughPropertiesFB pp{XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB};
+    pp.next = &pp2;
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &pp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(pp.supportsPassthrough == XR_TRUE && (pp2.capabilities & XR_PASSTHROUGH_CAPABILITY_COLOR_BIT_FB));
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+
+    XrPassthroughCreateInfoFB pci{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+    XrPassthroughFB pt;
+    CHECK_RESULT(xrCreatePassthroughFB(s, &pci, &pt), XR_SUCCESS);
+    XrPassthroughLayerCreateInfoFB lci{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+    lci.passthrough = pt;
+    lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB;
+    XrPassthroughLayerFB layer;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &layer), XR_ERROR_FEATURE_UNSUPPORTED);
+    lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+    lci.flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &layer), XR_SUCCESS);
+    XrGeometryInstanceCreateInfoFB gci{XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB};
+    XrGeometryInstanceFB geo;
+    CHECK_RESULT(xrCreateGeometryInstanceFB(s, &gci, &geo), XR_ERROR_FEATURE_UNSUPPORTED);
+    XrPassthroughStyleFB style{XR_TYPE_PASSTHROUGH_STYLE_FB};
+    style.textureOpacityFactor = 2;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_ERROR_VALIDATION_FAILURE);
+    style.textureOpacityFactor = 0.5f;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_SUCCESS);
+
+    XrCompositionLayerPassthroughFB pl{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+    pl.layerHandle = layer;
+    const XrCompositionLayerBaseHeader* layers[1] = {reinterpret_cast<const XrCompositionLayerBaseHeader*>(&pl)};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    ei.layerCount = 1; ei.layers = layers;
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    auto frame = [&]() -> XrResult {
+        xrWaitFrame(s, nullptr, &fs);
+        xrBeginFrame(s, nullptr);
+        ei.displayTime = fs.predictedDisplayTime;
+        return xrEndFrame(s, &ei);
+    };
+    // the feature is paused: the layer is accepted but nothing is asked of the camera
+    int64_t before = hxTestPassthroughWanted();
+    CHECK_RESULT(frame(), XR_SUCCESS);
+    CHECK(hxTestPassthroughWanted() == before);
+    CHECK_RESULT(xrPassthroughStartFB(pt), XR_SUCCESS);
+    int64_t started = hxTestPassthroughWanted();
+    CHECK(started > before);
+    CHECK_RESULT(frame(), XR_SUCCESS);
+    CHECK(hxTestPassthroughWanted() >= started);
+    // a paused layer shows nothing
+    CHECK_RESULT(xrPassthroughLayerPauseFB(layer), XR_SUCCESS);
+    int64_t paused = hxTestPassthroughWanted();
+    CHECK_RESULT(frame(), XR_SUCCESS);
+    CHECK(hxTestPassthroughWanted() == paused);
+    CHECK_RESULT(xrPassthroughLayerResumeFB(layer), XR_SUCCESS);
+    // ALPHA_BLEND without any passthrough layer also shows the camera
+    ei.layerCount = 0;
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
+    CHECK_RESULT(frame(), XR_SUCCESS);
+    CHECK(hxTestPassthroughWanted() > paused);
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    // a destroyed layer handle in a frame is an error
+    CHECK_RESULT(xrDestroyPassthroughLayerFB(layer), XR_SUCCESS);
+    ei.layerCount = 1;
+    CHECK_RESULT(frame(), XR_ERROR_HANDLE_INVALID);
+    ei.layerCount = 0;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_SUCCESS);
+    CHECK_RESULT(xrPassthroughPauseFB(pt), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyPassthroughFB(pt), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyPassthroughFB(pt), XR_ERROR_HANDLE_INVALID);
+    CHECK_RESULT(xrCreatePassthroughFB(s, &pci, &pt), XR_SUCCESS);  // left for the session to free
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -953,6 +1052,7 @@ int main() {
     testHands();
     testLayerShapes();
     testLayerValidation();
+    testPassthrough();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

@@ -11,8 +11,8 @@ import com.hyperxr.HyperXRApp
 /**
  * Read-only viewer configuration for the HyperXR OpenXR runtime running inside other apps
  * (IPD, field of view, lens distortion), so OpenXR apps see the same calibration as HyperXR.
- * Only these numbers are exposed; and `hands`, the shared file with the tracked hands while an
- * OpenXR game runs ([HandBridge]: joint positions and pinch, nothing from the camera image).
+ * Only these numbers are exposed; and, while an OpenXR game runs, `hands` (joint positions and
+ * pinch, [HandBridge]) and `camera` (small camera frames, only while the game shows passthrough).
  */
 class RuntimeConfigProvider : ContentProvider() {
     override fun onCreate() = true
@@ -25,8 +25,15 @@ class RuntimeConfigProvider : ContentProvider() {
     }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
-        if (uri.lastPathSegment != "hands") return null
-        val f = HandBridge.ensure(context ?: return null)
+        val ctx = context ?: return null
+        // hands and camera frames only for the game HyperMagic launched (and HyperMagic itself)
+        val caller = callingPackage
+        if (caller != ctx.packageName && caller != HandBridge.allowedGame(ctx)) throw SecurityException("$caller may not read $uri")
+        val f = when (uri.lastPathSegment) {
+            "hands" -> HandBridge.ensure(ctx)
+            "camera" -> HandBridge.ensureCamera(ctx)
+            else -> return null
+        }
         return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_WRITE)
     }
 

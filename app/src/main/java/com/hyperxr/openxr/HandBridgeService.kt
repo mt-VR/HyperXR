@@ -36,7 +36,8 @@ import com.hyperxr.handtracking.TrackingState
  * background, so its hand tracking moves into this foreground service. It is started just before
  * a game is launched (an app may only use the camera from a foreground service it started while
  * visible), opens the back camera only while the game's runtime says it has a hand tracker, and
- * publishes the hands ~90 times a second in [HandBridge]'s shared file.
+ * publishes the hands ~90 times a second in [HandBridge]'s shared file. When the game shows
+ * passthrough (XR_FB_passthrough / ALPHA_BLEND), it also publishes small colour frames (~30 fps).
  *
  * It stops by itself when no OpenXR runtime has been alive for a while (the game closed), and when
  * HyperMagic comes back to the front (it needs the camera itself).
@@ -48,6 +49,12 @@ class HandBridgeService : Service() {
     private val camHandler = Handler(camThread.looper)
     private var hands: HandTrackingService? = null
     private var map = 0L
+    private var cameraMap = 0L
+    @Volatile private var handsWanted = false
+    @Volatile private var passthroughWanted = false
+    private val frameConverter = com.hyperxr.handtracking.YuvToBitmap()
+    private var frameBuffer: java.nio.ByteBuffer? = null
+    private var lastFrameNs = 0L
     private var device: CameraDevice? = null
     private var reader: ImageReader? = null
     private var opening = false
@@ -64,6 +71,7 @@ class HandBridgeService : Service() {
         super.onCreate()
         goForeground()
         map = HandBridge.nativeOpen(HandBridge.file(this).absolutePath)
+        cameraMap = HandBridge.nativeCameraOpen(HandBridge.cameraFile(this).absolutePath)
         val s = HyperXRApp.instance.settings.current
         hands = HandTrackingService(this).also {
             it.configure(s.handTracking, s.performance.handInferenceHz)
@@ -100,10 +108,13 @@ class HandBridgeService : Service() {
             // the game is gone: no runtime for a while (after the first one appeared, or never)
             val lastSign = maxOf(alive, startedNs)
             if (now - lastSign > IDLE_STOP_NS) { stopSelf(); return }
-            val wanted = wants != 0L && now - wants < CAMERA_IDLE_NS
+            handsWanted = wants != 0L && now - wants < CAMERA_IDLE_NS
+            val pt = HandBridge.nativeCameraWanted(cameraMap)
+            passthroughWanted = pt != 0L && now - pt < PASSTHROUGH_IDLE_NS
+            val wanted = handsWanted || passthroughWanted
             if (wanted && device == null && !opening && now - lastOpenTryNs > 2_000_000_000L) openCamera()
             if (!wanted && device != null) closeCamera()
-            if (device != null) publish(now)
+            if (device != null && handsWanted) publish(now)
             handler.postDelayed(this, if (device != null) PUBLISH_MS else 250L)
         }
     }
@@ -144,7 +155,8 @@ class HandBridgeService : Service() {
         val r = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 3)
         r.setOnImageAvailableListener({ rd ->
             val img = rd.acquireLatestImage() ?: return@setOnImageAvailableListener
-            hands?.submit(img, intr, null, null, rotation180 = rot180) ?: img.close()
+            if (passthroughWanted) runCatching { publishFrame(img, intr, rot180) }
+            if (handsWanted) hands?.submit(img, intr, null, null, rotation180 = rot180) ?: img.close() else img.close()
         }, camHandler)
         reader = r
         opening = true
@@ -173,6 +185,25 @@ class HandBridgeService : Service() {
         }
     }
 
+    /** A passthrough frame for the game (at most ~30 per second), RGBA at <= 640 px wide. */
+    private fun publishFrame(img: android.media.Image, intr: CameraIntrinsics, rot180: Boolean) {
+        val now = System.nanoTime()
+        if (now - lastFrameNs < FRAME_INTERVAL_NS || cameraMap == 0L) return
+        lastFrameNs = now
+        // when the light hit the sensor (the camera's timestamp is REALTIME on nearly every phone)
+        val age = android.os.SystemClock.elapsedRealtimeNanos() - img.timestamp
+        val captured = now - if (age in 0..250_000_000L) age else 0L
+        val bmp = frameConverter.convert(img, rot180)
+        val bytes = bmp.width * bmp.height * 4
+        val buf = frameBuffer?.takeIf { it.capacity() >= bytes } ?: java.nio.ByteBuffer.allocateDirect(bytes).also { frameBuffer = it }
+        buf.clear()
+        bmp.copyPixelsToBuffer(buf)  // ARGB_8888 is R, G, B, A in memory: what GL_RGBA expects
+        val s = bmp.width.toFloat() / intr.width
+        val cx = (if (rot180) intr.width - intr.cx else intr.cx) * s
+        val cy = (if (rot180) intr.height - intr.cy else intr.cy) * s
+        HandBridge.nativeCameraWrite(cameraMap, captured, buf, bmp.width, bmp.height, intr.fx * s, intr.fy * s, cx, cy)
+    }
+
     private fun closeCamera() {
         runCatching { device?.close() }
         device = null
@@ -186,6 +217,7 @@ class HandBridgeService : Service() {
         hands?.shutdown(); hands = null
         // nothing tracked any more: the game sees no hands rather than frozen ones
         if (map != 0L) { HandBridge.nativeWrite(map, System.nanoTime(), FloatArray(6), joints); HandBridge.nativeClose(map); map = 0L }
+        if (cameraMap != 0L) { HandBridge.nativeCameraClose(cameraMap); cameraMap = 0L }
         worker.quitSafely(); camThread.quitSafely()
         Diagnostics.log("Hand bridge for OpenXR games stopped")
         super.onDestroy()
@@ -198,6 +230,9 @@ class HandBridgeService : Service() {
         private const val PUBLISH_MS = 11L
         /** Camera off this long after the game last asked for hands. */
         private const val CAMERA_IDLE_NS = 5_000_000_000L
+        /** Passthrough frames stop this long after the game last showed the camera. */
+        private const val PASSTHROUGH_IDLE_NS = 3_000_000_000L
+        private const val FRAME_INTERVAL_NS = 30_000_000L
         /** Service gone when no OpenXR runtime has been alive this long. */
         private const val IDLE_STOP_NS = 90_000_000_000L
 
@@ -206,6 +241,7 @@ class HandBridgeService : Service() {
             if (!HyperXRApp.instance.settings.current.handTracking.openxrHands) return
             if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
             HandBridge.ensure(ctx)
+            HandBridge.ensureCamera(ctx)
             runCatching {
                 val i = Intent(ctx, HandBridgeService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
