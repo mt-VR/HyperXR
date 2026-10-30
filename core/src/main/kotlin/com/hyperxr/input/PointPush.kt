@@ -28,6 +28,13 @@ class PointPush {
     /** ... and may drop for this long without stopping (tracking hiccups). */
     var exitNs = 200_000_000L
 
+    /**
+     * Also accept a hand that simply leads with the index (the index tip the farthest from the
+     * eyes, the finger straight, not pinching), as people do when they touch a screen, not only
+     * the pointing fist.
+     */
+    var leadingIndexCounts = false
+
     var pointing = false; private set
     var pressed = false; private set
     /** 0 (no push) .. 1 (pressed), for the visual. */
@@ -54,7 +61,7 @@ class PointPush {
         tip.set(joints[HandJoint.INDEX_TIP])
 
         // pose with hysteresis; a held press keeps the pose (the finger bends a little when pushing)
-        val pose = isPointingPose(joints)
+        val pose = isPointingPose(joints) || (leadingIndexCounts && isIndexLeading(joints, eye))
         if (pose) {
             lostSinceNs = 0L
             if (poseSinceNs == 0L) poseSinceNs = now
@@ -86,6 +93,22 @@ class PointPush {
     }
 
     companion object {
+        /**
+         * The index is out in front: straight, its tip at least 1.5 cm farther from the eyes than
+         * every other fingertip, and away from the thumb (not a pinch).
+         */
+        fun isIndexLeading(j: Array<Vec3>, eye: Vec3): Boolean {
+            val bones = j[HandJoint.INDEX_MCP].distanceTo(j[HandJoint.INDEX_PIP]) + j[HandJoint.INDEX_PIP].distanceTo(j[HandJoint.INDEX_DIP]) +
+                j[HandJoint.INDEX_DIP].distanceTo(j[HandJoint.INDEX_TIP])
+            if (j[HandJoint.INDEX_MCP].distanceTo(j[HandJoint.INDEX_TIP]) / bones.coerceAtLeast(1e-4f) < 0.82f) return false
+            if (j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) < 0.035f) return false
+            val reach = j[HandJoint.INDEX_TIP].distanceTo(eye)
+            for (f in intArrayOf(HandJoint.MIDDLE_TIP, HandJoint.RING_TIP, HandJoint.PINKY_TIP)) {
+                if (j[f].distanceTo(eye) > reach - 0.015f) return false
+            }
+            return true
+        }
+
         /**
          * Index finger straight, at least two of middle/ring/pinky folded (their tips near the
          * palm). The thumb is ignored: out like a pistol or tucked in, both work.

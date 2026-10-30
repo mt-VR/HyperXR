@@ -94,6 +94,15 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val gaze = RayPointer(0, PointerSource.GAZE)
     private val ctrlPointers = arrayOf(RayPointer(1, PointerSource.JOYCON), RayPointer(2, PointerSource.JOYCON))
     private val touches = arrayOf(DirectTouch(3), DirectTouch(4))
+    /**
+     * Projected touch: panels float beyond arm's reach, so the index touches what it covers as
+     * seen from the eyes, and a short push towards it presses (held, it drags and scrolls). The
+     * push is measured as the fingertip moving away from the eyes, which stays right even when the
+     * hand's absolute depth is a few centimetres off.
+     */
+    private val touchPokes = arrayOf(com.hyperxr.input.PointPush().apply { leadingIndexCounts = true }, com.hyperxr.input.PointPush().apply { leadingIndexCounts = true })
+    private val touchRays = arrayOf(RayPointer(7, PointerSource.HAND_RAY), RayPointer(8, PointerSource.HAND_RAY))
+    private val touchRayOut = arrayOf(Ray(), Ray())
     private val ray = Ray()
     private var anchorYaw = 0f
     private var anchored = false
@@ -400,7 +409,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val h = if (input.holding[i]) notPointing[i] else input.hands[i]
             // pinch-and-hold away from any target opens the radial menu around this hand
             val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
-            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active ||
+            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || touchRays[i].hovered != null || linkDrag.active ||
                 lab?.handBusy?.get(i) == true
             if (h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
@@ -462,6 +471,19 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             } else microGestures[i].reset()
             val tip = if (directTouch && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
+            // projected touch (pinch mode; point-and-push mode already aims with the fingertip):
+            // not while the fingertip itself is at a surface, a pinch holds something, or pinching
+            val canPoke = directTouch && !pointMode && h.isUsable && !menuOpen && !labBusy && touches[i].hovered == null &&
+                handRays[i].captured == null && h.gesture != com.hyperxr.handtracking.Gesture.PINCH
+            val poked = touchPokes[i].update(if (canPoke) h.joints else null, input.head.position, h.depthSource == DepthSource.HAND_SIZE_PRIOR, now)
+            if (canPoke && touchPokes[i].pointing) {
+                val r = touchRayOut[i]
+                r.origin.set(input.head.position)
+                r.direction.set(h.joints[HandJoint.INDEX_TIP]).sub(input.head.position).normalize()
+                touchRays[i].update(r, poked, surfaces, now)
+                trackHit(touchRays[i], r)
+                dragWindows(touchRays[i], r, poked)
+            } else touchRays[i].update(null, false, surfaces, now)
         }
         // gaze: screen tap / viewer button, or dwell (look at a button to click it)
         input.gazeRay(ray)

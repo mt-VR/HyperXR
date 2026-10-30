@@ -214,7 +214,7 @@ fun HandsSection(a: MainActivity) {
             a.update { it.copy(handTracking = it.handTracking.copy(hybridMagic = v)) }
         }
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
-        ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador; a ponta dele é medida pela profundidade (ARCore Depth)") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
+        ToggleRow("Direct Touch", h.directTouch, "Toque com o indicador: o botão que a ponta do dedo cobre é o tocado; um empurrãozinho para a frente clica, segurando arrasta e rola. Perto do painel, o dedo encosta de verdade (ponta medida pela profundidade).") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
         listOf("Polegar (só espaço)", "Indicador", "Médio", "Anelar", "Mínimo").forEachIndexed { f, name ->
             ToggleRow("Teclado na mesa: $name", f in h.tableFingers) { v ->
                 a.update { s -> val next = if (v) s.handTracking.tableFingers + f else s.handTracking.tableFingers - f

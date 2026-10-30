@@ -129,7 +129,7 @@ object SurfaceMath {
  */
 class DirectTouch(val pointerId: Int) {
     var hoverDistance = 0.10f
-    var pressDistance = 0.008f
+    var pressDistance = 0.012f
     var releaseDistance = 0.022f
     /** Pressing from behind the panel is ignored; pushing this far through cancels. */
     var pushThroughLimit = 0.08f
@@ -174,7 +174,8 @@ class DirectTouch(val pointerId: Int) {
         for (s in surfaces) {
             if (!s.interactive) continue
             SurfaceMath.toLocal(s, tip, local)
-            if (local.z < -0.03f || local.z > hoverDistance * scale) continue
+            // a fast finger may already be past the surface in the frame after it was in front
+            if (local.z < -pushThroughLimit || local.z > hoverDistance * scale) continue
             if (!SurfaceMath.localToUv(s, local, uv)) continue
             if (local.z < bestZ) { bestZ = local.z; best = s }
         }
