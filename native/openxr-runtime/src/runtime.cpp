@@ -29,7 +29,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -50,6 +50,9 @@ struct Instance {
     bool extGles, extTimespec, extHeadless, extLocalFloor;
     uint64_t extMeta;  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
     XrAsyncRequestIdFB nextRequest;  // XR_FB_spatial_entity and friends: async request ids
+    // XR_EXT_future: Pico's asynchronous calls (they all finish at once; the future holds the result)
+    struct Future { uint64_t id; int kind; void* owner; XrResult result; int payload; } futures[64];
+    uint64_t nextFuture;
     bool gfxRequirementsQueried;
     bool systemQueried;
     char appName[XR_MAX_APPLICATION_NAME_SIZE];
@@ -757,6 +760,14 @@ const ExtDesc kExtensions[] = {
     {XR_FB_SCENE_CAPTURE_EXTENSION_NAME, XR_FB_scene_capture_SPEC_VERSION},
     // controller models (HyperMagic's own, glTF), per-layer blend factors, and two hints accepted
     {XR_FB_RENDER_MODEL_EXTENSION_NAME, XR_FB_render_model_SPEC_VERSION},
+    // Pico (ByteDance) spatial sensing: anchors, the room (scene), its planes and its mesh, with futures
+    {XR_EXT_FUTURE_EXTENSION_NAME, XR_EXT_future_SPEC_VERSION},
+    {XR_BD_FUTURE_PROGRESS_EXTENSION_NAME, XR_BD_future_progress_SPEC_VERSION},
+    {XR_BD_SPATIAL_SENSING_EXTENSION_NAME, XR_BD_spatial_sensing_SPEC_VERSION},
+    {XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME, XR_BD_spatial_anchor_SPEC_VERSION},
+    {XR_BD_SPATIAL_SCENE_EXTENSION_NAME, XR_BD_spatial_scene_SPEC_VERSION},
+    {XR_BD_SPATIAL_MESH_EXTENSION_NAME, XR_BD_spatial_mesh_SPEC_VERSION},
+    {XR_BD_SPATIAL_PLANE_EXTENSION_NAME, XR_BD_spatial_plane_SPEC_VERSION},
     {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
     {XR_META_LOCAL_DIMMING_EXTENSION_NAME, XR_META_local_dimming_SPEC_VERSION},
     {XR_META_HEADSET_ID_EXTENSION_NAME, XR_META_headset_id_SPEC_VERSION},
@@ -962,6 +973,11 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemSimultaneousHandsAndControllersPropertiesMETA*>(n)->supportsSimultaneousHandsAndControllers = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_KEYBOARD_TRACKING_PROPERTIES_FB)
             reinterpret_cast<XrSystemKeyboardTrackingPropertiesFB*>(n)->supportsKeyboardTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SPATIAL_SENSING_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialSensingPropertiesBD*>(n)->supportsSpatialSensing = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SPATIAL_ANCHOR_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialAnchorPropertiesBD*>(n)->supportsSpatialAnchor = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SPATIAL_SCENE_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialScenePropertiesBD*>(n)->supportsSpatialScene = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SPATIAL_MESH_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialMeshPropertiesBD*>(n)->supportsSpatialMesh = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SPATIAL_PLANE_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialPlanePropertiesBD*>(n)->supportsSpatialPlane = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_RENDER_MODEL_PROPERTIES_FB) reinterpret_cast<XrSystemRenderModelPropertiesFB*>(n)->supportsRenderModelLoading = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_HEADSET_ID_PROPERTIES_META) memset(&reinterpret_cast<XrSystemHeadsetIdPropertiesMETA*>(n)->id, 0, sizeof(XrUuidEXT));  // not a Meta headset
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB) reinterpret_cast<XrSystemPassthroughPropertiesFB*>(n)->supportsPassthrough = XR_TRUE;
@@ -1111,6 +1127,9 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PT_LAYER)) { static_cast<PassthroughLayer*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) { static_cast<Passthrough*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_SNAP)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_ANCHOR_BD)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_SDP)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     free(s->entities);
     s->entities = nullptr;
     if (s->gfx) hxp::gfxDestroySession(s->gfx);
@@ -2714,6 +2733,545 @@ XRAPI_ATTR XrResult XRAPI_CALL LoadRenderModelFB(XrSession h, const XrRenderMode
     return hxrendermodel::glb(left, buffer->buffer, buffer->bufferCapacityInput) == size ? XR_SUCCESS : XR_ERROR_RUNTIME_FAILURE;
 }
 
+// ------------------------------------------------------------------ Pico spatial sensing (XR_BD_spatial_*)
+enum FutureKind { FUT_START = 1, FUT_QUERY, FUT_ANCHOR, FUT_PERSIST, FUT_UNPERSIST, FUT_CAPTURE };
+
+struct SenseProvider { uint32_t magic; Session* session; XrSenseDataProviderTypeBD type; XrSenseDataProviderStateBD state; };
+struct Snapshot { uint32_t magic; Session* session; XrSenseDataProviderTypeBD type; int count; int16_t entity[MAX_ENTITIES]; };
+struct AnchorBD { uint32_t magic; Session* session; int entity; };
+
+SenseProvider* asProvider(XrSenseDataProviderBD h) { return asObj<SenseProvider>(reinterpret_cast<uint64_t>(h), MAGIC_SDP); }
+Snapshot* asSnapshot(XrSenseDataSnapshotBD h) { return asObj<Snapshot>(reinterpret_cast<uint64_t>(h), MAGIC_SNAP); }
+AnchorBD* asAnchorBD(XrAnchorBD h) { return asObj<AnchorBD>(reinterpret_cast<uint64_t>(h), MAGIC_ANCHOR_BD); }
+
+inline uint64_t fid(XrFutureEXT f) { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(f)); }
+
+/** Snapshots made by queries, until their completion call hands them out (future id -> snapshot). */
+struct PendingSnapshot { uint64_t future; Snapshot* snap; };
+PendingSnapshot gPendingSnapshots[64];
+pthread_mutex_t gPendingLock = PTHREAD_MUTEX_INITIALIZER;
+void pendingSnapshot(Instance*, uint64_t future, Snapshot* snap) {
+    pthread_mutex_lock(&gPendingLock);
+    PendingSnapshot* slot = &gPendingSnapshots[0];
+    for (auto& p : gPendingSnapshots) if (p.future == 0) { slot = &p; break; }
+    slot->future = future; slot->snap = snap;
+    pthread_mutex_unlock(&gPendingLock);
+}
+Snapshot* takeSnapshot(uint64_t future) {
+    Snapshot* r = nullptr;
+    pthread_mutex_lock(&gPendingLock);
+    for (auto& p : gPendingSnapshots) if (p.future == future && future != 0) { r = p.snap; p.future = 0; p.snap = nullptr; }
+    pthread_mutex_unlock(&gPendingLock);
+    return r;
+}
+
+/** A finished future holding [result] and a [payload] for its completion call. */
+XrFutureEXT newFuture(Instance* inst, int kind, void* owner, XrResult result, int payload) {
+    pthread_mutex_lock(&inst->lock);
+    Instance::Future* slot = &inst->futures[0];
+    for (auto& f : inst->futures) if (f.id == 0) { slot = &f; break; }  // all busy: the oldest slot is reused
+    slot->id = ++inst->nextFuture;
+    slot->kind = kind; slot->owner = owner; slot->result = result; slot->payload = payload;
+    XrFutureEXT id = reinterpret_cast<XrFutureEXT>(static_cast<uintptr_t>(slot->id));
+    pthread_mutex_unlock(&inst->lock);
+    return id;
+}
+
+/** Takes the future [id] of [kind] and [owner] (it can be completed once); null when unknown. */
+bool takeFuture(Instance* inst, XrFutureEXT id, int kind, void* owner, Instance::Future* out) {
+    bool found = false;
+    pthread_mutex_lock(&inst->lock);
+    for (auto& f : inst->futures)
+        if (fid(id) != 0 && f.id == fid(id) && f.kind == kind && f.owner == owner) { *out = f; f.id = 0; found = true; break; }
+    pthread_mutex_unlock(&inst->lock);
+    return found;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PollFutureEXT(XrInstance h, const XrFuturePollInfoEXT* info, XrFuturePollResultEXT* result) {
+    Instance* inst = asInstance(h);
+    if (!inst) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_FUTURE_POLL_INFO_EXT || !result || result->type != XR_TYPE_FUTURE_POLL_RESULT_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    bool known = false;
+    pthread_mutex_lock(&inst->lock);
+    for (auto& f : inst->futures) if (fid(info->future) != 0 && f.id == fid(info->future)) known = true;
+    pthread_mutex_unlock(&inst->lock);
+    if (!known) return XR_ERROR_FUTURE_INVALID_EXT;
+    result->state = XR_FUTURE_STATE_READY_EXT;  // nothing here takes time: every future is ready at once
+    for (auto* n = reinterpret_cast<XrBaseOutStructure*>(result->next); n; n = n->next)
+        if (n->type == XR_TYPE_FUTURE_POLL_RESULT_PROGRESS_BD) {
+            reinterpret_cast<XrFuturePollResultProgressBD*>(n)->isSupported = XR_TRUE;
+            reinterpret_cast<XrFuturePollResultProgressBD*>(n)->progressPercentage = 100;
+        }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CancelFutureEXT(XrInstance h, const XrFutureCancelInfoEXT* info) {
+    Instance* inst = asInstance(h);
+    if (!inst) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_FUTURE_CANCEL_INFO_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    bool found = false;
+    pthread_mutex_lock(&inst->lock);
+    for (auto& f : inst->futures) if (fid(info->future) != 0 && f.id == fid(info->future)) { f.id = 0; found = true; }
+    pthread_mutex_unlock(&inst->lock);
+    return found ? XR_SUCCESS : XR_ERROR_FUTURE_INVALID_EXT;
+}
+
+void providerEvent(SenseProvider* p, bool updated) {
+    XrEventDataSenseDataProviderStateChangedBD st{XR_TYPE_EVENT_DATA_SENSE_DATA_PROVIDER_STATE_CHANGED_BD};
+    st.provider = reinterpret_cast<XrSenseDataProviderBD>(p);
+    st.newState = p->state;
+    pushEvent(p->session->instance, &st, sizeof(st));
+    if (!updated) return;
+    XrEventDataSenseDataUpdatedBD up{XR_TYPE_EVENT_DATA_SENSE_DATA_UPDATED_BD};
+    up.provider = reinterpret_cast<XrSenseDataProviderBD>(p);
+    pushEvent(p->session->instance, &up, sizeof(up));
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateSenseDataProviderBD(XrSession h, const XrSenseDataProviderCreateInfoBD* ci, XrSenseDataProviderBD* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_SENSE_DATA_PROVIDER_CREATE_INFO_BD || !out) return XR_ERROR_VALIDATION_FAILURE;
+    struct { XrSenseDataProviderTypeBD type; const char* ext; } kinds[] = {
+        {XR_SENSE_DATA_PROVIDER_TYPE_ANCHOR_BD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME}, {XR_SENSE_DATA_PROVIDER_TYPE_SCENE_BD, XR_BD_SPATIAL_SCENE_EXTENSION_NAME},
+        {XR_SENSE_DATA_PROVIDER_TYPE_MESH_BD, XR_BD_SPATIAL_MESH_EXTENSION_NAME}, {XR_SENSE_DATA_PROVIDER_TYPE_PLANE_BD, XR_BD_SPATIAL_PLANE_EXTENSION_NAME}};
+    bool ok = false;
+    for (auto& k : kinds) if (k.type == ci->providerType && extEnabled(s->instance, k.ext)) ok = true;
+    if (!ok) return XR_ERROR_VALIDATION_FAILURE;
+    SenseProvider* p = alloc<SenseProvider>(MAGIC_SDP, s);
+    if (!p) return XR_ERROR_OUT_OF_MEMORY;
+    p->session = s; p->type = ci->providerType; p->state = XR_SENSE_DATA_PROVIDER_STATE_INITIALIZED_BD;
+    *out = reinterpret_cast<XrSenseDataProviderBD>(p);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL StartSenseDataProviderAsyncBD(XrSenseDataProviderBD h, const XrSenseDataProviderStartInfoBD* info, XrFutureEXT* future) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SENSE_DATA_PROVIDER_START_INFO_BD || !future) return XR_ERROR_VALIDATION_FAILURE;
+    *future = newFuture(p->session->instance, FUT_START, p->session, XR_SUCCESS, 0);
+    ensureScene(p->session);
+    p->state = XR_SENSE_DATA_PROVIDER_STATE_RUNNING_BD;
+    providerEvent(p, true);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL StartSenseDataProviderCompleteBD(XrSession h, XrFutureEXT future, XrFutureCompletionEXT* completion) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!completion || completion->type != XR_TYPE_FUTURE_COMPLETION_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    Instance::Future f;
+    if (!takeFuture(s->instance, future, FUT_START, s, &f)) return XR_ERROR_FUTURE_INVALID_EXT;
+    completion->futureResult = f.result;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSenseDataProviderStateBD(XrSenseDataProviderBD h, XrSenseDataProviderStateBD* state) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!state) return XR_ERROR_VALIDATION_FAILURE;
+    *state = p->state;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL StopSenseDataProviderBD(XrSenseDataProviderBD h) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    p->state = XR_SENSE_DATA_PROVIDER_STATE_STOPPED_BD;
+    providerEvent(p, false);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroySenseDataProviderBD(XrSenseDataProviderBD h) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    release(p);
+    return XR_SUCCESS;
+}
+
+/** Whether an entity belongs to what a provider of [type] senses (anchors, or the room's planes). */
+bool sensedBy(const SceneEntity& e, XrSenseDataProviderTypeBD type) {
+    if (e.kind == DEAD || e.kind == hxscene::ROOM) return false;
+    return type == XR_SENSE_DATA_PROVIDER_TYPE_ANCHOR_BD ? e.kind == hxscene::ANCHOR : e.kind != hxscene::ANCHOR;
+}
+
+XrSemanticLabelBD labelBD(int kind) {
+    return kind == hxscene::FLOOR ? XR_SEMANTIC_LABEL_FLOOR_BD : kind == hxscene::CEILING ? XR_SEMANTIC_LABEL_CEILING_BD :
+           kind == hxscene::WALL ? XR_SEMANTIC_LABEL_WALL_BD : XR_SEMANTIC_LABEL_UNKNOWN_BD;
+}
+
+/** Whether entity [e] passes the filters chained on a query. */
+bool passesBD(const SceneEntity& e, const void* chain) {
+    for (auto* n = static_cast<const XrBaseInStructure*>(chain); n; n = n->next) {
+        if (n->type == XR_TYPE_SENSE_DATA_FILTER_UUID_BD) {
+            auto* f = reinterpret_cast<const XrSenseDataFilterUuidBD*>(n);
+            bool any = false;
+            for (uint32_t i = 0; i < f->uuidCount; i++) if (memcmp(f->uuids[i].data, e.uuid.data, 16) == 0) any = true;
+            if (!any) return false;
+        } else if (n->type == XR_TYPE_SENSE_DATA_FILTER_SEMANTIC_BD) {
+            auto* f = reinterpret_cast<const XrSenseDataFilterSemanticBD*>(n);
+            bool any = false;
+            for (uint32_t i = 0; i < f->labelCount; i++) if (f->labels[i] == labelBD(e.kind)) any = true;
+            if (!any) return false;
+        } else if (n->type == XR_TYPE_SENSE_DATA_FILTER_PLANE_ORIENTATION_BD) {
+            auto* f = reinterpret_cast<const XrSenseDataFilterPlaneOrientationBD*>(n);
+            XrPlaneOrientationBD o = e.kind == hxscene::FLOOR ? XR_PLANE_ORIENTATION_HORIZONTAL_UPWARD_BD :
+                                     e.kind == hxscene::CEILING ? XR_PLANE_ORIENTATION_HORIZONTAL_DOWNWARD_BD : XR_PLANE_ORIENTATION_VERTICAL_BD;
+            bool any = false;
+            for (uint32_t i = 0; i < f->orientationCount; i++) if (f->orientations[i] == o) any = true;
+            if (!any) return false;
+        }
+    }
+    return true;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL QuerySenseDataAsyncBD(XrSenseDataProviderBD h, const XrSenseDataQueryInfoBD* info, XrFutureEXT* future) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SENSE_DATA_QUERY_INFO_BD || !future) return XR_ERROR_VALIDATION_FAILURE;
+    Session* s = p->session;
+    ensureScene(s);
+    Snapshot* snap = alloc<Snapshot>(MAGIC_SNAP, s);
+    if (!snap) return XR_ERROR_OUT_OF_MEMORY;
+    snap->session = s; snap->type = p->type;
+    for (int i = 0; i < s->entityCount; i++)
+        if (sensedBy(s->entities[i], p->type) && passesBD(s->entities[i], info->next))
+            snap->entity[snap->count++] = static_cast<int16_t>(i);
+    *future = newFuture(s->instance, FUT_QUERY, p, XR_SUCCESS, 0);
+    pendingSnapshot(s->instance, fid(*future), snap);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL QuerySenseDataCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrSenseDataQueryCompletionBD* completion) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!completion || completion->type != XR_TYPE_SENSE_DATA_QUERY_COMPLETION_BD) return XR_ERROR_VALIDATION_FAILURE;
+    Instance::Future f;
+    if (!takeFuture(p->session->instance, future, FUT_QUERY, p, &f)) return XR_ERROR_FUTURE_INVALID_EXT;
+    Snapshot* snap = takeSnapshot(fid(future));
+    completion->futureResult = snap ? XR_SUCCESS : XR_ERROR_RUNTIME_FAILURE;
+    completion->snapshot = reinterpret_cast<XrSenseDataSnapshotBD>(snap);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroySenseDataSnapshotBD(XrSenseDataSnapshotBD h) {
+    Snapshot* snap = asSnapshot(h);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    release(snap);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetQueriedSenseDataBD(XrSenseDataSnapshotBD h, XrQueriedSenseDataGetInfoBD* info, XrQueriedSenseDataBD* data) {
+    Snapshot* snap = asSnapshot(h);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_QUERIED_SENSE_DATA_GET_INFO_BD || !data || data->type != XR_TYPE_QUERIED_SENSE_DATA_BD) return XR_ERROR_VALIDATION_FAILURE;
+    data->stateCountOutput = static_cast<uint32_t>(snap->count);
+    if (data->stateCapacityInput == 0) return XR_SUCCESS;
+    if (data->stateCapacityInput < static_cast<uint32_t>(snap->count)) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!data->states) return XR_ERROR_VALIDATION_FAILURE;
+    for (int i = 0; i < snap->count; i++) {
+        XrSpatialEntityStateBD& st = data->states[i];
+        st.entityId = static_cast<XrSpatialEntityIdBD>(snap->entity[i] + 1);
+        st.lastUpdateTime = hxp::nowNs();
+        st.uuid = snap->session->entities[snap->entity[i]].uuid;
+    }
+    return XR_SUCCESS;
+}
+
+/** The entity [id] of a snapshot, or null. */
+SceneEntity* snapEntity(Snapshot* snap, XrSpatialEntityIdBD id) {
+    for (int i = 0; i < snap->count; i++) if (static_cast<XrSpatialEntityIdBD>(snap->entity[i] + 1) == id) return &snap->session->entities[snap->entity[i]];
+    return nullptr;
+}
+
+/** Components a snapshot's entity has (bit per XrSpatialEntityComponentTypeBD, plane orientation as bit 6). */
+uint32_t componentsBD(const SceneEntity& e, XrSenseDataProviderTypeBD type) {
+    constexpr uint32_t LOC = 1u << XR_SPATIAL_ENTITY_COMPONENT_TYPE_LOCATION_BD, SEM = 1u << XR_SPATIAL_ENTITY_COMPONENT_TYPE_SEMANTIC_BD,
+                       BOX = 1u << XR_SPATIAL_ENTITY_COMPONENT_TYPE_BOUNDING_BOX_2D_BD, POLY = 1u << XR_SPATIAL_ENTITY_COMPONENT_TYPE_POLYGON_BD,
+                       MESH = 1u << XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD, ORIENT = 1u << 6;
+    if (e.kind == hxscene::ANCHOR) return LOC;
+    switch (type) {
+        case XR_SENSE_DATA_PROVIDER_TYPE_SCENE_BD: return LOC | SEM | BOX | POLY;
+        case XR_SENSE_DATA_PROVIDER_TYPE_PLANE_BD: return LOC | SEM | BOX | POLY | ORIENT;
+        case XR_SENSE_DATA_PROVIDER_TYPE_MESH_BD: return LOC | SEM | MESH;
+        default: return LOC;
+    }
+}
+
+uint32_t componentBit(XrSpatialEntityComponentTypeBD c) {
+    if (c == XR_SPATIAL_ENTITY_COMPONENT_TYPE_PLANE_ORIENTATION_BD) return 1u << 6;
+    return c <= XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD ? 1u << c : 0;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateSpatialEntityComponentTypesBD(XrSenseDataSnapshotBD h, XrSpatialEntityIdBD id, uint32_t capacity, uint32_t* count, XrSpatialEntityComponentTypeBD* types) {
+    Snapshot* snap = asSnapshot(h);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = snapEntity(snap, id);
+    if (!e) return XR_ERROR_SPATIAL_ENTITY_ID_INVALID_BD;
+    static const XrSpatialEntityComponentTypeBD all[] = {
+        XR_SPATIAL_ENTITY_COMPONENT_TYPE_LOCATION_BD, XR_SPATIAL_ENTITY_COMPONENT_TYPE_SEMANTIC_BD, XR_SPATIAL_ENTITY_COMPONENT_TYPE_BOUNDING_BOX_2D_BD,
+        XR_SPATIAL_ENTITY_COMPONENT_TYPE_POLYGON_BD, XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD, XR_SPATIAL_ENTITY_COMPONENT_TYPE_PLANE_ORIENTATION_BD};
+    uint32_t mask = componentsBD(*e, snap->type), n = 0;
+    for (auto c : all) if (mask & componentBit(c)) n++;
+    *count = n;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!types) return XR_ERROR_VALIDATION_FAILURE;
+    n = 0;
+    for (auto c : all) if (mask & componentBit(c)) types[n++] = c;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpatialEntityUuidBD(XrSenseDataSnapshotBD h, XrSpatialEntityIdBD id, XrUuidEXT* uuid) {
+    Snapshot* snap = asSnapshot(h);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    if (!uuid) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = snapEntity(snap, id);
+    if (!e) return XR_ERROR_SPATIAL_ENTITY_ID_INVALID_BD;
+    *uuid = e->uuid;
+    return XR_SUCCESS;
+}
+
+/** A plane's outline in its own XY plane: the room outline (floor, ceiling) or the wall's rectangle. */
+int planeOutline(Session* s, const SceneEntity& e, XrVector2f* out) {
+    if (e.kind == hxscene::FLOOR || e.kind == hxscene::CEILING) {
+        const XrVector2f* v = e.kind == hxscene::FLOOR ? s->floorOutline : s->ceilingOutline;
+        for (int i = 0; i < s->room.count; i++) out[i] = v[i];
+        return s->room.count;
+    }
+    out[0] = {e.minX, e.minY}; out[1] = {e.maxX, e.minY}; out[2] = {e.maxX, e.maxY}; out[3] = {e.minX, e.maxY};
+    return 4;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpatialEntityComponentDataBD(XrSenseDataSnapshotBD h, const XrSpatialEntityComponentGetInfoBD* info, XrSpatialEntityComponentDataBaseHeaderBD* data) {
+    Snapshot* snap = asSnapshot(h);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_GET_INFO_BD || !data) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = snapEntity(snap, info->entityId);
+    if (!e) return XR_ERROR_SPATIAL_ENTITY_ID_INVALID_BD;
+    if (!(componentsBD(*e, snap->type) & componentBit(info->componentType))) return XR_ERROR_VALIDATION_FAILURE;
+    Session* s = snap->session;
+    switch (info->componentType) {
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_LOCATION_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_LOCATION_BD) return XR_ERROR_VALIDATION_FAILURE;
+            const XrSpatialEntityLocationGetInfoBD* where = nullptr;
+            for (auto* n = static_cast<const XrBaseInStructure*>(info->next); n; n = n->next)
+                if (n->type == XR_TYPE_SPATIAL_ENTITY_LOCATION_GET_INFO_BD) where = reinterpret_cast<const XrSpatialEntityLocationGetInfoBD*>(n);
+            Space* base = where ? asSpace(where->baseSpace) : nullptr;
+            if (!base) return XR_ERROR_VALIDATION_FAILURE;
+            auto* d = reinterpret_cast<XrSpatialEntityComponentDataLocationBD*>(data);
+            XrPosef b; bool tb;
+            if (!spaceInStage(base, hxp::nowNs(), &b, &tb)) { d->location.locationFlags = 0; return XR_SUCCESS; }
+            d->location.pose = hx::compose(hx::inverse(b), e->pose);
+            d->location.locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                        XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+            return XR_SUCCESS;
+        }
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_SEMANTIC_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_SEMANTIC_BD) return XR_ERROR_VALIDATION_FAILURE;
+            auto* d = reinterpret_cast<XrSpatialEntityComponentDataSemanticBD*>(data);
+            d->labelCountOutput = 1;
+            if (d->labelCapacityInput == 0) return XR_SUCCESS;
+            if (!d->labels) return XR_ERROR_VALIDATION_FAILURE;
+            d->labels[0] = labelBD(e->kind);
+            return XR_SUCCESS;
+        }
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_BOUNDING_BOX_2D_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_BOUNDING_BOX_2D_BD) return XR_ERROR_VALIDATION_FAILURE;
+            auto* d = reinterpret_cast<XrSpatialEntityComponentDataBoundingBox2DBD*>(data);
+            d->boundingBox2D = {{e->minX, e->minY}, {e->maxX - e->minX, e->maxY - e->minY}};
+            return XR_SUCCESS;
+        }
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_POLYGON_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_POLYGON_BD) return XR_ERROR_VALIDATION_FAILURE;
+            auto* d = reinterpret_cast<XrSpatialEntityComponentDataPolygonBD*>(data);
+            XrVector2f v[hxscene::MAX_POLY];
+            uint32_t n = static_cast<uint32_t>(planeOutline(s, *e, v));
+            d->vertexCountOutput = n;
+            if (d->vertexCapacityInput == 0) return XR_SUCCESS;
+            if (d->vertexCapacityInput < n) return XR_ERROR_SIZE_INSUFFICIENT;
+            if (!d->vertices) return XR_ERROR_VALIDATION_FAILURE;
+            memcpy(d->vertices, v, sizeof(XrVector2f) * n);
+            return XR_SUCCESS;
+        }
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_TRIANGLE_MESH_BD) return XR_ERROR_VALIDATION_FAILURE;
+            auto* d = reinterpret_cast<XrSpatialEntityComponentDataTriangleMeshBD*>(data);
+            // the plane as a triangle fan around its middle, in its own space (z = 0)
+            XrVector2f v[hxscene::MAX_POLY];
+            uint32_t n = static_cast<uint32_t>(planeOutline(s, *e, v));
+            d->vertexCountOutput = n + 1;
+            d->indexCountOutput = n * 3;
+            if (d->vertexCapacityInput == 0 && d->indexCapacityInput == 0) return XR_SUCCESS;
+            if (d->vertexCapacityInput < n + 1 || d->indexCapacityInput < n * 3) return XR_ERROR_SIZE_INSUFFICIENT;
+            if (!d->vertices || !d->indices) return XR_ERROR_VALIDATION_FAILURE;
+            float cx = 0, cy = 0;
+            for (uint32_t i = 0; i < n; i++) { cx += v[i].x; cy += v[i].y; }
+            d->vertices[0] = {cx / n, cy / n, 0};
+            for (uint32_t i = 0; i < n; i++) d->vertices[i + 1] = {v[i].x, v[i].y, 0};
+            for (uint32_t i = 0; i < n; i++) {
+                d->indices[i * 3] = 0;
+                d->indices[i * 3 + 1] = static_cast<uint16_t>(1 + i);
+                d->indices[i * 3 + 2] = static_cast<uint16_t>(1 + (i + 1) % n);
+            }
+            return XR_SUCCESS;
+        }
+        case XR_SPATIAL_ENTITY_COMPONENT_TYPE_PLANE_ORIENTATION_BD: {
+            if (data->type != XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_PLANE_ORIENTATION_BD) return XR_ERROR_VALIDATION_FAILURE;
+            reinterpret_cast<XrSpatialEntityComponentDataPlaneOrientationBD*>(data)->orientation =
+                e->kind == hxscene::FLOOR ? XR_PLANE_ORIENTATION_HORIZONTAL_UPWARD_BD :
+                e->kind == hxscene::CEILING ? XR_PLANE_ORIENTATION_HORIZONTAL_DOWNWARD_BD : XR_PLANE_ORIENTATION_VERTICAL_BD;
+            return XR_SUCCESS;
+        }
+        default: return XR_ERROR_VALIDATION_FAILURE;
+    }
+}
+
+AnchorBD* newAnchorBD(Session* s, int entity) {
+    AnchorBD* a = alloc<AnchorBD>(MAGIC_ANCHOR_BD, s);
+    if (a) { a->session = s; a->entity = entity; }
+    return a;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateSpatialEntityAnchorBD(XrSenseDataProviderBD h, const XrSpatialEntityAnchorCreateInfoBD* ci, XrAnchorBD* out) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_SPATIAL_ENTITY_ANCHOR_CREATE_INFO_BD || !out) return XR_ERROR_VALIDATION_FAILURE;
+    Snapshot* snap = asSnapshot(ci->snapshot);
+    if (!snap) return XR_ERROR_HANDLE_INVALID;
+    SceneEntity* e = snapEntity(snap, ci->entityId);
+    if (!e) return XR_ERROR_SPATIAL_ENTITY_ID_INVALID_BD;
+    AnchorBD* a = newAnchorBD(p->session, static_cast<int>(e - p->session->entities));
+    if (!a) return XR_ERROR_OUT_OF_MEMORY;
+    *out = reinterpret_cast<XrAnchorBD>(a);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyAnchorBD(XrAnchorBD h) {
+    AnchorBD* a = asAnchorBD(h);
+    if (!a) return XR_ERROR_HANDLE_INVALID;
+    release(a);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetAnchorUuidBD(XrAnchorBD h, XrUuidEXT* uuid) {
+    AnchorBD* a = asAnchorBD(h);
+    if (!a) return XR_ERROR_HANDLE_INVALID;
+    if (!uuid) return XR_ERROR_VALIDATION_FAILURE;
+    *uuid = a->session->entities[a->entity].uuid;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateAnchorSpaceBD(XrSession h, const XrAnchorSpaceCreateInfoBD* ci, XrSpace* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_ANCHOR_SPACE_CREATE_INFO_BD || !out) return XR_ERROR_VALIDATION_FAILURE;
+    AnchorBD* a = asAnchorBD(ci->anchor);
+    if (!a || a->session != s) return XR_ERROR_HANDLE_INVALID;
+    if (!hx::poseValid(ci->poseInAnchorSpace)) return XR_ERROR_POSE_INVALID;
+    XrSpace sp = entitySpace(s, a->entity);
+    if (sp == XR_NULL_HANDLE) return XR_ERROR_OUT_OF_MEMORY;
+    asSpace(sp)->offset = ci->poseInAnchorSpace;
+    *out = sp;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateSpatialAnchorAsyncBD(XrSenseDataProviderBD h, const XrSpatialAnchorCreateInfoBD* info, XrFutureEXT* future) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPATIAL_ANCHOR_CREATE_INFO_BD || !future) return XR_ERROR_VALIDATION_FAILURE;
+    if (p->type != XR_SENSE_DATA_PROVIDER_TYPE_ANCHOR_BD) return XR_ERROR_VALIDATION_FAILURE;
+    Space* base = asSpace(info->space);
+    if (!base || base->session != p->session) return XR_ERROR_HANDLE_INVALID;
+    if (!hx::poseValid(info->pose)) return XR_ERROR_POSE_INVALID;
+    Session* s = p->session;
+    ensureScene(s);
+    XrPosef b; bool tb;
+    XrResult result = XR_SUCCESS;
+    int entity = -1;
+    if (!spaceInStage(base, info->time > 0 ? info->time : hxp::nowNs(), &b, &tb)) result = XR_ERROR_SPATIAL_SENSING_SERVICE_UNAVAILABLE_BD;
+    else {
+        XrUuidEXT u;
+        hxp::randomBytes(u.data, 16);
+        u.data[6] = static_cast<uint8_t>((u.data[6] & 0x0f) | 0x40);
+        u.data[8] = static_cast<uint8_t>((u.data[8] & 0x3f) | 0x80);
+        SceneEntity* e = addEntity(s, hxscene::ANCHOR, u, hx::compose(b, info->pose));
+        if (!e) result = XR_ERROR_LIMIT_REACHED; else entity = static_cast<int>(e - s->entities);
+    }
+    *future = newFuture(s->instance, FUT_ANCHOR, p, result, entity);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateSpatialAnchorCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrSpatialAnchorCreateCompletionBD* completion) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!completion || completion->type != XR_TYPE_SPATIAL_ANCHOR_CREATE_COMPLETION_BD) return XR_ERROR_VALIDATION_FAILURE;
+    Instance::Future f;
+    if (!takeFuture(p->session->instance, future, FUT_ANCHOR, p, &f)) return XR_ERROR_FUTURE_INVALID_EXT;
+    completion->futureResult = f.result;
+    completion->anchor = XR_NULL_HANDLE;
+    if (f.result == XR_SUCCESS) {
+        AnchorBD* a = newAnchorBD(p->session, f.payload);
+        if (!a) { completion->futureResult = XR_ERROR_OUT_OF_MEMORY; return XR_SUCCESS; }
+        completion->anchor = reinterpret_cast<XrAnchorBD>(a);
+        completion->uuid = p->session->entities[f.payload].uuid;
+    }
+    return XR_SUCCESS;
+}
+
+XrResult persistBD(XrSenseDataProviderBD h, XrAnchorBD anchor, XrPersistenceLocationBD location, bool store, int kind, XrFutureEXT* future) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    AnchorBD* a = asAnchorBD(anchor);
+    if (!a || a->session != p->session) return XR_ERROR_HANDLE_INVALID;
+    if (location != XR_PERSISTENCE_LOCATION_LOCAL_BD) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity& e = p->session->entities[a->entity];
+    XrResult result = XR_SUCCESS;
+    if (e.kind != hxscene::ANCHOR) result = XR_ERROR_ANCHOR_NOT_SUPPORTED_FOR_ENTITY_BD;  // the room is HyperMagic's, not the app's
+    else { e.stored = store; persistAnchors(p->session); }
+    *future = newFuture(p->session->instance, kind, p, result, 0);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PersistSpatialAnchorAsyncBD(XrSenseDataProviderBD h, const XrSpatialAnchorPersistInfoBD* info, XrFutureEXT* future) {
+    if (!info || info->type != XR_TYPE_SPATIAL_ANCHOR_PERSIST_INFO_BD || !future) return asProvider(h) ? XR_ERROR_VALIDATION_FAILURE : XR_ERROR_HANDLE_INVALID;
+    return persistBD(h, info->anchor, info->location, true, FUT_PERSIST, future);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL UnpersistSpatialAnchorAsyncBD(XrSenseDataProviderBD h, const XrSpatialAnchorUnpersistInfoBD* info, XrFutureEXT* future) {
+    if (!info || info->type != XR_TYPE_SPATIAL_ANCHOR_UNPERSIST_INFO_BD || !future) return asProvider(h) ? XR_ERROR_VALIDATION_FAILURE : XR_ERROR_HANDLE_INVALID;
+    return persistBD(h, info->anchor, info->location, false, FUT_UNPERSIST, future);
+}
+
+XrResult completeSimple(XrSenseDataProviderBD h, XrFutureEXT future, int kind, XrFutureCompletionEXT* completion) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!completion || completion->type != XR_TYPE_FUTURE_COMPLETION_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    Instance::Future f;
+    if (!takeFuture(p->session->instance, future, kind, p, &f)) return XR_ERROR_FUTURE_INVALID_EXT;
+    completion->futureResult = f.result;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PersistSpatialAnchorCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrFutureCompletionEXT* c) { return completeSimple(h, future, FUT_PERSIST, c); }
+XRAPI_ATTR XrResult XRAPI_CALL UnpersistSpatialAnchorCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrFutureCompletionEXT* c) { return completeSimple(h, future, FUT_UNPERSIST, c); }
+
+/** "Scan the room" (Pico): there is no scanner; the room is read again from HyperMagic. */
+XRAPI_ATTR XrResult XRAPI_CALL CaptureSceneAsyncBD(XrSenseDataProviderBD h, const XrSceneCaptureInfoBD* info, XrFutureEXT* future) {
+    SenseProvider* p = asProvider(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SCENE_CAPTURE_INFO_BD || !future) return XR_ERROR_VALIDATION_FAILURE;
+    ensureScene(p->session);
+    buildScene(p->session);
+    *future = newFuture(p->session->instance, FUT_CAPTURE, p, XR_SUCCESS, 0);
+    XrEventDataSenseDataUpdatedBD up{XR_TYPE_EVENT_DATA_SENSE_DATA_UPDATED_BD};
+    up.provider = h;
+    pushEvent(p->session->instance, &up, sizeof(up));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CaptureSceneCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrFutureCompletionEXT* c) { return completeSimple(h, future, FUT_CAPTURE, c); }
+
 // ------------------------------------------------------------------ smaller Meta extensions
 /** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
 const char* const kPerfCounters[] = {
@@ -3099,6 +3657,33 @@ const Entry kEntries[] = {
     HX_EXT(SaveSpaceListFB, XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME),
     HX_EXT(ResumeSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
     HX_EXT(PauseSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
+    HX_EXT(PollFutureEXT, XR_EXT_FUTURE_EXTENSION_NAME),
+    HX_EXT(CancelFutureEXT, XR_EXT_FUTURE_EXTENSION_NAME),
+    HX_EXT(CreateSenseDataProviderBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(StartSenseDataProviderAsyncBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(StartSenseDataProviderCompleteBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(GetSenseDataProviderStateBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(QuerySenseDataAsyncBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(QuerySenseDataCompleteBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(DestroySenseDataSnapshotBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(GetQueriedSenseDataBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(StopSenseDataProviderBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(DestroySenseDataProviderBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(EnumerateSpatialEntityComponentTypesBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(GetSpatialEntityUuidBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(GetSpatialEntityComponentDataBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(CreateSpatialEntityAnchorBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(DestroyAnchorBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(GetAnchorUuidBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(CreateAnchorSpaceBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),
+    HX_EXT(CreateSpatialAnchorAsyncBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(CreateSpatialAnchorCompleteBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(PersistSpatialAnchorAsyncBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(PersistSpatialAnchorCompleteBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(UnpersistSpatialAnchorAsyncBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(UnpersistSpatialAnchorCompleteBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
+    HX_EXT(CaptureSceneAsyncBD, XR_BD_SPATIAL_SCENE_EXTENSION_NAME),
+    HX_EXT(CaptureSceneCompleteBD, XR_BD_SPATIAL_SCENE_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),

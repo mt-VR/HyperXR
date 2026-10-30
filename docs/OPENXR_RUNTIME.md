@@ -50,7 +50,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | API | OpenXR 1.0 e 1.1 (`xrLocateSpaces`, LOCAL_FLOOR) |
 | Extensões | `XR_KHR_android_create_instance`, `XR_KHR_opengl_es_enable`, `XR_KHR_convert_timespec_time`, `XR_MND_headless`, `XR_EXT_local_floor`, `XR_KHR_android_thread_settings`, `XR_EXT_performance_settings` |
 | Meta (Quest) | `XR_FB_display_refresh_rate` (a taxa da tela), `XR_FB_color_space` (Rec.709), `XR_FB_swapchain_update_state` (+ `_opengl_es`), `XR_FB_foveation` e `_configuration` (aceitas; a imagem inteira é sempre usada), `XR_FB_composition_layer_settings` e `_image_layout`, `XR_FB_touch_controller_pro`, `XR_META_touch_controller_plus` |
-| Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch |
+| Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch; `XR_BD_spatial_sensing`, `_anchor`, `_scene`, `_mesh` e `_plane` (provedores de âncoras, sala, planos e malha sobre a mesma sala do HyperGuardian; âncoras gravadas como as da Meta) com `XR_EXT_future` e `XR_BD_future_progress` |
 | Âncoras e sala | `XR_FB_spatial_entity` (+ `_query`, `_storage`, `_container`), `XR_FB_scene` e `XR_FB_scene_capture`: âncoras com pose fixa, gravadas nos arquivos do próprio jogo; a sala (chão, teto, paredes, layout) a partir da área do HyperGuardian |
 | Modelos e camadas Meta | `XR_FB_render_model` (modelo de controle do próprio HyperMagic, glTF 2.0 gerado pelo runtime), `XR_FB_composition_layer_alpha_blend` (fatores de mistura por camada), `XR_META_local_dimming` (aceito, sem efeito num celular) e `XR_META_headset_id` (zero: não é um óculos da Meta) |
 | Mãos como controle | `XR_EXT_hand_interaction` (pinça, ativar mira, agarrar, e as poses mira/empunhadura/pinça/toque das mãos rastreadas) junto com o perfil de controle (`XR_META_simultaneous_hands_and_controllers`) |
@@ -105,11 +105,11 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 740 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 890 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
-  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) modelo do controle (arquivo .glb válido, faces para fora) e mãos como controle, vibração, proximidade e métricas.
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) modelo do controle (arquivo .glb válido, faces para fora) mãos como controle, vibração, proximidade, métricas e o sensoriamento espacial da Pico (futures, provedores, filtros, componentes, âncoras entre sessões).
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

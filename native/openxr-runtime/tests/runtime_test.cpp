@@ -1630,6 +1630,210 @@ static void testHandInteractionAndMetaExtras() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testPicoSpatialSensing() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_EXT_FUTURE_EXTENSION_NAME, XR_BD_FUTURE_PROGRESS_EXTENSION_NAME, XR_BD_SPATIAL_SENSING_EXTENSION_NAME,
+                          XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME, XR_BD_SPATIAL_SCENE_EXTENSION_NAME, XR_BD_SPATIAL_MESH_EXTENSION_NAME, XR_BD_SPATIAL_PLANE_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 8, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrLocateSpace); LOAD(inst, xrPollFutureEXT); LOAD(inst, xrCancelFutureEXT);
+    LOAD(inst, xrCreateSenseDataProviderBD); LOAD(inst, xrStartSenseDataProviderAsyncBD); LOAD(inst, xrStartSenseDataProviderCompleteBD);
+    LOAD(inst, xrGetSenseDataProviderStateBD); LOAD(inst, xrQuerySenseDataAsyncBD); LOAD(inst, xrQuerySenseDataCompleteBD);
+    LOAD(inst, xrGetQueriedSenseDataBD); LOAD(inst, xrDestroySenseDataSnapshotBD); LOAD(inst, xrEnumerateSpatialEntityComponentTypesBD);
+    LOAD(inst, xrGetSpatialEntityComponentDataBD); LOAD(inst, xrGetSpatialEntityUuidBD); LOAD(inst, xrStopSenseDataProviderBD);
+    LOAD(inst, xrDestroySenseDataProviderBD); LOAD(inst, xrCreateSpatialAnchorAsyncBD); LOAD(inst, xrCreateSpatialAnchorCompleteBD);
+    LOAD(inst, xrPersistSpatialAnchorAsyncBD); LOAD(inst, xrPersistSpatialAnchorCompleteBD); LOAD(inst, xrUnpersistSpatialAnchorAsyncBD);
+    LOAD(inst, xrUnpersistSpatialAnchorCompleteBD); LOAD(inst, xrCreateAnchorSpaceBD); LOAD(inst, xrGetAnchorUuidBD); LOAD(inst, xrDestroyAnchorBD);
+    LOAD(inst, xrCaptureSceneAsyncBD); LOAD(inst, xrCaptureSceneCompleteBD); LOAD(inst, xrCreateSpatialEntityAnchorBD);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemSpatialPlanePropertiesBD plp{XR_TYPE_SYSTEM_SPATIAL_PLANE_PROPERTIES_BD};
+    XrSystemSpatialSensingPropertiesBD ssp{XR_TYPE_SYSTEM_SPATIAL_SENSING_PROPERTIES_BD};
+    ssp.next = &plp;
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &ssp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(ssp.supportsSpatialSensing == XR_TRUE && plp.supportsSpatialPlane == XR_TRUE);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    const float rx[4] = {-2, 2, 2, -2}, rz[4] = {1.5f, 1.5f, -1.5f, -1.5f};
+    hxTestSetRoom(rx, rz, 4, 2.4f);
+    XrEventDataBuffer ev;
+
+    auto start = [&](XrSenseDataProviderTypeBD type) {
+        XrSenseDataProviderCreateInfoBD pci{XR_TYPE_SENSE_DATA_PROVIDER_CREATE_INFO_BD};
+        pci.providerType = type;
+        XrSenseDataProviderBD p = XR_NULL_HANDLE;
+        CHECK_RESULT(xrCreateSenseDataProviderBD(s, &pci, &p), XR_SUCCESS);
+        XrSenseDataProviderStartInfoBD si{XR_TYPE_SENSE_DATA_PROVIDER_START_INFO_BD};
+        XrFutureEXT fut = XR_NULL_HANDLE;
+        CHECK_RESULT(xrStartSenseDataProviderAsyncBD(p, &si, &fut), XR_SUCCESS);
+        XrFuturePollResultProgressBD prog{XR_TYPE_FUTURE_POLL_RESULT_PROGRESS_BD};
+        XrFuturePollResultEXT pr{XR_TYPE_FUTURE_POLL_RESULT_EXT};
+        pr.next = &prog;
+        XrFuturePollInfoEXT pi{XR_TYPE_FUTURE_POLL_INFO_EXT};
+        pi.future = fut;
+        CHECK_RESULT(xrPollFutureEXT(inst, &pi, &pr), XR_SUCCESS);
+        CHECK(pr.state == XR_FUTURE_STATE_READY_EXT && prog.progressPercentage == 100);
+        XrFutureCompletionEXT done{XR_TYPE_FUTURE_COMPLETION_EXT};
+        CHECK_RESULT(xrStartSenseDataProviderCompleteBD(s, fut, &done), XR_SUCCESS);
+        CHECK(done.futureResult == XR_SUCCESS);
+        CHECK_RESULT(xrStartSenseDataProviderCompleteBD(s, fut, &done), XR_ERROR_FUTURE_INVALID_EXT);  // completed once
+        XrSenseDataProviderStateBD st;
+        CHECK_RESULT(xrGetSenseDataProviderStateBD(p, &st), XR_SUCCESS);
+        CHECK(st == XR_SENSE_DATA_PROVIDER_STATE_RUNNING_BD);
+        return p;
+    };
+    auto query = [&](XrSenseDataProviderBD p, const void* filter) {
+        XrSenseDataQueryInfoBD qi{XR_TYPE_SENSE_DATA_QUERY_INFO_BD};
+        qi.next = filter;
+        XrFutureEXT fut;
+        CHECK_RESULT(xrQuerySenseDataAsyncBD(p, &qi, &fut), XR_SUCCESS);
+        XrSenseDataQueryCompletionBD qc{XR_TYPE_SENSE_DATA_QUERY_COMPLETION_BD};
+        CHECK_RESULT(xrQuerySenseDataCompleteBD(p, fut, &qc), XR_SUCCESS);
+        CHECK(qc.futureResult == XR_SUCCESS && qc.snapshot != XR_NULL_HANDLE);
+        return qc.snapshot;
+    };
+
+    // planes: the 4 walls when asking for vertical ones
+    XrSenseDataProviderBD planes = start(XR_SENSE_DATA_PROVIDER_TYPE_PLANE_BD);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SENSE_DATA_UPDATED_BD, &ev));
+    XrPlaneOrientationBD vertical = XR_PLANE_ORIENTATION_VERTICAL_BD;
+    XrSenseDataFilterPlaneOrientationBD of{XR_TYPE_SENSE_DATA_FILTER_PLANE_ORIENTATION_BD};
+    of.orientationCount = 1; of.orientations = &vertical;
+    XrSenseDataSnapshotBD snap = query(planes, &of);
+    XrQueriedSenseDataGetInfoBD gi{XR_TYPE_QUERIED_SENSE_DATA_GET_INFO_BD};
+    XrQueriedSenseDataBD qd{XR_TYPE_QUERIED_SENSE_DATA_BD};
+    CHECK_RESULT(xrGetQueriedSenseDataBD(snap, &gi, &qd), XR_SUCCESS);
+    CHECK(qd.stateCountOutput == 4);
+    XrSpatialEntityStateBD states[8];
+    for (auto& st : states) st = {XR_TYPE_SPATIAL_ENTITY_STATE_BD};
+    qd.stateCapacityInput = 8; qd.states = states;
+    CHECK_RESULT(xrGetQueriedSenseDataBD(snap, &gi, &qd), XR_SUCCESS);
+    uint32_t n = 0;
+    XrSpatialEntityComponentTypeBD comps[8];
+    CHECK_RESULT(xrEnumerateSpatialEntityComponentTypesBD(snap, states[0].entityId, 8, &n, comps), XR_SUCCESS);
+    CHECK(n == 5);
+    XrSpatialEntityLocationGetInfoBD lg{XR_TYPE_SPATIAL_ENTITY_LOCATION_GET_INFO_BD};
+    lg.baseSpace = stage;
+    XrSpatialEntityComponentGetInfoBD cg{XR_TYPE_SPATIAL_ENTITY_COMPONENT_GET_INFO_BD};
+    cg.next = &lg; cg.entityId = states[0].entityId; cg.componentType = XR_SPATIAL_ENTITY_COMPONENT_TYPE_LOCATION_BD;
+    XrSpatialEntityComponentDataLocationBD ld{XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_LOCATION_BD};
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&ld)), XR_SUCCESS);
+    CHECK(NEAR(ld.location.pose.position.y, 1.2, 1e-5));  // half way up a 2.4 m wall
+    cg.next = nullptr; cg.componentType = XR_SPATIAL_ENTITY_COMPONENT_TYPE_PLANE_ORIENTATION_BD;
+    XrSpatialEntityComponentDataPlaneOrientationBD od{XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_PLANE_ORIENTATION_BD};
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&od)), XR_SUCCESS);
+    CHECK(od.orientation == XR_PLANE_ORIENTATION_VERTICAL_BD);
+    cg.componentType = XR_SPATIAL_ENTITY_COMPONENT_TYPE_SEMANTIC_BD;
+    XrSemanticLabelBD label = XR_SEMANTIC_LABEL_UNKNOWN_BD;
+    XrSpatialEntityComponentDataSemanticBD sd{XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_SEMANTIC_BD};
+    sd.labelCapacityInput = 1; sd.labels = &label;
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&sd)), XR_SUCCESS);
+    CHECK(label == XR_SEMANTIC_LABEL_WALL_BD);
+    cg.componentType = XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD;  // planes do not carry meshes
+    XrSpatialEntityComponentDataTriangleMeshBD md{XR_TYPE_SPATIAL_ENTITY_COMPONENT_DATA_TRIANGLE_MESH_BD};
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&md)), XR_ERROR_VALIDATION_FAILURE);
+    // an anchor on a wall
+    XrSpatialEntityAnchorCreateInfoBD eai{XR_TYPE_SPATIAL_ENTITY_ANCHOR_CREATE_INFO_BD};
+    eai.snapshot = snap; eai.entityId = states[0].entityId;
+    XrAnchorBD wallAnchor;
+    CHECK_RESULT(xrCreateSpatialEntityAnchorBD(planes, &eai, &wallAnchor), XR_SUCCESS);
+    XrUuidEXT u1, u2;
+    CHECK_RESULT(xrGetAnchorUuidBD(wallAnchor, &u1), XR_SUCCESS);
+    CHECK(memcmp(u1.data, states[0].uuid.data, 16) == 0);
+    CHECK_RESULT(xrDestroySenseDataSnapshotBD(snap), XR_SUCCESS);
+
+    // the room as a mesh: the floor is a fan around its middle
+    XrSenseDataProviderBD mesh = start(XR_SENSE_DATA_PROVIDER_TYPE_MESH_BD);
+    XrSemanticLabelBD floorLabel = XR_SEMANTIC_LABEL_FLOOR_BD;
+    XrSenseDataFilterSemanticBD sf{XR_TYPE_SENSE_DATA_FILTER_SEMANTIC_BD};
+    sf.labelCount = 1; sf.labels = &floorLabel;
+    snap = query(mesh, &sf);
+    qd.stateCapacityInput = 8;
+    CHECK_RESULT(xrGetQueriedSenseDataBD(snap, &gi, &qd), XR_SUCCESS);
+    CHECK(qd.stateCountOutput == 1);
+    cg.entityId = states[0].entityId; cg.componentType = XR_SPATIAL_ENTITY_COMPONENT_TYPE_TRIANGLE_MESH_BD;
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&md)), XR_SUCCESS);
+    CHECK(md.vertexCountOutput == 5 && md.indexCountOutput == 12);
+    XrVector3f mv[8]; uint16_t mi[16];
+    md.vertexCapacityInput = 8; md.vertices = mv; md.indexCapacityInput = 16; md.indices = mi;
+    CHECK_RESULT(xrGetSpatialEntityComponentDataBD(snap, &cg, reinterpret_cast<XrSpatialEntityComponentDataBaseHeaderBD*>(&md)), XR_SUCCESS);
+    CHECK(NEAR(mv[0].x, 0, 1e-5) && NEAR(mv[1].x, -2, 1e-5) && mi[0] == 0 && mi[11] == 1);
+    CHECK_RESULT(xrDestroySenseDataSnapshotBD(snap), XR_SUCCESS);
+
+    // anchors: created, located, saved, found again in a new session, then forgotten
+    XrSenseDataProviderBD anchors = start(XR_SENSE_DATA_PROVIDER_TYPE_ANCHOR_BD);
+    XrSpatialAnchorCreateInfoBD aci{XR_TYPE_SPATIAL_ANCHOR_CREATE_INFO_BD};
+    aci.space = stage; aci.pose.orientation.w = 1; aci.pose.position = {0.5f, 1, -2}; aci.time = monoNs();
+    XrFutureEXT fut;
+    CHECK_RESULT(xrCreateSpatialAnchorAsyncBD(anchors, &aci, &fut), XR_SUCCESS);
+    XrSpatialAnchorCreateCompletionBD acc{XR_TYPE_SPATIAL_ANCHOR_CREATE_COMPLETION_BD};
+    CHECK_RESULT(xrCreateSpatialAnchorCompleteBD(anchors, fut, &acc), XR_SUCCESS);
+    CHECK(acc.futureResult == XR_SUCCESS && acc.anchor != XR_NULL_HANDLE);
+    XrAnchorSpaceCreateInfoBD asi{XR_TYPE_ANCHOR_SPACE_CREATE_INFO_BD};
+    asi.anchor = acc.anchor; asi.poseInAnchorSpace.orientation.w = 1;
+    XrSpace anchorSpace;
+    CHECK_RESULT(xrCreateAnchorSpaceBD(s, &asi, &anchorSpace), XR_SUCCESS);
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    CHECK_RESULT(xrLocateSpace(anchorSpace, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK(NEAR(loc.pose.position.x, 0.5, 1e-5) && NEAR(loc.pose.position.z, -2, 1e-5));
+    XrSpatialAnchorPersistInfoBD per{XR_TYPE_SPATIAL_ANCHOR_PERSIST_INFO_BD};
+    per.anchor = acc.anchor; per.location = XR_PERSISTENCE_LOCATION_LOCAL_BD;
+    CHECK_RESULT(xrPersistSpatialAnchorAsyncBD(anchors, &per, &fut), XR_SUCCESS);
+    XrFutureCompletionEXT fc{XR_TYPE_FUTURE_COMPLETION_EXT};
+    CHECK_RESULT(xrPersistSpatialAnchorCompleteBD(anchors, fut, &fc), XR_SUCCESS);
+    CHECK(fc.futureResult == XR_SUCCESS && hxTestSavedAnchors() == 1);
+    per.anchor = wallAnchor;  // the room is not the app's to save
+    CHECK_RESULT(xrPersistSpatialAnchorAsyncBD(anchors, &per, &fut), XR_SUCCESS);
+    CHECK_RESULT(xrPersistSpatialAnchorCompleteBD(anchors, fut, &fc), XR_SUCCESS);
+    CHECK(fc.futureResult == XR_ERROR_ANCHOR_NOT_SUPPORTED_FOR_ENTITY_BD);
+    CHECK_RESULT(xrGetAnchorUuidBD(acc.anchor, &u1), XR_SUCCESS);
+    // scene capture re-reads the room
+    XrSenseDataProviderBD scene = start(XR_SENSE_DATA_PROVIDER_TYPE_SCENE_BD);
+    XrSceneCaptureInfoBD sci{XR_TYPE_SCENE_CAPTURE_INFO_BD};
+    CHECK_RESULT(xrCaptureSceneAsyncBD(scene, &sci, &fut), XR_SUCCESS);
+    CHECK_RESULT(xrCaptureSceneCompleteBD(scene, fut, &fc), XR_SUCCESS);
+    CHECK(fc.futureResult == XR_SUCCESS);
+    CHECK_RESULT(xrStopSenseDataProviderBD(scene), XR_SUCCESS);
+    XrFutureCancelInfoEXT cancel{XR_TYPE_FUTURE_CANCEL_INFO_EXT};
+    cancel.future = fut;
+    CHECK_RESULT(xrCancelFutureEXT(inst, &cancel), XR_ERROR_FUTURE_INVALID_EXT);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    anchors = start(XR_SENSE_DATA_PROVIDER_TYPE_ANCHOR_BD);
+    snap = query(anchors, nullptr);
+    qd.stateCapacityInput = 8;
+    CHECK_RESULT(xrGetQueriedSenseDataBD(snap, &gi, &qd), XR_SUCCESS);
+    CHECK(qd.stateCountOutput == 1);
+    CHECK_RESULT(xrGetSpatialEntityUuidBD(snap, states[0].entityId, &u2), XR_SUCCESS);
+    CHECK(memcmp(u1.data, u2.data, 16) == 0);
+    eai.snapshot = snap; eai.entityId = states[0].entityId;
+    XrAnchorBD again;
+    CHECK_RESULT(xrCreateSpatialEntityAnchorBD(anchors, &eai, &again), XR_SUCCESS);
+    XrSpatialAnchorUnpersistInfoBD un{XR_TYPE_SPATIAL_ANCHOR_UNPERSIST_INFO_BD};
+    un.anchor = again; un.location = XR_PERSISTENCE_LOCATION_LOCAL_BD;
+    CHECK_RESULT(xrUnpersistSpatialAnchorAsyncBD(anchors, &un, &fut), XR_SUCCESS);
+    CHECK_RESULT(xrUnpersistSpatialAnchorCompleteBD(anchors, fut, &fc), XR_SUCCESS);
+    CHECK(hxTestSavedAnchors() == 0);
+    CHECK_RESULT(xrDestroyAnchorBD(again), XR_SUCCESS);
+    CHECK_RESULT(xrDestroySenseDataProviderBD(anchors), XR_SUCCESS);
+    hxTestSetRoom(nullptr, nullptr, 0, 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1661,6 +1865,7 @@ int main() {
     testSpatialEntitiesAndScene();
     testRenderModel();
     testHandInteractionAndMetaExtras();
+    testPicoSpatialSensing();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }
