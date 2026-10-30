@@ -68,6 +68,15 @@ class QuestApkTest {
         assertTrue(r.reasons.any { "3 extensões Meta" in it })
     }
 
+    @Test fun handTrackingGameIsServed() {
+        val r = QuestApk.inspect(apk(mapOf(
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
+            "lib/arm64-v8a/libunity.so" to bin("XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim"),
+        )))
+        assertEquals(Verdict.LIKELY_RUNS, r.verdict)
+        assertTrue(r.reasons.any { "hand tracking" in it })
+    }
+
     @Test fun picoAppIsRecognised() {
         val r = QuestApk.inspect(apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to bin("XR_KHR_opengl_es_enable", "XR_BD_controller_interaction", "XR_PICO_configuration"),

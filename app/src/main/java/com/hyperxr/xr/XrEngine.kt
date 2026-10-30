@@ -908,6 +908,8 @@ class XrEngine(
     }
 
     fun onResume() {
+        // back in front: HyperMagic's own hand tracking needs the camera the game's hand bridge held
+        com.hyperxr.openxr.HandBridgeService.stop(activity)
         tracker?.start(); gyro.start(); content.onResume()
         vsyncRunning = true
         activity.runOnUiThread { android.view.Choreographer.getInstance().postFrameCallback(vsyncCallback) }

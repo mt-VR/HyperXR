@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #define LOG_TAG "HyperMagic-Runtime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -156,6 +157,32 @@ void* sensorMain(void*) {
     if (gyro) ASensorEventQueue_disableSensor(q, gyro);
     ASensorManager_destroyEventQueue(sm, q);
     return nullptr;  // the looper reference taken above is released by trackerStop()
+}
+
+// ------------------------------------------------------------------ hands
+/** Maps content://com.hypermagic.runtime/hands (read-write: the runtime reports it is alive). */
+HxHandShared* mapHands() {
+    JNIEnv* e = env();
+    if (!e || !gContext) return nullptr;
+    jclass ctxCls = e->GetObjectClass(gContext);
+    jobject cr = e->CallObjectMethod(gContext, e->GetMethodID(ctxCls, "getContentResolver", "()Landroid/content/ContentResolver;"));
+    if (clearException(e) || !cr) return nullptr;
+    jclass uriCls = e->FindClass("android/net/Uri");
+    jstring s = e->NewStringUTF("content://com.hypermagic.runtime/hands");
+    jobject uri = e->CallStaticObjectMethod(uriCls, e->GetStaticMethodID(uriCls, "parse", "(Ljava/lang/String;)Landroid/net/Uri;"), s);
+    jstring mode = e->NewStringUTF("rw");
+    jclass crCls = e->GetObjectClass(cr);
+    jobject pfd = e->CallObjectMethod(cr, e->GetMethodID(crCls, "openFileDescriptor", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;"), uri, mode);
+    if (clearException(e) || !pfd) { LOGI("HyperMagic hands not reachable (hand bridge off)"); return nullptr; }
+    int fd = e->CallIntMethod(pfd, e->GetMethodID(e->GetObjectClass(pfd), "detachFd", "()I"));
+    if (clearException(e) || fd < 0) return nullptr;
+    void* p = mmap(nullptr, sizeof(HxHandShared), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (p == MAP_FAILED) { LOGW("hands: mmap failed"); return nullptr; }
+    HxHandShared* h = static_cast<HxHandShared*>(p);
+    if (h->magic != HX_HANDS_MAGIC) { munmap(p, sizeof(HxHandShared)); LOGW("hands: unknown format"); return nullptr; }
+    LOGI("hands from HyperMagic mapped");
+    return h;
 }
 
 // ------------------------------------------------------------------ config
@@ -480,6 +507,36 @@ void readInput(HxInput* out) {
 }
 
 void recenter() { pthread_mutex_lock(&gTrackLock); gRecenter = true; pthread_mutex_unlock(&gTrackLock); }
+
+/**
+ * Hands from HyperMagic: the app's shared file, opened through its provider (any thread; the
+ * mapping is made once and kept for the life of the process).
+ */
+bool readHands(HxHandShared* out, bool wantsHands) {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static HxHandShared* map = nullptr;
+    static int64_t lastTryNs = 0;
+    pthread_mutex_lock(&lock);
+    if (!map && nowNs() - lastTryNs > 2000000000LL) {
+        lastTryNs = nowNs();
+        map = mapHands();
+    }
+    HxHandShared* m = map;
+    pthread_mutex_unlock(&lock);
+    if (!m) return false;
+    int64_t now = nowNs();
+    __atomic_store_n(&m->readerAliveNs, now, __ATOMIC_RELAXED);
+    if (wantsHands) __atomic_store_n(&m->readerWantsHandsNs, now, __ATOMIC_RELAXED);
+    // sequence lock: copy until the writer was not in the middle of an update
+    for (int tries = 0; tries < 8; tries++) {
+        uint32_t s1 = __atomic_load_n(&m->seq, __ATOMIC_ACQUIRE);
+        if (s1 & 1u) continue;
+        memcpy(out, m, sizeof(HxHandShared));
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (__atomic_load_n(&m->seq, __ATOMIC_RELAXED) == s1) return out->magic == HX_HANDS_MAGIC;
+    }
+    return false;
+}
 
 bool headPose(int64_t timeNs, const HxConfig& cfg, XrPosef* out) {
     pthread_mutex_lock(&gTrackLock);

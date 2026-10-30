@@ -183,6 +183,8 @@ object CompatLayer {
      * runtime config provider and of the OpenXR broker, which makes both visible.
      */
     fun launchGame(ctx: Context, pkg: String, activity: String) {
+        // hands for the game's hand tracking: the camera service must start while HyperMagic is in front
+        com.hyperxr.openxr.HandBridgeService.start(ctx)
         val uris = buildList {
             add(Uri.parse("content://com.hypermagic.runtime/visibility/$pkg"))
             if (installed(ctx, BROKER_PACKAGE)) add(Uri.parse("content://org.khronos.openxr.runtime_broker/visibility/$pkg"))

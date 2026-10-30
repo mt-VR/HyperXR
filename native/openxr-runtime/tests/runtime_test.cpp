@@ -7,9 +7,14 @@
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_loader_negotiation.h>
+#include <time.h>
+
+#include "../src/hx_hands.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
+extern "C" void hxTestSetHands(const HxHandShared* h);
+extern "C" int64_t hxTestHandsWanted();
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch);
 
 static int gFailures = 0;
@@ -653,6 +658,149 @@ static void testMetaAndPico() {
     xrDestroyInstance(plain);
 }
 
+static int64_t monoNs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+/** A right hand held out in front, palm down, fingers forward (camera space: -z forward, y up). */
+static void rightHandPalmDown(float lm[21][3]) {
+    const float wrist[3] = {0.10f, -0.30f, -0.30f};
+    // thumb on the left of a right hand seen from above; index .. little from left to right
+    const float fingerX[4] = {-0.030f, -0.010f, 0.010f, 0.030f};
+    for (int k = 0; k < 3; k++) lm[0][k] = wrist[k];
+    for (int t = 0; t < 4; t++) { lm[1 + t][0] = wrist[0] - 0.03f - 0.012f * t; lm[1 + t][1] = wrist[1]; lm[1 + t][2] = wrist[2] - 0.02f - 0.025f * t; }
+    for (int f = 0; f < 4; f++)
+        for (int j = 0; j < 4; j++) {
+            float* p = lm[5 + f * 4 + j];
+            p[0] = wrist[0] + fingerX[f]; p[1] = wrist[1]; p[2] = wrist[2] - 0.09f - 0.03f * j;
+        }
+}
+
+static void testHands() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_FB_HAND_TRACKING_AIM_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 3, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem);
+    LOAD(inst, xrGetSystemProperties);
+    LOAD(inst, xrCreateSession);
+    LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace);
+    LOAD(inst, xrCreateHandTrackerEXT);
+    LOAD(inst, xrDestroyHandTrackerEXT);
+    LOAD(inst, xrLocateHandJointsEXT);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    CHECK_RESULT(xrGetSystem(inst, &sgi, &sys), XR_SUCCESS);
+    XrSystemHandTrackingPropertiesEXT htp{XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &htp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(htp.supportsHandTracking == XR_TRUE);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+    rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    hxTestSetHead(0, 0, 0, 1, 1);
+
+    XrHandTrackerCreateInfoEXT hci{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+    hci.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+    hci.hand = (XrHandEXT)7;
+    XrHandTrackerEXT bad;
+    CHECK_RESULT(xrCreateHandTrackerEXT(s, &hci, &bad), XR_ERROR_VALIDATION_FAILURE);
+    XrHandTrackerEXT left, right;
+    hci.hand = XR_HAND_LEFT_EXT;
+    CHECK_RESULT(xrCreateHandTrackerEXT(s, &hci, &left), XR_SUCCESS);
+    hci.hand = XR_HAND_RIGHT_EXT;
+    CHECK_RESULT(xrCreateHandTrackerEXT(s, &hci, &right), XR_SUCCESS);
+
+    XrHandJointLocationEXT joints[XR_HAND_JOINT_COUNT_EXT];
+    XrHandTrackingAimStateFB aim{XR_TYPE_HAND_TRACKING_AIM_STATE_FB};
+    XrHandJointLocationsEXT locs{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+    locs.next = &aim;
+    locs.jointCount = XR_HAND_JOINT_COUNT_EXT;
+    locs.jointLocations = joints;
+    XrHandJointsLocateInfoEXT li{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+    li.baseSpace = stage;
+    li.time = monoNs();
+
+    // no HyperMagic: no hands, but no error
+    hxTestSetHands(nullptr);
+    CHECK_RESULT(xrLocateHandJointsEXT(right, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_FALSE && joints[XR_HAND_JOINT_WRIST_EXT].locationFlags == 0);
+
+    HxHandShared h{};
+    h.magic = HX_HANDS_MAGIC;
+    rightHandPalmDown(h.joints[1]);
+    h.tracked[1] = 1; h.confidence[1] = 0.9f; h.pinch[1] = 0.95f; h.timeNs[1] = monoNs();
+    hxTestSetHands(&h);
+    CHECK_RESULT(xrLocateHandJointsEXT(right, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_TRUE);
+    CHECK(hxTestHandsWanted() > 0);
+    // camera 8 cm in front of the eyes (1.6 m), head straight: wrist at (0.10, 1.30, -0.38)
+    XrPosef w = joints[XR_HAND_JOINT_WRIST_EXT].pose;
+    CHECK(NEAR(w.position.x, 0.10, 1e-4) && NEAR(w.position.y, 1.30, 1e-4) && NEAR(w.position.z, -0.38, 1e-4));
+    CHECK(joints[XR_HAND_JOINT_INDEX_TIP_EXT].locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT);
+    CHECK(NEAR(joints[XR_HAND_JOINT_INDEX_TIP_EXT].pose.position.z, -0.38 - 0.18, 1e-4));
+    // OpenXR joint axes: +Y out of the back of the hand (up, palm down), +Z back along the finger
+    auto axis = [](XrQuaternionf q, float x, float y, float z, float out[3]) {
+        float tx = 2 * (q.y * z - q.z * y), ty = 2 * (q.z * x - q.x * z), tz = 2 * (q.x * y - q.y * x);
+        out[0] = x + q.w * tx + (q.y * tz - q.z * ty); out[1] = y + q.w * ty + (q.z * tx - q.x * tz); out[2] = z + q.w * tz + (q.x * ty - q.y * tx);
+    };
+    float up[3], back[3];
+    axis(joints[XR_HAND_JOINT_INDEX_PROXIMAL_EXT].pose.orientation, 0, 1, 0, up);
+    axis(joints[XR_HAND_JOINT_INDEX_PROXIMAL_EXT].pose.orientation, 0, 0, 1, back);
+    CHECK(up[1] > 0.99f);
+    CHECK(back[2] > 0.99f);
+    axis(joints[XR_HAND_JOINT_PALM_EXT].pose.orientation, 0, 1, 0, up);
+    CHECK(up[1] > 0.99f);
+    CHECK(joints[XR_HAND_JOINT_PALM_EXT].radius > joints[XR_HAND_JOINT_INDEX_TIP_EXT].radius);
+    // Meta's aim: valid, pinching, pointing forward from the knuckles
+    CHECK((aim.status & XR_HAND_TRACKING_AIM_VALID_BIT_FB) && (aim.status & XR_HAND_TRACKING_AIM_INDEX_PINCHING_BIT_FB));
+    CHECK(NEAR(aim.pinchStrengthIndex, 0.95, 1e-5));
+    float fwd[3];
+    axis(aim.aimPose.orientation, 0, 0, -1, fwd);
+    CHECK(fwd[2] < -0.8f);
+    // the left hand is not tracked
+    CHECK_RESULT(xrLocateHandJointsEXT(left, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_FALSE && aim.status == 0);
+    // hands too old are dropped
+    h.timeNs[1] = monoNs() - 500000000LL;
+    hxTestSetHands(&h);
+    CHECK_RESULT(xrLocateHandJointsEXT(right, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_FALSE);
+    // a mirrored (left) hand gets the back of the hand up too
+    HxHandShared lh = h;
+    for (int j = 0; j < 21; j++) { lh.joints[0][j][0] = -h.joints[1][j][0]; lh.joints[0][j][1] = h.joints[1][j][1]; lh.joints[0][j][2] = h.joints[1][j][2]; }
+    lh.tracked[0] = 1; lh.timeNs[0] = monoNs(); lh.tracked[1] = 0;
+    hxTestSetHands(&lh);
+    CHECK_RESULT(xrLocateHandJointsEXT(left, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_TRUE);
+    axis(joints[XR_HAND_JOINT_MIDDLE_PROXIMAL_EXT].pose.orientation, 0, 1, 0, up);
+    CHECK(up[1] > 0.99f);
+    // validation
+    locs.jointCount = 21;
+    CHECK_RESULT(xrLocateHandJointsEXT(left, &li, &locs), XR_ERROR_VALIDATION_FAILURE);
+    locs.jointCount = XR_HAND_JOINT_COUNT_EXT;
+    li.time = 0;
+    CHECK_RESULT(xrLocateHandJointsEXT(left, &li, &locs), XR_ERROR_TIME_INVALID);
+    CHECK_RESULT(xrDestroyHandTrackerEXT(left), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyHandTrackerEXT(left), XR_ERROR_HANDLE_INVALID);
+    hxTestSetHands(nullptr);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);  // frees the right tracker
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -675,6 +823,7 @@ int main() {
     LOAD(inst, xrDestroyInstance);
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
     testMetaAndPico();
+    testHands();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

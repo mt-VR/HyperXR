@@ -8,7 +8,12 @@ namespace {
 XrQuaternionf gHead = {0, 0, 0, 1};
 bool gTracked = true;
 HxInput gInput = {};
+HxHandShared gHands = {};
+bool gHandsSet = false;
 }
+
+extern "C" void hxTestSetHands(const HxHandShared* h) { if (h) { gHands = *h; gHandsSet = true; } else gHandsSet = false; }
+extern "C" int64_t hxTestHandsWanted() { return gHands.readerWantsHandsNs; }
 
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch) {
     gInput.buttons = buttons;
@@ -43,6 +48,13 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
 }
 void recenter() {}
 void readInput(HxInput* out) { *out = gInput; }
+bool readHands(HxHandShared* out, bool wantsHands) {
+    if (!gHandsSet) return false;
+    gHands.readerAliveNs = nowNs();
+    if (wantsHands) gHands.readerWantsHandsNs = gHands.readerAliveNs;
+    *out = gHands;
+    return true;
+}
 XrResult gfxCreateSession(const void*, HxSessionGfx**) { return XR_ERROR_GRAPHICS_DEVICE_INVALID; }
 void gfxDestroySession(HxSessionGfx*) {}
 XrResult gfxEnumerateFormats(int64_t*, uint32_t, uint32_t* count) { *count = 0; return XR_SUCCESS; }

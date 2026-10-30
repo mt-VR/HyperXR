@@ -51,6 +51,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Extensões | `XR_KHR_android_create_instance`, `XR_KHR_opengl_es_enable`, `XR_KHR_convert_timespec_time`, `XR_MND_headless`, `XR_EXT_local_floor`, `XR_KHR_android_thread_settings`, `XR_EXT_performance_settings` |
 | Meta (Quest) | `XR_FB_display_refresh_rate` (a taxa da tela), `XR_FB_color_space` (Rec.709), `XR_FB_swapchain_update_state` (+ `_opengl_es`), `XR_FB_foveation` e `_configuration` (aceitas; a imagem inteira é sempre usada), `XR_FB_composition_layer_settings` e `_image_layout`, `XR_FB_touch_controller_pro`, `XR_META_touch_controller_plus` |
 | Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch |
+| Mãos | `XR_EXT_hand_tracking` (26 juntas, com raio) e `XR_FB_hand_tracking_aim` (mira e pinça da Meta), com as mãos que o HyperMagic rastreia pela câmera (veja abaixo) |
 | Sistema | HMD, estéreo primário, blend OPAQUE, orientação rastreada (3DoF), posição por modelo de pescoço |
 | Espaços | VIEW, LOCAL (altura dos olhos), STAGE e LOCAL_FLOOR (chão em y = 0), espaços de ação |
 | Swapchains | `GL_SRGB8_ALPHA8`, `GL_RGBA8`, profundidade 16/24/24+8/32F, texturas array, imagem estática |
@@ -61,8 +62,16 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Limitações (reais)
 
 - **Controles sem rastreamento**: botões, gatilhos e analógicos funcionam; a pose do controle segue a
-  cabeça. Mãos (hand tracking) não chegam aos apps OpenXR.
-- **Extensões Meta e Pico**: as listadas acima existem; as outras (passthrough, hand tracking, âncoras
+  cabeça.
+- **Mãos**: chegam pelo `XR_EXT_hand_tracking`. Ao abrir um jogo OpenXR, o HyperMagic inicia um serviço
+  em primeiro plano (`HandBridgeService`, notificação "mãos no jogo") que liga a câmera traseira só
+  enquanto o jogo tem um rastreador de mão e publica as mãos ~90 vezes por segundo num arquivo
+  compartilhado (`hx_hands.h`), que o runtime mapeia pelo provider (`content://com.hypermagic.runtime/hands`).
+  Os 21 pontos viram as 26 juntas do OpenXR (palma e metacarpos estimados ao longo da palma; cada
+  junta orientada pelo osso e pelo dorso da mão); a câmera é tratada como 8 cm à frente dos olhos.
+  Sem velocidades das juntas, sem malha (`XR_FB_hand_tracking_mesh`) e sem cápsulas; a orientação do
+  polegar é aproximada. Desligue em Ajustes > Mãos ("Mãos nos jogos OpenXR").
+- **Extensões Meta e Pico**: as listadas acima existem; as outras (passthrough, malha das mãos, âncoras
   espaciais, `XR_PICO_*`) não. Jogos que as exigem, que usam a VrApi ou só Vulkan não rodam; o loader da
   Meta ou da Pico é trocado pelo da Khronos ao corrigir o APK, e o importador em Arquivos diz o que o
   jogo usa antes de instalar. O SDK nativo da Pico (`libpxr_api.so`) e as lojas Meta/Pico (verificação
@@ -75,10 +84,11 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 312 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 359 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
-  pose de mira).
+  pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada).
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

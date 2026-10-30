@@ -25,7 +25,7 @@ namespace {
 enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
-    MAGIC_FOVEATION = 0x48584631,
+    MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -104,12 +104,16 @@ struct Session {
     XrPosef lastHead;
     int liveSwapchains;
     int liveSpaces;
+    int handTrackers;        // live XR_EXT_hand_tracking trackers (HyperMagic keeps the camera on)
     XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
     HxInput input;           // snapshot taken by xrSyncActions
 };
 
 /** XR_FB_foveation profile: kept only so its handle is valid (the whole image is always drawn). */
 struct Foveation { uint32_t magic; };
+
+/** XR_EXT_hand_tracking tracker: one hand, joints from HyperMagic's camera hand tracking. */
+struct HandTracker { uint32_t magic; Session* session; XrHandEXT hand; };
 
 struct Space {
     uint32_t magic;
@@ -546,6 +550,9 @@ const ExtDesc kExtensions[] = {
     {XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, XR_EXT_performance_settings_SPEC_VERSION},
     // Pico apps: the Pico 4 / Neo 3 / G3 controller profiles (driven like the Touch ones)
     {XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME, XR_BD_controller_interaction_SPEC_VERSION},
+    // hands: tracked by HyperMagic with the phone's camera while the game runs (hx_hands.h)
+    {XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_EXT_hand_tracking_SPEC_VERSION},
+    {XR_FB_HAND_TRACKING_AIM_EXTENSION_NAME, XR_FB_hand_tracking_aim_SPEC_VERSION},
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME, XR_KHR_android_thread_settings_SPEC_VERSION},
     {XR_FB_SWAPCHAIN_UPDATE_STATE_OPENGL_ES_EXTENSION_NAME, XR_FB_swapchain_update_state_opengl_es_SPEC_VERSION},
@@ -720,6 +727,7 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
     p->trackingProperties.positionTracking = XR_FALSE;
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(p->next); n; n = n->next) {
         if (n->type == XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB) reinterpret_cast<XrSystemColorSpacePropertiesFB*>(n)->colorSpace = XR_COLOR_SPACE_REC709_FB;
+        if (n->type == XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT) reinterpret_cast<XrSystemHandTrackingPropertiesEXT*>(n)->supportsHandTracking = XR_TRUE;
     }
     return XR_SUCCESS;
 }
@@ -858,6 +866,7 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_SWAPCHAIN)) { Swapchain* sc = static_cast<Swapchain*>(c); hxp::gfxDestroySwapchain(sc->gfx); sc->magic = 0; free(sc); }
     while (void* c = takeChild(s, MAGIC_SPACE)) { static_cast<Space*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_FOVEATION)) { static_cast<Foveation*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
     if (s->gfx) hxp::gfxDestroySession(s->gfx);
     pthread_mutex_destroy(&s->frameLock);
     pthread_cond_destroy(&s->frameCond);
@@ -1196,6 +1205,8 @@ XRAPI_ATTR XrResult XRAPI_CALL WaitFrame(XrSession h, const XrFrameWaitInfo* inf
     while (s->frameWaited && s->running) pthread_cond_wait(&s->frameCond, &s->frameLock);
     pthread_mutex_unlock(&s->frameLock);
     if (!s->running) return XR_ERROR_SESSION_NOT_RUNNING;
+    // twice a second: tell HyperMagic a game is running here, and whether it wants hands
+    if (s->frameCount % 30 == 0) { HxHandShared tmp; hxp::readHands(&tmp, s->handTrackers > 0); }
     // Pace to the display: the compositor swaps with vsync, so one period between frames.
     if (s->lastWaitNs) sleepUntil(s->lastWaitNs + period - 1000000);
     int64_t now = hxp::nowNs();
@@ -1703,6 +1714,114 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroyFoveationProfileFB(XrFoveationProfileFB h)
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ hands (XR_EXT_hand_tracking)
+XRAPI_ATTR XrResult XRAPI_CALL CreateHandTrackerEXT(XrSession h, const XrHandTrackerCreateInfoEXT* ci, XrHandTrackerEXT* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT || !out) return XR_ERROR_VALIDATION_FAILURE;
+    if (ci->hand != XR_HAND_LEFT_EXT && ci->hand != XR_HAND_RIGHT_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    if (ci->handJointSet != XR_HAND_JOINT_SET_DEFAULT_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    HandTracker* t = alloc<HandTracker>(MAGIC_HAND, s);
+    if (!t) return XR_ERROR_OUT_OF_MEMORY;
+    t->session = s;
+    t->hand = ci->hand;
+    s->handTrackers++;
+    HxHandShared tmp;
+    hxp::readHands(&tmp, true);  // HyperMagic turns the camera on now, not at the first locate
+    *out = reinterpret_cast<XrHandTrackerEXT>(t);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyHandTrackerEXT(XrHandTrackerEXT h) {
+    HandTracker* t = asObj<HandTracker>(reinterpret_cast<uint64_t>(h), MAGIC_HAND);
+    if (!t) return XR_ERROR_HANDLE_INVALID;
+    if (isLive(t->session, MAGIC_SESSION) && t->session->handTrackers > 0) t->session->handTrackers--;
+    release(t);
+    return XR_SUCCESS;
+}
+
+/** Hands older than this are not shown (the camera lost them, or HyperMagic stopped). */
+constexpr int64_t HAND_STALE_NS = 200000000LL;
+/** Where the phone's camera sits relative to the eyes in a viewer: a little in front of them. */
+constexpr float CAMERA_FORWARD_M = 0.08f;
+
+/** Look-rotation whose -Z points along [dir] with +Y as close to world up as possible. */
+XrQuaternionf lookAlong(XrVector3f dir) {
+    hxhands::V z = hxhands::norm({-dir.x, -dir.y, -dir.z}, {0, 0, 1});
+    hxhands::V up = fabsf(z.y) > 0.98f ? hxhands::V{0, 0, -1} : hxhands::V{0, 1, 0};
+    hxhands::V x = hxhands::norm(hxhands::cross(up, z), {1, 0, 0});
+    hxhands::V y = hxhands::cross(z, x);
+    hxhands::Q q = hxhands::fromAxes(x, y, z);
+    return {q.x, q.y, q.z, q.w};
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrHandJointsLocateInfoEXT* info, XrHandJointLocationsEXT* locs) {
+    HandTracker* t = asObj<HandTracker>(reinterpret_cast<uint64_t>(h), MAGIC_HAND);
+    if (!t) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT || !locs || locs->type != XR_TYPE_HAND_JOINT_LOCATIONS_EXT)
+        return XR_ERROR_VALIDATION_FAILURE;
+    if (info->time <= 0) return XR_ERROR_TIME_INVALID;
+    Space* base = asSpace(info->baseSpace);
+    if (!base) return XR_ERROR_HANDLE_INVALID;
+    if (locs->jointCount != XR_HAND_JOINT_COUNT_EXT || !locs->jointLocations) return XR_ERROR_VALIDATION_FAILURE;
+    XrHandJointVelocitiesEXT* vel = nullptr;
+    XrHandTrackingAimStateFB* aim = nullptr;
+    for (auto* n = reinterpret_cast<XrBaseOutStructure*>(locs->next); n; n = n->next) {
+        if (n->type == XR_TYPE_HAND_JOINT_VELOCITIES_EXT) vel = reinterpret_cast<XrHandJointVelocitiesEXT*>(n);
+        if (n->type == XR_TYPE_HAND_TRACKING_AIM_STATE_FB) aim = reinterpret_cast<XrHandTrackingAimStateFB*>(n);
+    }
+    if (vel) {
+        if (vel->jointCount != XR_HAND_JOINT_COUNT_EXT || !vel->jointVelocities) return XR_ERROR_VALIDATION_FAILURE;
+        for (uint32_t i = 0; i < vel->jointCount; i++) vel->jointVelocities[i].velocityFlags = 0;
+    }
+    if (aim) { aim->status = 0; aim->aimPose = hx::identity(); aim->pinchStrengthIndex = aim->pinchStrengthMiddle = 0; aim->pinchStrengthRing = aim->pinchStrengthLittle = 0; }
+    locs->isActive = XR_FALSE;
+    for (uint32_t i = 0; i < locs->jointCount; i++) { locs->jointLocations[i].locationFlags = 0; locs->jointLocations[i].pose = hx::identity(); locs->jointLocations[i].radius = 0; }
+
+    Instance* inst = t->session->instance;
+    HxHandShared hands;
+    if (!hxp::readHands(&hands, true)) return XR_SUCCESS;
+    int side = t->hand == XR_HAND_LEFT_EXT ? 0 : 1;
+    if (!hands.tracked[side] || hxp::nowNs() - hands.timeNs[side] > HAND_STALE_NS) return XR_SUCCESS;
+    hxhands::Joint joints[XR_HAND_JOINT_COUNT_EXT];
+    if (!hxhands::toXrJoints(hands.joints[side], side == 0, joints)) return XR_SUCCESS;
+    // camera space -> stage: the camera rides with the head, so it is where the head was when
+    // the hands were seen; then into the base space
+    XrPosef head, basePose;
+    bool baseTracked;
+    if (!hxp::headPose(hands.timeNs[side], inst->cfg, &head)) return XR_SUCCESS;
+    if (!spaceInStage(base, info->time, &basePose, &baseTracked)) return XR_SUCCESS;
+    XrPosef camera = hx::compose(head, XrPosef{{0, 0, 0, 1}, {0, 0, -CAMERA_FORWARD_M}});
+    XrPosef toBase = hx::compose(hx::inverse(basePose), camera);
+    for (uint32_t i = 0; i < XR_HAND_JOINT_COUNT_EXT; i++) {
+        XrPosef p{{joints[i].q.x, joints[i].q.y, joints[i].q.z, joints[i].q.w}, {joints[i].p.x, joints[i].p.y, joints[i].p.z}};
+        locs->jointLocations[i].pose = hx::compose(toBase, p);
+        locs->jointLocations[i].radius = joints[i].radius;
+        locs->jointLocations[i].locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                                XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+    }
+    locs->isActive = XR_TRUE;
+    if (aim) {
+        // Meta's aim ray: from about the shoulder through the knuckles, pinch on the index
+        XrPosef headNow;
+        if (!hxp::headPose(info->time, inst->cfg, &headNow)) headNow = head;
+        XrQuaternionf yaw = hx::yawOnly(headNow.orientation);
+        XrVector3f shoulder = hx::vadd(headNow.position, hx::qrot(yaw, {side == 0 ? -0.17f : 0.17f, -0.22f, 0.05f}));
+        XrPosef knuckles = hx::compose(camera, XrPosef{{0, 0, 0, 1}, {
+            (hands.joints[side][hxhands::INDEX_MCP][0] + hands.joints[side][2][0]) * 0.5f,
+            (hands.joints[side][hxhands::INDEX_MCP][1] + hands.joints[side][2][1]) * 0.5f,
+            (hands.joints[side][hxhands::INDEX_MCP][2] + hands.joints[side][2][2]) * 0.5f}});
+        XrVector3f dir = {knuckles.position.x - shoulder.x, knuckles.position.y - shoulder.y, knuckles.position.z - shoulder.z};
+        XrPosef aimStage{lookAlong(dir), knuckles.position};
+        aim->aimPose = hx::compose(hx::inverse(basePose), aimStage);
+        float pinch = hands.pinch[side] < 0 ? 0 : (hands.pinch[side] > 1 ? 1 : hands.pinch[side]);
+        aim->pinchStrengthIndex = pinch;
+        aim->status = XR_HAND_TRACKING_AIM_COMPUTED_BIT_FB | XR_HAND_TRACKING_AIM_VALID_BIT_FB |
+                      (pinch > 0.8f ? XR_HAND_TRACKING_AIM_INDEX_PINCHING_BIT_FB : 0);
+    }
+    return XR_SUCCESS;
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL PerfSettingsSetPerformanceLevelEXT(XrSession h, XrPerfSettingsDomainEXT domain, XrPerfSettingsLevelEXT level) {
     if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
     if (domain != XR_PERF_SETTINGS_DOMAIN_CPU_EXT && domain != XR_PERF_SETTINGS_DOMAIN_GPU_EXT) return XR_ERROR_VALIDATION_FAILURE;
@@ -1799,6 +1918,9 @@ const Entry kEntries[] = {
     HX_EXT(CreateFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(DestroyFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(PerfSettingsSetPerformanceLevelEXT, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME),
+    HX_EXT(CreateHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
+    HX_EXT(DestroyHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
+    HX_EXT(LocateHandJointsEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
 };
 #undef HX_FN
 #undef HX_EXT

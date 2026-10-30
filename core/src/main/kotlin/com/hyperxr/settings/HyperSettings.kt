@@ -108,6 +108,8 @@ data class HandTrackingSettings(
     val clickGesture: ClickGesture = ClickGesture.PINCH,
     /** Light pinch: clicks when the thumb closes halfway towards the index, no squeezing. */
     val lightPinch: Boolean = true,
+    /** OpenXR games (Meta / Pico) get the hands: HyperMagic tracks them with the camera while the game runs. */
+    val openxrHands: Boolean = true,
     /** Fingers that type on the table keyboard (0 thumb, 1 index, 2 middle, 3 ring, 4 pinky). */
     val tableFingers: Set<Int> = setOf(1, 2),
     /** AI depth (Depth Anything V2 on the NPU) confirms table taps; the model is downloaded once. */

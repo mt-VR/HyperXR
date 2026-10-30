@@ -5,12 +5,14 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import com.hyperxr.HyperXRApp
 
 /**
  * Read-only viewer configuration for the HyperXR OpenXR runtime running inside other apps
  * (IPD, field of view, lens distortion), so OpenXR apps see the same calibration as HyperXR.
- * Only these numbers are exposed.
+ * Only these numbers are exposed; and `hands`, the shared file with the tracked hands while an
+ * OpenXR game runs ([HandBridge]: joint positions and pinch, nothing from the camera image).
  */
 class RuntimeConfigProvider : ContentProvider() {
     override fun onCreate() = true
@@ -20,6 +22,12 @@ class RuntimeConfigProvider : ContentProvider() {
         val c = MatrixCursor(COLUMNS)
         c.addRow(arrayOf<Any>(g.ipdMm, g.fovDegrees, g.distortionK1, g.distortionK2, if (g.lensDistortion) 1 else 0, g.lensSeparationMm))
         return c
+    }
+
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        if (uri.lastPathSegment != "hands") return null
+        val f = HandBridge.ensure(context ?: return null)
+        return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_WRITE)
     }
 
     override fun getType(uri: Uri): String = "vnd.android.cursor.item/vnd.hyperxr.runtime"

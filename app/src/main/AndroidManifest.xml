@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Hands for OpenXR games: the camera runs in a foreground service while the game is in front. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -196,7 +199,13 @@
             <meta-data android:name="org.khronos.openxr.OpenXRRuntime.MajorVersion" android:value="1" />
         </service>
 
-        <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps. Read-only numbers. -->
+        <!-- Hand tracking for OpenXR games (XR_EXT_hand_tracking in the HyperMagic runtime). -->
+        <service
+            android:name=".openxr.HandBridgeService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+
+        <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps, and the hands file. -->
         <provider
             android:name=".openxr.RuntimeConfigProvider"
             android:authorities="com.hypermagic.runtime"

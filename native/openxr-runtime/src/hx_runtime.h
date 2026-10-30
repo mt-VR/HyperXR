@@ -20,6 +20,8 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "hx_hands.h"
+
 // ------------------------------------------------------------------ math
 namespace hx {
 
@@ -139,6 +141,12 @@ bool headPose(int64_t timeNs, const HxConfig& cfg, XrPosef* out);
 void recenter();
 /** Latest controller input (zeros when nothing is connected). */
 void readInput(HxInput* out);
+/**
+ * Consistent copy of the hands HyperMagic publishes (hx_hands.h); false when the app's hand
+ * bridge is not reachable. [wantsHands]: tell the app a game has a hand tracker, so it keeps the
+ * camera on (it turns it off a few seconds after the last call that wanted hands).
+ */
+bool readHands(HxHandShared* out, bool wantsHands);
 
 // Graphics. All return XrResult; the host build only supports headless sessions.
 XrResult gfxCreateSession(const void* binding, HxSessionGfx** out);

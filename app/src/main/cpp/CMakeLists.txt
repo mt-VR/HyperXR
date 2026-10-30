@@ -48,6 +48,12 @@ target_compile_options(hyperxr_image PRIVATE -O3 -Wall -Wextra -fno-exceptions -
 target_link_options(hyperxr_image PRIVATE -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
 target_link_libraries(hyperxr_image libyuv jnigraphics)
 
+# Hands for OpenXR games: the shared file the HyperMagic runtime maps inside the game.
+add_library(hyperxr_handbridge SHARED hand_bridge.cpp)
+target_include_directories(hyperxr_handbridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/openxr-runtime/src)
+target_compile_options(hyperxr_handbridge PRIVATE -O2 -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(hyperxr_handbridge PRIVATE -Wl,-z,max-page-size=16384)
+
 # libretro frontend for the embedded emulator cores (jniLibs/libcore_*.so, loaded with dlopen).
 add_library(hyperxr_retro SHARED retro_frontend.cpp)
 target_include_directories(hyperxr_retro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/libretro/include)

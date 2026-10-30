@@ -232,6 +232,9 @@ fun HandsSection(a: MainActivity) {
             "Ligado: menos latência nas mãos; a Depth API só fica se o celular a oferecer a 60 fps. Desligado: Depth API mesmo a 30 fps") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(prefer60FpsOverDepth = v)) }
         }
+        ToggleRow("Mãos nos jogos OpenXR", h.openxrHands, "Jogos de Quest e Pico com hand tracking recebem suas mãos: o HyperMagic usa a câmera enquanto o jogo pede mãos (gasta mais bateria)") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(openxrHands = v)) }
+        }
         ToggleRow("Pinça leve", h.lightPinch, "Clica quando o polegar chega na metade do caminho até o indicador, sem precisar apertar um dedo no outro") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(lightPinch = v)) }
         }
