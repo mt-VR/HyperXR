@@ -386,6 +386,8 @@ class XrEngine(
             headStabilizer.strength = settings.headTracking.stabilization * (if (scene.background == Background.PASSTHROUGH) 0.5f else 1f)
             if (tracker != null) headStabilizer.apply(input.head.orientation, dt)
         }
+        // the ears follow the head: Resonance Audio places every sound around it (HRTF)
+        audio.listener(input.head)
 
         var xrFrame = 0
         if (openXrSession != 0L) {

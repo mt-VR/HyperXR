@@ -49,3 +49,15 @@ target_include_directories(hyperxr_retro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../
 target_compile_options(hyperxr_retro PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter -fno-exceptions -fno-rtti)
 target_link_options(hyperxr_retro PRIVATE -Wl,-z,max-page-size=16384)
 target_link_libraries(hyperxr_retro android log dl)
+
+# Spatial audio: Resonance Audio (Apache-2.0) built from source by tools/build_resonance_audio.sh,
+# mixed and played through AAudio.
+set(RESONANCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/resonance-audio)
+add_library(resonance_audio STATIC IMPORTED)
+set_target_properties(resonance_audio PROPERTIES IMPORTED_LOCATION ${RESONANCE_DIR}/${ANDROID_ABI}/libResonanceAudioStatic.a)
+add_library(hyperxr_audio SHARED spatial_audio.cpp)
+target_include_directories(hyperxr_audio PRIVATE ${RESONANCE_DIR}/include)
+target_compile_definitions(hyperxr_audio PRIVATE __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__)
+target_compile_options(hyperxr_audio PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+target_link_options(hyperxr_audio PRIVATE -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
+target_link_libraries(hyperxr_audio resonance_audio aaudio log m)

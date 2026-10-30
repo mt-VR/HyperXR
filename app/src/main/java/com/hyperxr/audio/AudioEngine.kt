@@ -14,8 +14,9 @@ import kotlin.math.sin
 /**
  * Low-latency sound effects. Procedural sounds are synthesised to 16-bit PCM WAV files in the cache
  * and played through SoundPool (decoded once, mixed by the platform's fast path when available).
- * Spatialisation: equal-power stereo panning from the head-relative azimuth and inverse-distance
- * attenuation. It is not HRTF.
+ * Spatialisation: Resonance Audio (HRTF, third-order ambisonics, through AAudio: SpatialAudio) for
+ * synthesised sounds, so a sound is placed in front, behind, above or below; where it cannot start,
+ * and for loaded files, equal-power stereo panning with inverse-distance attenuation.
  */
 class AudioEngine(private val context: Context) {
     private val pool = SoundPool.Builder()
@@ -27,6 +28,9 @@ class AudioEngine(private val context: Context) {
     var masterVolume = 1f
     var spatial = true
     private val local = Vec3()
+    /** SoundPool id -> Resonance sound, for the sounds that also live in the spatial engine. */
+    private val nativeSounds = HashMap<Int, Int>()
+    private val hrtf = SpatialAudio.start()
 
     fun load(file: File): Int = pool.load(file.absolutePath, 1)
 
@@ -51,11 +55,24 @@ class AudioEngine(private val context: Context) {
         }
         val file = File(dir, "s${nextSynth++}.wav")
         writeWav(file, pcm, rate)
-        return pool.load(file.absolutePath, 1)
+        val id = pool.load(file.absolutePath, 1)
+        if (hrtf) {
+            val f = FloatArray(n) { pcm[it] / 32768f }
+            SpatialAudio.nativeAddSound(f).takeIf { it >= 0 }?.let { nativeSounds[id] = it }
+        }
+        return id
     }
 
     /** Plays [soundId]; when [position] is given it is spatialised against [head]. Returns a stream id. */
     fun play(soundId: Int, volume: Float, pitch: Float, loop: Boolean, position: Vec3?, head: Pose?): Int {
+        val native = nativeSounds[soundId]
+        if (native != null) {
+            SpatialAudio.nativeMaster(masterVolume)
+            if (head != null) listener(head)
+            val sp = spatial && position != null
+            val h = SpatialAudio.nativePlay(native, volume, pitch.coerceIn(0.5f, 2f), loop, sp, position?.x ?: 0f, position?.y ?: 0f, position?.z ?: 0f)
+            if (h > 0) return NATIVE_BASE + h
+        }
         var l = volume * masterVolume
         var r = l
         if (spatial && position != null && head != null) {
@@ -70,8 +87,21 @@ class AudioEngine(private val context: Context) {
         return pool.play(soundId, l.coerceIn(0f, 1f), r.coerceIn(0f, 1f), 1, if (loop) -1 else 0, pitch.coerceIn(0.5f, 2f))
     }
 
-    fun stop(streamId: Int) = pool.stop(streamId)
-    fun release() { pool.release(); dir.deleteRecursively() }
+    fun stop(streamId: Int) { if (streamId >= NATIVE_BASE) SpatialAudio.nativeStopVoice(streamId - NATIVE_BASE) else pool.stop(streamId) }
+
+    /** Moves a playing sound (a source that walks about). */
+    fun move(streamId: Int, position: Vec3) { if (streamId >= NATIVE_BASE) SpatialAudio.nativeMove(streamId - NATIVE_BASE, position.x, position.y, position.z) }
+
+    /** Where the ears are: once a frame from the engine, so HRTF follows the head. */
+    fun listener(head: Pose) {
+        if (!hrtf) return
+        val p = head.position; val q = head.orientation
+        SpatialAudio.nativeListener(p.x, p.y, p.z, q.x, q.y, q.z, q.w)
+    }
+
+    fun release() { pool.release(); SpatialAudio.stop(); dir.deleteRecursively() }
+
+    private companion object { const val NATIVE_BASE = 1 shl 24 }
 
     private fun writeWav(file: File, pcm: ShortArray, rate: Int) {
         RandomAccessFile(file, "rw").use { f ->

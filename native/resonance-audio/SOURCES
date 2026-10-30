@@ -1,0 +1,5 @@
+resonance-audio https://github.com/resonance-audio/resonance-audio 4556a46afd4ffae092aa281bfd072eb0279d3a29 (Apache-2.0)
+eigen https://gitlab.com/libeigen/eigen 3147391d946bb4b6c68edd901f2add6ac1f31f8c (MPL-2.0, EIGEN_MPL2_ONLY)
+pffft https://bitbucket.org/jpommier/pffft 67a4a6a113179ab4ac398298f46fce8dd60498dc (FFTPACK licence, BSD-like)
+SADIE HRTF database (Apache-2.0), compiled in
+Built by tools/build_resonance_audio.sh with NDK 27.2.12479018, android-26, c++_static
