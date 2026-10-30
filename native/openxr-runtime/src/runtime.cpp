@@ -25,6 +25,7 @@ namespace {
 enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
+    MAGIC_FOVEATION = 0x48584631,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -43,6 +44,7 @@ struct Instance {
     pthread_mutex_t lock;
     XrVersion apiVersion;
     bool extGles, extTimespec, extHeadless, extLocalFloor;
+    uint32_t extMeta;  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
     bool gfxRequirementsQueried;
     bool systemQueried;
     char appName[XR_MAX_APPLICATION_NAME_SIZE];
@@ -105,6 +107,9 @@ struct Session {
     XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
     HxInput input;           // snapshot taken by xrSyncActions
 };
+
+/** XR_FB_foveation profile: kept only so its handle is valid (the whole image is always drawn). */
+struct Foveation { uint32_t magic; };
 
 struct Space {
     uint32_t magic;
@@ -323,6 +328,9 @@ const char* const kProfiles[] = {
     "/interaction_profiles/meta/touch_controller_plus",
     "/interaction_profiles/meta/touch_pro_controller",
     "/interaction_profiles/facebook/touch_controller_pro",
+    "/interaction_profiles/bytedance/pico4_controller",
+    "/interaction_profiles/bytedance/pico_neo3_controller",
+    "/interaction_profiles/bytedance/pico_g3_controller",
     "/interaction_profiles/khr/simple_controller",
 };
 
@@ -523,8 +531,28 @@ const ExtDesc kExtensions[] = {
     {XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME, XR_KHR_convert_timespec_time_SPEC_VERSION},
     {XR_MND_HEADLESS_EXTENSION_NAME, XR_MND_headless_SPEC_VERSION},
     {XR_EXT_LOCAL_FLOOR_EXTENSION_NAME, XR_EXT_local_floor_SPEC_VERSION},
+    // Meta (Quest) apps: the extensions the Meta XR SDK and Unity/Unreal's Quest support ask for.
+    // They are honoured as far as a phone in a viewer can: one refresh rate (the screen's), the
+    // phone's colour space, foveation and swapchain state accepted (the full image is always drawn).
+    {XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME, XR_FB_display_refresh_rate_SPEC_VERSION},
+    {XR_FB_COLOR_SPACE_EXTENSION_NAME, XR_FB_color_space_SPEC_VERSION},
+    {XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME, XR_FB_swapchain_update_state_SPEC_VERSION},
+    {XR_FB_FOVEATION_EXTENSION_NAME, XR_FB_foveation_SPEC_VERSION},
+    {XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME, XR_FB_foveation_configuration_SPEC_VERSION},
+    {XR_FB_COMPOSITION_LAYER_SETTINGS_EXTENSION_NAME, XR_FB_composition_layer_settings_SPEC_VERSION},
+    {XR_FB_COMPOSITION_LAYER_IMAGE_LAYOUT_EXTENSION_NAME, XR_FB_composition_layer_image_layout_SPEC_VERSION},
+    {XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME, XR_FB_touch_controller_pro_SPEC_VERSION},
+    {XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME, XR_META_touch_controller_plus_SPEC_VERSION},
+    {XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, XR_EXT_performance_settings_SPEC_VERSION},
+    // Pico apps: the Pico 4 / Neo 3 / G3 controller profiles (driven like the Touch ones)
+    {XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME, XR_BD_controller_interaction_SPEC_VERSION},
+#ifdef __ANDROID__
+    {XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME, XR_KHR_android_thread_settings_SPEC_VERSION},
+    {XR_FB_SWAPCHAIN_UPDATE_STATE_OPENGL_ES_EXTENSION_NAME, XR_FB_swapchain_update_state_opengl_es_SPEC_VERSION},
+#endif
 };
 constexpr uint32_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);
+static_assert(kExtensionCount <= 32, "Instance::extMeta has one bit per extension");
 
 XRAPI_ATTR XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(const char* layerName, uint32_t capacity, uint32_t* count, XrExtensionProperties* props) {
     if (layerName && layerName[0]) return XR_ERROR_API_LAYER_NOT_PRESENT;
@@ -556,10 +584,11 @@ XRAPI_ATTR XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* ci, Xr
     if (ci->applicationInfo.applicationName[0] == 0) return XR_ERROR_NAME_INVALID;
     if (ci->enabledApiLayerCount > 0) return XR_ERROR_API_LAYER_NOT_PRESENT;
     bool gles = false, timespec = false, headless = false, localFloor = false;
+    uint32_t extBits = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++) {
         const char* e = ci->enabledExtensionNames[i];
         bool known = false;
-        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) known = true;
+        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) { known = true; extBits |= 1u << k; }
         if (!known) return XR_ERROR_EXTENSION_NOT_PRESENT;
         if (strcmp(e, "XR_KHR_opengl_es_enable") == 0) gles = true;
         if (strcmp(e, XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME) == 0) timespec = true;
@@ -581,6 +610,7 @@ XRAPI_ATTR XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* ci, Xr
     pthread_mutex_init(&inst->lock, nullptr);
     inst->apiVersion = v;
     inst->extGles = gles; inst->extTimespec = timespec; inst->extHeadless = headless; inst->extLocalFloor = localFloor;
+    inst->extMeta = extBits;
     copyStr(inst->appName, sizeof(inst->appName), ci->applicationInfo.applicationName);
     hxp::loadConfig(&inst->cfg);
     gInstance = inst;
@@ -688,6 +718,9 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
     p->graphicsProperties.maxSwapchainImageHeight = 4096;
     p->trackingProperties.orientationTracking = XR_TRUE;
     p->trackingProperties.positionTracking = XR_FALSE;
+    for (auto* n = reinterpret_cast<XrBaseOutStructure*>(p->next); n; n = n->next) {
+        if (n->type == XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB) reinterpret_cast<XrSystemColorSpacePropertiesFB*>(n)->colorSpace = XR_COLOR_SPACE_REC709_FB;
+    }
     return XR_SUCCESS;
 }
 
@@ -824,6 +857,7 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     // child handles die with the session
     while (void* c = takeChild(s, MAGIC_SWAPCHAIN)) { Swapchain* sc = static_cast<Swapchain*>(c); hxp::gfxDestroySwapchain(sc->gfx); sc->magic = 0; free(sc); }
     while (void* c = takeChild(s, MAGIC_SPACE)) { static_cast<Space*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_FOVEATION)) { static_cast<Foveation*>(c)->magic = 0; free(c); }
     if (s->gfx) hxp::gfxDestroySession(s->gfx);
     pthread_mutex_destroy(&s->frameLock);
     pthread_cond_destroy(&s->frameCond);
@@ -1587,13 +1621,110 @@ XRAPI_ATTR XrResult XRAPI_CALL StopHapticFeedback(XrSession h, const XrHapticAct
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ Meta (FB) and EXT extensions
+/** The phone's one display rate (HyperMagic sets the screen to its highest rate itself). */
+float displayHz(const Instance* inst) { return inst->cfg.refreshHz > 20 ? inst->cfg.refreshHz : 60.0f; }
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateDisplayRefreshRatesFB(XrSession h, uint32_t capacity, uint32_t* count, float* rates) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = 1;
+    if (capacity == 0) return XR_SUCCESS;
+    if (!rates) return XR_ERROR_VALIDATION_FAILURE;
+    rates[0] = displayHz(s->instance);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetDisplayRefreshRateFB(XrSession h, float* rate) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!rate) return XR_ERROR_VALIDATION_FAILURE;
+    *rate = displayHz(s->instance);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL RequestDisplayRefreshRateFB(XrSession h, float rate) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    // 0 means "the system's choice"; any other rate must be one we listed
+    if (rate == 0.0f || fabsf(rate - displayHz(s->instance)) < 0.5f) return XR_SUCCESS;
+    return XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateColorSpacesFB(XrSession h, uint32_t capacity, uint32_t* count, XrColorSpaceFB* spaces) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = 1;
+    if (capacity == 0) return XR_SUCCESS;
+    if (!spaces) return XR_ERROR_VALIDATION_FAILURE;
+    spaces[0] = XR_COLOR_SPACE_REC709_FB;  // a phone screen: sRGB primaries
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SetColorSpaceFB(XrSession h, XrColorSpaceFB space) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    // the app's colours are shown as they are; asking for another gamut is allowed but changes nothing
+    return space == XR_COLOR_SPACE_UNMANAGED_FB || space == XR_COLOR_SPACE_REC709_FB || space == XR_COLOR_SPACE_REC2020_FB ||
+           space == XR_COLOR_SPACE_RIFT_CV1_FB || space == XR_COLOR_SPACE_RIFT_S_FB || space == XR_COLOR_SPACE_QUEST_FB ||
+           space == XR_COLOR_SPACE_P3_FB || space == XR_COLOR_SPACE_ADOBE_RGB_FB ? XR_SUCCESS : XR_ERROR_COLOR_SPACE_UNSUPPORTED_FB;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL UpdateSwapchainFB(XrSwapchain h, const XrSwapchainStateBaseHeaderFB* state) {
+    if (!asSwapchain(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!state) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;  // foveation and sampler state: the whole image is always used as drawn
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSwapchainStateFB(XrSwapchain h, XrSwapchainStateBaseHeaderFB* state) {
+    if (!asSwapchain(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!state) return XR_ERROR_VALIDATION_FAILURE;
+    if (state->type == XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB) {
+        auto* f = reinterpret_cast<XrSwapchainStateFoveationFB*>(state);
+        f->flags = 0; f->profile = XR_NULL_HANDLE;
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateFoveationProfileFB(XrSession h, const XrFoveationProfileCreateInfoFB* ci, XrFoveationProfileFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    Foveation* f = alloc<Foveation>(MAGIC_FOVEATION, s);
+    if (!f) return XR_ERROR_OUT_OF_MEMORY;
+    *out = reinterpret_cast<XrFoveationProfileFB>(f);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyFoveationProfileFB(XrFoveationProfileFB h) {
+    Foveation* f = asObj<Foveation>(reinterpret_cast<uint64_t>(h), MAGIC_FOVEATION);
+    if (!f) return XR_ERROR_HANDLE_INVALID;
+    release(f);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PerfSettingsSetPerformanceLevelEXT(XrSession h, XrPerfSettingsDomainEXT domain, XrPerfSettingsLevelEXT level) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (domain != XR_PERF_SETTINGS_DOMAIN_CPU_EXT && domain != XR_PERF_SETTINGS_DOMAIN_GPU_EXT) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;  // Android decides the clocks; the hint is accepted
+}
+
+#ifdef __ANDROID__
+XRAPI_ATTR XrResult XRAPI_CALL SetAndroidApplicationThreadKHR(XrSession h, XrAndroidThreadTypeKHR type, uint32_t tid) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (type < XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR || type > XR_ANDROID_THREAD_TYPE_RENDERER_WORKER_KHR) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;
+}
+#endif
+
 // ------------------------------------------------------------------ dispatch
 XRAPI_ATTR XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
 
-struct Entry { const char* name; PFN_xrVoidFunction fn; int ext; };
+struct Entry { const char* name; PFN_xrVoidFunction fn; int ext; const char* extName = nullptr; };
 enum { EXT_NONE = 0, EXT_GLES, EXT_TIMESPEC, EXT_V11 };
 
 #define HX_FN(n, e) {"xr" #n, reinterpret_cast<PFN_xrVoidFunction>(n), e}
+#define HX_EXT(n, ext) {"xr" #n, reinterpret_cast<PFN_xrVoidFunction>(n), EXT_NONE, ext}
 const Entry kEntries[] = {
     HX_FN(GetInstanceProcAddr, EXT_NONE),
     HX_FN(EnumerateApiLayerProperties, EXT_NONE),
@@ -1656,9 +1787,27 @@ const Entry kEntries[] = {
 #ifdef __ANDROID__
     HX_FN(GetOpenGLESGraphicsRequirementsKHR, EXT_GLES),
     HX_FN(InitializeLoaderKHR, EXT_NONE),
+    HX_EXT(SetAndroidApplicationThreadKHR, XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME),
 #endif
+    HX_EXT(EnumerateDisplayRefreshRatesFB, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME),
+    HX_EXT(GetDisplayRefreshRateFB, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME),
+    HX_EXT(RequestDisplayRefreshRateFB, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME),
+    HX_EXT(EnumerateColorSpacesFB, XR_FB_COLOR_SPACE_EXTENSION_NAME),
+    HX_EXT(SetColorSpaceFB, XR_FB_COLOR_SPACE_EXTENSION_NAME),
+    HX_EXT(UpdateSwapchainFB, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME),
+    HX_EXT(GetSwapchainStateFB, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME),
+    HX_EXT(CreateFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
+    HX_EXT(DestroyFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
+    HX_EXT(PerfSettingsSetPerformanceLevelEXT, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME),
 };
 #undef HX_FN
+#undef HX_EXT
+
+/** Whether the app enabled the extension [name] (functions of extensions it did not enable are unsupported). */
+bool extEnabled(const Instance* inst, const char* name) {
+    for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(kExtensions[k].name, name) == 0) return (inst->extMeta >> k) & 1u;
+    return false;
+}
 
 XRAPI_ATTR XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
     if (!function) return XR_ERROR_VALIDATION_FAILURE;
@@ -1680,6 +1829,7 @@ XRAPI_ATTR XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const ch
             if (e.ext == EXT_GLES && !inst->extGles) return XR_ERROR_FUNCTION_UNSUPPORTED;
             if (e.ext == EXT_TIMESPEC && !inst->extTimespec) return XR_ERROR_FUNCTION_UNSUPPORTED;
             if (e.ext == EXT_V11 && XR_VERSION_MINOR(inst->apiVersion) < 1) return XR_ERROR_FUNCTION_UNSUPPORTED;
+            if (e.extName && !extEnabled(inst, e.extName)) return XR_ERROR_FUNCTION_UNSUPPORTED;
         }
         *function = e.fn;
         return XR_SUCCESS;

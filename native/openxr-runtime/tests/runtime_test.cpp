@@ -61,7 +61,7 @@ static void testExtensionsAndInstance() {
     uint32_t n = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 0, &n, nullptr), XR_SUCCESS);
     CHECK(n >= 3);
-    XrExtensionProperties props[16];
+    XrExtensionProperties props[32];
     for (auto& p : props) { p = {XR_TYPE_EXTENSION_PROPERTIES}; }
     uint32_t small = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 1, &small, props), n > 1 ? XR_ERROR_SIZE_INSUFFICIENT : XR_SUCCESS);
@@ -86,7 +86,7 @@ static void testInstanceBasics(XrInstance inst) {
     LOAD(inst, xrGetInstanceProperties);
     XrInstanceProperties ip{XR_TYPE_INSTANCE_PROPERTIES};
     CHECK_RESULT(xrGetInstanceProperties(inst, &ip), XR_SUCCESS);
-    CHECK(strcmp(ip.runtimeName, "HyperXR Runtime") == 0);
+    CHECK(strcmp(ip.runtimeName, "HyperMagic Runtime") == 0);
 
     LOAD(inst, xrResultToString);
     char buf[XR_MAX_RESULT_STRING_SIZE];
@@ -549,6 +549,110 @@ static void testActionInput(XrInstance inst, XrSystemId sys) {
     CHECK_RESULT(xrDestroyActionSet(set), XR_SUCCESS);
 }
 
+/** Quest (Meta XR) and Pico apps: their extensions and the Pico controller profile. */
+static void testMetaAndPico() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME, XR_FB_COLOR_SPACE_EXTENSION_NAME,
+                          XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME, XR_FB_FOVEATION_EXTENSION_NAME, XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME,
+                          XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME, XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, sizeof(exts) / sizeof(exts[0]), &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem);
+    LOAD(inst, xrGetSystemProperties);
+    LOAD(inst, xrCreateSession);
+    LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrEnumerateDisplayRefreshRatesFB);
+    LOAD(inst, xrGetDisplayRefreshRateFB);
+    LOAD(inst, xrRequestDisplayRefreshRateFB);
+    LOAD(inst, xrEnumerateColorSpacesFB);
+    LOAD(inst, xrSetColorSpaceFB);
+    LOAD(inst, xrCreateFoveationProfileFB);
+    LOAD(inst, xrDestroyFoveationProfileFB);
+    LOAD(inst, xrPerfSettingsSetPerformanceLevelEXT);
+    LOAD(inst, xrStringToPath);
+    LOAD(inst, xrCreateActionSet);
+    LOAD(inst, xrCreateAction);
+    LOAD(inst, xrSuggestInteractionProfileBindings);
+    LOAD(inst, xrAttachSessionActionSets);
+    LOAD(inst, xrGetCurrentInteractionProfile);
+
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    CHECK_RESULT(xrGetSystem(inst, &sgi, &sys), XR_SUCCESS);
+    XrSystemColorSpacePropertiesFB csp{XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &csp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(csp.colorSpace == XR_COLOR_SPACE_REC709_FB);
+
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+
+    uint32_t n = 0;
+    CHECK_RESULT(xrEnumerateDisplayRefreshRatesFB(s, 0, &n, nullptr), XR_SUCCESS);
+    CHECK(n == 1);
+    float rate = 0, current = 0;
+    CHECK_RESULT(xrEnumerateDisplayRefreshRatesFB(s, 1, &n, &rate), XR_SUCCESS);
+    CHECK_RESULT(xrGetDisplayRefreshRateFB(s, &current), XR_SUCCESS);
+    CHECK(rate > 20 && current == rate);
+    CHECK_RESULT(xrRequestDisplayRefreshRateFB(s, rate), XR_SUCCESS);
+    CHECK_RESULT(xrRequestDisplayRefreshRateFB(s, 0.0f), XR_SUCCESS);
+    CHECK_RESULT(xrRequestDisplayRefreshRateFB(s, 1234.0f), XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB);
+
+    XrColorSpaceFB cs[4];
+    CHECK_RESULT(xrEnumerateColorSpacesFB(s, 4, &n, cs), XR_SUCCESS);
+    CHECK(n >= 1 && cs[0] == XR_COLOR_SPACE_REC709_FB);
+    CHECK_RESULT(xrSetColorSpaceFB(s, XR_COLOR_SPACE_QUEST_FB), XR_SUCCESS);
+
+    XrFoveationProfileCreateInfoFB fci{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+    XrFoveationProfileFB fov = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateFoveationProfileFB(s, &fci, &fov), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyFoveationProfileFB(fov), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyFoveationProfileFB(fov), XR_ERROR_HANDLE_INVALID);
+    CHECK_RESULT(xrCreateFoveationProfileFB(s, &fci, &fov), XR_SUCCESS);  // left for the session to clean up
+    CHECK_RESULT(xrPerfSettingsSetPerformanceLevelEXT(s, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, XR_PERF_SETTINGS_LEVEL_BOOST_EXT), XR_SUCCESS);
+
+    // a Pico 4 app's bindings are driven like the Touch ones
+    XrActionSetCreateInfo sci{XR_TYPE_ACTION_SET_CREATE_INFO};
+    strcpy(sci.actionSetName, "pico"); strcpy(sci.localizedActionSetName, "Pico");
+    XrActionSet set;
+    CHECK_RESULT(xrCreateActionSet(inst, &sci, &set), XR_SUCCESS);
+    XrActionCreateInfo aci{XR_TYPE_ACTION_CREATE_INFO};
+    strcpy(aci.actionName, "trigger"); strcpy(aci.localizedActionName, "Trigger");
+    aci.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+    XrAction trig;
+    CHECK_RESULT(xrCreateAction(set, &aci, &trig), XR_SUCCESS);
+    XrPath pico, binding, right;
+    xrStringToPath(inst, "/interaction_profiles/bytedance/pico4_controller", &pico);
+    xrStringToPath(inst, "/user/hand/right/input/trigger/value", &binding);
+    xrStringToPath(inst, "/user/hand/right", &right);
+    XrActionSuggestedBinding sb{trig, binding};
+    XrInteractionProfileSuggestedBinding ipsb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    ipsb.interactionProfile = pico; ipsb.countSuggestedBindings = 1; ipsb.suggestedBindings = &sb;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+    XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    ai.countActionSets = 1; ai.actionSets = &set;
+    CHECK_RESULT(xrAttachSessionActionSets(s, &ai), XR_SUCCESS);
+    XrInteractionProfileState ips{XR_TYPE_INTERACTION_PROFILE_STATE};
+    CHECK_RESULT(xrGetCurrentInteractionProfile(s, right, &ips), XR_SUCCESS);
+    CHECK(ips.interactionProfile == pico);
+
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+
+    // an extension the app did not enable has no functions
+    XrInstance plain = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 1, &r);
+    CHECK(r == XR_SUCCESS);
+    PFN_xrVoidFunction f = nullptr;
+    CHECK_RESULT(gpa(plain, "xrGetDisplayRefreshRateFB", &f), XR_ERROR_FUNCTION_UNSUPPORTED);
+    xrDestroyInstance(plain);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -570,6 +674,7 @@ int main() {
     testActionInput(inst, sys);
     LOAD(inst, xrDestroyInstance);
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+    testMetaAndPico();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

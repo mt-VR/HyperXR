@@ -59,6 +59,26 @@ class QuestApkTest {
         assertEquals(Verdict.MAY_RUN, r.verdict) // Meta extensions referenced
     }
 
+    @Test fun metaExtensionsTheRuntimeHasNoLongerHoldAGameBack() {
+        val r = QuestApk.inspect(apk(mapOf(
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
+            "lib/arm64-v8a/libunity.so" to bin("XR_FB_display_refresh_rate", "XR_FB_color_space", "XR_FB_foveation"),
+        )))
+        assertEquals(Verdict.LIKELY_RUNS, r.verdict)
+        assertTrue(r.reasons.any { "3 extensões Meta" in it })
+    }
+
+    @Test fun picoAppIsRecognised() {
+        val r = QuestApk.inspect(apk(mapOf(
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("XR_KHR_opengl_es_enable", "XR_BD_controller_interaction", "XR_PICO_configuration"),
+            "lib/arm64-v8a/libpxr_api.so" to bin("pxr"),
+        )))
+        assertTrue(r.picoApp)
+        assertTrue(r.reasons.any { "App da Pico" in it })
+        assertTrue(r.reasons.any { "XR_PICO_configuration" in it })
+        assertTrue(r.reasons.any { "libpxr_api.so" in it })
+    }
+
     @Test fun vrapiAndVulkanOnlyWontRun() {
         val vrapi = QuestApk.inspect(apk(mapOf("lib/arm64-v8a/libvrapi.so" to bin("vrapi_Initialize"))))
         assertEquals(XrApi.VRAPI, vrapi.xrApi); assertEquals(Verdict.WONT_RUN, vrapi.verdict)

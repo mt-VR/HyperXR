@@ -35,6 +35,8 @@ data class ApkReport(
     val graphics: Set<String>,
     val extensions: Set<String>,
     val launchActivity: String?,
+    /** Made for Pico headsets (Pico SDK in the manifest or the libraries). */
+    val picoApp: Boolean = false,
     /** Uses the Daydream controller API (served by Google VR Services, or by HyperXR Daydream). */
     val daydreamController: Boolean = false,
     /** Daydream app (also when it supports Cardboard too). */
@@ -54,7 +56,16 @@ object QuestApk {
     val RUNTIME_EXTENSIONS = setOf(
         "XR_KHR_android_create_instance", "XR_KHR_opengl_es_enable", "XR_KHR_convert_timespec_time",
         "XR_EXT_local_floor", "XR_MND_headless",
+        // Meta (Quest)
+        "XR_FB_display_refresh_rate", "XR_FB_color_space", "XR_FB_swapchain_update_state", "XR_FB_swapchain_update_state_opengl_es",
+        "XR_FB_foveation", "XR_FB_foveation_configuration", "XR_FB_composition_layer_settings", "XR_FB_composition_layer_image_layout",
+        "XR_FB_touch_controller_pro", "XR_META_touch_controller_plus", "XR_EXT_performance_settings", "XR_KHR_android_thread_settings",
+        // Pico
+        "XR_BD_controller_interaction",
     )
+
+    /** Pico's own native SDK and platform (store) libraries. */
+    private val PICO_LIBS = setOf("libpxr_api.so", "libPxrPlatform.so", "libpxrplatformloader.so", "libPxrPlatformLoader.so")
 
     private val QUEST_CATEGORY = "com.oculus.intent.category.VR"
     private val OPENXR_CATEGORY = "org.khronos.openxr.intent.category.IMMERSIVE_HMD"
@@ -135,6 +146,9 @@ object QuestApk {
         val questApp = QUEST_CATEGORY in categories || "com.oculus.supportedDevices" in meta ||
             features.contains("android.hardware.vr.headtracking") && engine != "Java/Kotlin"
         val platformSdk = "libovrplatformloader.so" in libNames || "libovrplatform.so" in libNames
+        val picoLibs = PICO_LIBS.intersect(libNames)
+        val picoApp = picoLibs.isNotEmpty() || meta.keys.any { it.startsWith("pvr.") || it.startsWith("PICO") || it.startsWith("pico.") } ||
+            features.any { it.startsWith("picovr") || it.startsWith("com.pico") }
         val graphics = buildSet {
             if (scan.has("XR_KHR_vulkan_enable") || scan.has("XR_KHR_vulkan_enable2")) add("Vulkan")
             if (scan.has("XR_KHR_opengl_es_enable")) add("OpenGL ES")
@@ -162,20 +176,28 @@ object QuestApk {
         if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperMagic aceita OpenGL ES")
         else if ("Vulkan" in graphics) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperMagic só oferece esse)"
         if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
-        val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) }.sorted()
-        if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o HyperMagic não as implementa, o jogo funciona só se forem opcionais"
+        val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) && it !in RUNTIME_EXTENSIONS }.sorted()
+        val metaOk = exts.count { (it.startsWith("XR_FB_") || it.startsWith("XR_META_")) && it in RUNTIME_EXTENSIONS }
+        if (metaOk > 0) reasons += "$metaOk extensões Meta que o jogo usa o runtime HyperMagic atende (taxa de quadros, cores, foveação, controles Touch)"
+        if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta que o HyperMagic ainda não tem (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o jogo funciona só se forem opcionais"
+        if (picoApp) {
+            reasons += "App da Pico: os controles Pico 4 / Neo 3 / G3 são atendidos (pelos Joy-Con ou pelas mãos)"
+            val picoExt = exts.filter { (it.startsWith("XR_PICO_") || it.startsWith("XR_BD_")) && it !in RUNTIME_EXTENSIONS }.sorted()
+            if (picoExt.isNotEmpty()) reasons += "Cita ${picoExt.size} extensões Pico que o HyperMagic não tem (${picoExt.take(4).joinToString()}${if (picoExt.size > 4) "..." else ""}); o jogo funciona só se forem opcionais"
+            if (picoLibs.isNotEmpty()) reasons += "Traz o SDK nativo da Pico (${picoLibs.joinToString()}): o que ele pede aos serviços do óculos Pico (loja, limites de área) não existe num celular"
+        }
         val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
         if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
         if (ddController) reasons += "Usa o controle Daydream: instale o HyperMagic Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
-        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
+        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && picoLibs.isEmpty() && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
 
         return ApkReport(
             packageName = pkg, versionName = manifest.attr("versionName") ?: "", versionCode = manifest.attr("versionCode")?.toLongOrNull() ?: 0,
             minSdk = sdk?.attr("minSdkVersion")?.toIntOrNull() ?: 1, targetSdk = sdk?.attr("targetSdkVersion")?.toIntOrNull() ?: 0,
             abis = abis, nativeLibs = libNames.sorted(), engine = engine, xrApi = xrApi, loader = loader, questApp = questApp,
             supportedDevices = meta["com.oculus.supportedDevices"], platformSdk = platformSdk, graphics = graphics, extensions = exts,
-            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons, daydream = daydream,
+            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons, daydream = daydream, picoApp = picoApp,
         )
     }
 

@@ -44,6 +44,7 @@ object ApkPatcher {
     const val MAX_TARGET_SDK = 29
     private val ABI_DIRS = listOf("arm64-v8a", "armeabi-v7a", "armeabi")
     private val ENTITLEMENT = setOf("libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so")
+    private val PICO_PLATFORM = setOf("libPxrPlatform.so", "libpxrplatformloader.so", "libPxrPlatformLoader.so")
     private val HEADSET_FEATURES = listOf("oculus.", "com.oculus.", "android.hardware.vr", "android.software.vr", "wave.feature", "picovr", "com.samsung.android.vr")
     const val DAYDREAM = "com.google.intent.category.DAYDREAM"
     const val CARDBOARD = "com.google.intent.category.CARDBOARD"
@@ -117,6 +118,9 @@ object ApkPatcher {
             ENTITLEMENT.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
                 warnings += "Verificação de compra da Meta (${it.joinToString()}): se o jogo exigir, ele fecha ao iniciar"
             }
+            PICO_PLATFORM.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
+                warnings += "SDK da loja Pico (${it.joinToString()}): se o jogo exigir a verificação de compra da Pico, ele fecha ao iniciar"
+            }
             if (abiDirs.any { "lib/$it/libvrapi.so" in names })
                 blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperMagic roda só OpenXR"
 
@@ -131,7 +135,7 @@ object ApkPatcher {
                     zip.getInputStream(zip.getEntry(loaderPath)).use { scan.feed(it) }
                     if (!scan.has("org.khronos.openxr.runtime_broker")) {
                         replace[loaderPath] = loader
-                        changes += "Loader OpenXR da Meta ($abi) trocado pelo loader da Khronos"
+                        changes += "Loader OpenXR do fabricante (Meta ou Pico, $abi) trocado pelo loader da Khronos"
                     }
                 }
             }

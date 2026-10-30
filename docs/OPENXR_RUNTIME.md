@@ -48,20 +48,25 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Área | Suporte |
 |---|---|
 | API | OpenXR 1.0 e 1.1 (`xrLocateSpaces`, LOCAL_FLOOR) |
-| Extensões | `XR_KHR_android_create_instance`, `XR_KHR_opengl_es_enable`, `XR_KHR_convert_timespec_time`, `XR_MND_headless`, `XR_EXT_local_floor` |
+| Extensões | `XR_KHR_android_create_instance`, `XR_KHR_opengl_es_enable`, `XR_KHR_convert_timespec_time`, `XR_MND_headless`, `XR_EXT_local_floor`, `XR_KHR_android_thread_settings`, `XR_EXT_performance_settings` |
+| Meta (Quest) | `XR_FB_display_refresh_rate` (a taxa da tela), `XR_FB_color_space` (Rec.709), `XR_FB_swapchain_update_state` (+ `_opengl_es`), `XR_FB_foveation` e `_configuration` (aceitas; a imagem inteira é sempre usada), `XR_FB_composition_layer_settings` e `_image_layout`, `XR_FB_touch_controller_pro`, `XR_META_touch_controller_plus` |
+| Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch |
 | Sistema | HMD, estéreo primário, blend OPAQUE, orientação rastreada (3DoF), posição por modelo de pescoço |
 | Espaços | VIEW, LOCAL (altura dos olhos), STAGE e LOCAL_FLOOR (chão em y = 0), espaços de ação |
 | Swapchains | `GL_SRGB8_ALPHA8`, `GL_RGBA8`, profundidade 16/24/24+8/32F, texturas array, imagem estática |
 | Camadas | projeção (com timewarp) e quad; até 16 camadas |
 | Ciclo de quadros | wait/begin/end com ritmo da tela, `XR_FRAME_DISCARDED`, estados da sessão completos |
-| Ações | perfis Touch (Oculus/Meta) e simple; gatilho, aperto, analógicos, A/B/X/Y, menu; poses de mira/empunhadura; fontes ligadas; háptico (sem efeito) |
+| Ações | perfis Touch (Oculus/Meta), Pico 4/Neo 3/G3 e simple; gatilho, aperto, analógicos, A/B/X/Y, menu; poses de mira/empunhadura; fontes ligadas; háptico (sem efeito) |
 
 ## Limitações (reais)
 
 - **Controles sem rastreamento**: botões, gatilhos e analógicos funcionam; a pose do controle segue a
   cabeça. Mãos (hand tracking) não chegam aos apps OpenXR.
-- **Extensões Meta**: `XR_FB_*`/`XR_META_*` não existem aqui. Jogos de Quest que as exigem, que usam a
-  VrApi, o loader da Meta ou só Vulkan não rodam (o importador em Arquivos avisa antes de instalar).
+- **Extensões Meta e Pico**: as listadas acima existem; as outras (passthrough, hand tracking, âncoras
+  espaciais, `XR_PICO_*`) não. Jogos que as exigem, que usam a VrApi ou só Vulkan não rodam; o loader da
+  Meta ou da Pico é trocado pelo da Khronos ao corrigir o APK, e o importador em Arquivos diz o que o
+  jogo usa antes de instalar. O SDK nativo da Pico (`libpxr_api.so`) e as lojas Meta/Pico (verificação
+  de compra) dependem de serviços do óculos que não existem num celular.
 - **Sem Vulkan**: apps só-Vulkan não rodam.
 - **Sem 6DoF**: a posição vem de um modelo de pescoço.
 - **Sem cubo e cilindro**: camadas de cubo, cilindro e equirect são recusadas com `XR_ERROR_LAYER_INVALID`.
@@ -70,7 +75,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 260 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 312 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira).
