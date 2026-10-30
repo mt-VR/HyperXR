@@ -152,7 +152,7 @@ class HandTrackingService(private val context: Context) {
             val rtm = RtmHandEngine(context)
             if (runCatching { rtm.start(backend) }.onFailure { Diagnostics.log("Hand tracking: RTMPose failed: ${it.message}") }.getOrDefault(false)) {
                 npu = withPc(rtm)
-                backendInUse = "RTMPose · ${rtm.device}" + if (hybrid) " + HybridMagic" else ""
+                backendInUse = "RTMPose · ${rtm.device} · detector ${rtm.detectorDevice}" + if (hybrid) " + HybridMagic" else ""
                 status = "rodando"
                 synchronized(slotLock) { inflight = null; queued = null; restarting = false }
                 Diagnostics.log("Hand tracking: RTMPose on ${rtm.device}")

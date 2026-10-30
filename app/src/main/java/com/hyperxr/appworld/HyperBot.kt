@@ -100,8 +100,8 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
         // the user: where they are and whether they look at it
         val dx = head.x - pos.x; val dz = head.z - pos.z
         val toUser = atan2(-dx, -dz) + PI.toFloat()   // facing the user: its +z towards them
-        val f = input.head.orientation.rotate(Vec3(0f, 0f, -1f))
-        val to = Vec3(pos.x - head.x, pos.y + 0.13f - head.y, pos.z - head.z)
+        val f = input.head.orientation.rotate(FORWARD, fwd)
+        val to = toBot.set(pos.x - head.x, pos.y + 0.13f - head.y, pos.z - head.z)
         val dist = to.length()
         val looked = dist > 0.05f && (f.x * to.x + f.y * to.y + f.z * to.z) / dist > 0.985f
         lookingAt = if (looked) lookingAt + dt else 0f
@@ -237,7 +237,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
         if (nextBlink <= 0f) { blink = 0.12f; nextBlink = 2.5f + Math.random().toFloat() * 4f }
         blink = max(0f, blink - dt)
         // the head follows you, within what a neck allows, with a glance around now and then
-        val hc = Vec3(pos.x, pos.y + hover() + 0.15f, pos.z)
+        val hc = headC.set(pos.x, pos.y + hover() + 0.15f, pos.z)
         val lx = head.x - hc.x; val ly = head.y - hc.y; val lz = head.z - hc.z
         var hy = atan2(lx, lz) - yaw - spin
         while (hy > PI) hy -= 2 * PI.toFloat(); while (hy < -PI) hy += 2 * PI.toFloat()
@@ -333,7 +333,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
 
         // shadow on the table: smaller and lighter the higher it floats
         val sh = (1f - h * 6f).coerceIn(0.35f, 1f)
-        world.draw(sphere, p.set(pos.x, pos.y + 0.001f, pos.z), Quat(), 0.11f * sh, 0.002f, 0.11f * sh, 0, Color.argb((90 * sh).toInt(), 0, 0, 0), unlit = true)
+        world.draw(sphere, p.set(pos.x, pos.y + 0.001f, pos.z), IDENTITY, 0.11f * sh, 0.002f, 0.11f * sh, 0, Color.argb((90 * sh).toInt(), 0, 0, 0), unlit = true)
         // hover ring and its glow
         val glow = 0.75f + 0.25f * sin(t * 6f)
         world.draw(torus, local(0f, h + 0.004f, 0f), body, 0.07f, 0.07f, 0.07f, 0, BLUE_DARK, 0.6f, 0.5f)
@@ -359,7 +359,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
         world.draw(r, inHead(hc, 0f, -0.002f, 0.042f), headQ, 0.098f, 0.066f, 0.022f, 0, VISOR, 1f, 0.2f)
         eyes(hc)
         // ear pods with a light ring
-        for (s in listOf(-1f, 1f)) {
+        for (s in SIDES) {
             Quat.fromAxisAngle(0f, 0f, 1f, PI.toFloat() / 2, q).let { headQ.mul(it, q) }
             world.draw(cyl, inHead(hc, s * 0.063f, 0f, 0f), q, 0.036f, 0.014f, 0.036f, 0, WHITE, 0.7f)
             world.draw(cyl, inHead(hc, s * 0.071f, 0f, 0f), q, 0.022f, 0.004f, 0.022f, 0, withAlpha(eyeColor(), 230), unlit = true)
@@ -400,7 +400,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
     /** The eyes on the visor: their shape is the mood (round, happy arcs, wide, closed, hearts). */
     private fun eyes(hc: Vec3) {
         val closed = blink > 0f
-        for (s in listOf(-1f, 1f)) {
+        for (s in SIDES) {
             val (w, hgt, dy) = when {
                 mood == Mood.SLEEP -> Triple(0.02f, 0.003f, -0.004f)
                 closed -> Triple(0.018f, 0.003f, 0f)
@@ -416,7 +416,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
             if (hgt > 0.015f) world.draw(world.renderer.sphere, inHead(hc, s * 0.022f - 0.004f, 0.009f + dy, 0.0575f), headQ, 0.005f, 0.005f, 0.002f, 0, Color.WHITE, unlit = true)
         }
         // blush when happy
-        if (mood == Mood.HAPPY) for (s in listOf(-1f, 1f))
+        if (mood == Mood.HAPPY) for (s in SIDES)
             world.draw(world.renderer.sphere, inHead(hc, s * 0.036f, -0.014f, 0.053f), headQ, 0.012f, 0.006f, 0.002f, 0, Color.argb(160, 255, 110, 160), unlit = true)
     }
 
@@ -436,6 +436,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
     // scratch vectors: everything drawn is used at once, so nothing is allocated per frame
     private val tmpH = Vec3(); private val outH = Vec3()
     private val headC = Vec3(); private val bodyC = Vec3()
+    private val fwd = Vec3(); private val toBot = Vec3()
 
     private fun beam(a: Vec3, b: Vec3, r: Float, color: Int) {
         val d = Vec3(b.x - a.x, b.y - a.y, b.z - a.z)
@@ -453,6 +454,9 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
 
     companion object {
         const val KEY = "hyperbot"
+        private val IDENTITY = Quat()
+        private val SIDES = floatArrayOf(-1f, 1f)
+        private val FORWARD = Vec3(0f, 0f, -1f)
         private val BLUE = Color.rgb(38, 110, 246)
         private val BLUE_DARK = Color.rgb(24, 62, 160)
         private val WHITE = Color.rgb(240, 244, 250)

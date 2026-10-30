@@ -162,6 +162,18 @@ abstract class XrPanel(
 
     private var downTimeNs = 0L
     private var longFired = false
+    private var downPy = 0f
+    private var lastPy = 0f
+    private var scrolling = false
+
+    /** Panels with more content than fits (the library, lists) scroll when dragged. */
+    open val scrollable: Boolean get() = false
+
+    /**
+     * Scrolls by [dyPx] panel pixels: positive shows what is further down (the content moves up
+     * with the finger). Dragging, the Joy-Con stick and the thumb sliding along the index all land here.
+     */
+    open fun scrollBy(dyPx: Float) {}
 
     override fun onPointerEvent(event: PointerEvent) {
         val px = event.u * pxW
@@ -175,6 +187,7 @@ abstract class XrPanel(
             PointerPhase.EXIT -> { if (hoverRegion != null || pressRegion != null) dirty = true; hoverRegion = null; pressRegion = null }
             PointerPhase.DOWN -> {
                 downTimeNs = event.timestampNs; longFired = false; dirty = true
+                downPy = py; lastPy = py; scrolling = false
                 when {
                     // a fist grabs the window wherever it points (and never clicks)
                     event.grab -> { pressRegion = null; dragging = true }
@@ -185,6 +198,13 @@ abstract class XrPanel(
                 }
             }
             PointerPhase.MOVE -> {
+                // dragged up or down past a few millimetres: the content scrolls and nothing is clicked
+                if (scrollable && !dragging && pressRegion?.id != TITLE_BAR) {
+                    if (!scrolling && kotlin.math.abs(py - downPy) > SCROLL_SLOP_PX) { scrolling = true; pressRegion = null; longFired = true; dirty = true }
+                    if (scrolling) { scrollBy(lastPy - py); dirty = true }
+                    lastPy = py
+                    if (scrolling) return
+                }
                 val pr = pressRegion
                 if (pr?.longAction != null && !longFired && event.timestampNs - downTimeNs > 600_000_000L && pr.rect.contains(px, py)) {
                     longFired = true; pr.longAction.invoke(); dirty = true
@@ -192,6 +212,7 @@ abstract class XrPanel(
                 if (pr != null && !pr.rect.contains(px, py) && pr.id != TITLE_BAR) { pressRegion = null; dirty = true }
             }
             PointerPhase.UP -> {
+                if (scrolling) { scrolling = false; pressRegion = null; dragging = false; dirty = true; return }
                 val pr = pressRegion
                 if (pr != null && hit != null && pr.id == hit.id && !longFired) hit.action?.invoke()
                 pressRegion = null; dragging = false; dirty = true
@@ -249,6 +270,8 @@ abstract class XrPanel(
 
     companion object {
         const val TITLE_BAR = "__title"
+        /** How far a press must move before it scrolls instead of clicking (panel pixels, ~2.5 cm). */
+        const val SCROLL_SLOP_PX = 22f
         /** Window depth change per metre of hand reach while dragging. */
         const val PUSH_GAIN = 4f
     }

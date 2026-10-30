@@ -20,6 +20,13 @@ fun interface DepthSampler {
  * We never invent depth when neither is available; [fuse] returns false instead.
  */
 class DepthFusion(var palmLengthMeters: Float = 0.09f) {
+    companion object {
+        /** How much a fingertip's own depth sample counts against the palm-based estimate. */
+        const val TIP_DEPTH_WEIGHT = 0.6f
+        const val TIP_NEARER_M = 0.06f
+        const val TIP_FARTHER_M = 0.035f
+    }
+
     /** Depth samples outside [priorZ * min, priorZ * max] are treated as background hits. */
     var minDepthRatio = 0.6f
     var maxDepthRatio = 1.55f
@@ -88,7 +95,13 @@ class DepthFusion(var palmLengthMeters: Float = 0.09f) {
             val v = img[i * 3 + 1] * h
             // relative z is in normalized-width units; convert to metres at the palm distance
             val dz = (img[i * 3 + 2] - zRef) * w * palmZ / intr.fx
-            val zi = (palmZ + dz).coerceAtLeast(0.05f)
+            var zi = (palmZ + dz).coerceAtLeast(0.05f)
+            // the fingertips that touch (thumb and index) measured where they are, not only from
+            // the palm: what touches a button is the tip
+            if (source == DepthSource.DEPTH_MAP && depth != null && (i == HandJoint.THUMB_TIP || i == HandJoint.INDEX_TIP)) {
+                val d = tipDepth(depth, u, v, w, h, zi)
+                if (!d.isNaN()) zi = zi + (d - zi) * TIP_DEPTH_WEIGHT
+            }
             val x = (u - intr.cx) * zi / intr.fx
             val y = -(v - intr.cy) * zi / intr.fy
             val p = out.cameraSpace[i].set(x, y, -zi)
@@ -99,6 +112,24 @@ class DepthFusion(var palmLengthMeters: Float = 0.09f) {
         out.depthSource = source
         out.confidence = conf.coerceIn(0f, 1f)
         return true
+    }
+
+    /**
+     * Depth at a fingertip: the nearest consistent sample of a small cross around it (a fingertip
+     * is thin, so the coarse depth map often has the wall behind it there). Samples farther than
+     * a little behind the model's estimate are the background; much nearer ones are noise.
+     */
+    private fun tipDepth(depth: DepthSampler, u: Float, v: Float, w: Float, h: Float, model: Float): Float {
+        var best = Float.NaN
+        val r = maxOf(2f, w / 160f)
+        for (k in 0 until 5) {
+            val du = when (k) { 1 -> r; 2 -> -r; else -> 0f }
+            val dv = when (k) { 3 -> r; 4 -> -r; else -> 0f }
+            val d = depth.depthAt((u + du).coerceIn(0f, w - 1), (v + dv).coerceIn(0f, h - 1))
+            if (!d.isFinite() || d < model - TIP_NEARER_M || d > model + TIP_FARTHER_M) continue
+            if (best.isNaN() || d < best) best = d
+        }
+        return best
     }
 
     private fun dist3(img: FloatArray, a: Int, b: Int, w: Float, h: Float): Float {

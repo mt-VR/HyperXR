@@ -94,6 +94,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val gaze = RayPointer(0, PointerSource.GAZE)
     private val ctrlPointers = arrayOf(RayPointer(1, PointerSource.JOYCON), RayPointer(2, PointerSource.JOYCON))
     private val touches = arrayOf(DirectTouch(3), DirectTouch(4))
+    /** The thumbs touch too (their tips measured with depth): a press with the thumb of the hand holding something. */
+    private val thumbTouches = arrayOf(DirectTouch(5), DirectTouch(6))
     private val ray = Ray()
     private var anchorYaw = 0f
     private var anchored = false
@@ -339,6 +341,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val airBusy = BooleanArray(2)
 
     private fun updatePointers(ctx: XrContext, surfaces: List<InteractionSurface>, directTouch: Boolean) {
+        val thumbTouch = app.settings.current.handTracking.thumbTouch
         val now = System.nanoTime()
         com.hyperxr.input.HandRay.pitchOffsetDeg = app.settings.current.handTracking.rayPitchDeg
         hitPoints.clear()
@@ -380,8 +383,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             if (ctrlPointers[0].hitDistance.isNaN()) hitPoints += ray.pointAt(1.5f) else trackHit(ctrlPointers[0], ray)
             dragWindows(ctrlPointers[0], ray, aDown)
             if (kotlin.math.abs(scrollY) > 0.15f) {
-                val target = (ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible }
-                target?.scroll(-scrollY * STICK_SCROLL_PX_PER_SEC * dt)
+                val panel = (ctrlPointers[0].hovered as? com.hyperxr.spatialui.XrPanel)?.takeIf { it.scrollable }
+                if (panel != null) panel.scrollBy(-scrollY * PANEL_STICK_PX_PER_SEC * dt)
+                else ((ctrlPointers[0].hovered as? SpatialWindow) ?: appWindows.lastOrNull { it.visible })?.scroll(-scrollY * STICK_SCROLL_PX_PER_SEC * dt)
             }
             // B: short press = back / close the top panel; held 0.8 s on a window = close it
             val bDown = buttons and 256 != 0
@@ -399,7 +403,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val h = if (input.holding[i]) notPointing[i] else input.hands[i]
             // pinch-and-hold away from any target opens the radial menu around this hand
             val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
-            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || linkDrag.active ||
+            val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || thumbTouches[i].hovered != null || linkDrag.active ||
                 lab?.handBusy?.get(i) == true
             if (h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
@@ -450,13 +454,23 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
             if (h.isUsable && !menuOpen && handRays[i].captured == null) {
                 when (val e = microGestures[i].update(h, now)) {
-                    is com.hyperxr.handtracking.MicroGestures.Event.Scroll -> scrollTarget(i)?.let { w -> w.scroll(e.delta * MICRO_SCROLL_SCREENS * w.screen.heightPx) }
+                    is com.hyperxr.handtracking.MicroGestures.Event.Scroll -> {
+                        val panel = ((gaze.hovered ?: handRays[i].hovered) as? com.hyperxr.spatialui.XrPanel)?.takeIf { it.scrollable }
+                        if (panel != null) panel.scrollBy(e.delta * PANEL_MICRO_PX)
+                        else scrollTarget(i)?.let { w -> w.scroll(e.delta * MICRO_SCROLL_SCREENS * w.screen.heightPx) }
+                    }
                     com.hyperxr.handtracking.MicroGestures.Event.DoubleTap -> radialAction(0)
                     null -> {}
                 }
             } else microGestures[i].reset()
             val tip = if (directTouch && h.isUsable) h.joints[HandJoint.INDEX_TIP] else null
             touches[i].update(tip, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
+            // the thumb, when it is on its own: not pinching (that is a click already), and not
+            // where the index is already touching
+            val thumb = if (directTouch && thumbTouch && h.isUsable && touches[i].pressed == null &&
+                h.joints[HandJoint.THUMB_TIP].distanceTo(h.joints[HandJoint.INDEX_TIP]) > THUMB_APART_M &&
+                (touches[i].hovered == null || h.joints[HandJoint.THUMB_TIP].distanceTo(h.joints[HandJoint.INDEX_TIP]) > THUMB_APART_M * 2)) h.joints[HandJoint.THUMB_TIP] else null
+            thumbTouches[i].update(thumb, h.depthSource == DepthSource.HAND_SIZE_PRIOR, surfaces, now)
         }
         // gaze: screen tap / viewer button, or dwell (look at a button to click it)
         input.gazeRay(ray)
@@ -479,6 +493,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var bWasDown = false
     private var bDownNs = 0L
     private val STICK_SCROLL_PX_PER_SEC = 1400f
+    /** Joy-Con stick and thumb-slide scrolling of panels (the library), panel pixels. */
+    private val PANEL_STICK_PX_PER_SEC = 520f
+    private val PANEL_MICRO_PX = 700f
+    /** Thumb and index tips farther apart than this: the thumb is touching on its own, not pinching. */
+    private val THUMB_APART_M = 0.035f
 
     /** Back: keyboard, then the top panel, then the window's own back. */
     private fun backOrClose() {

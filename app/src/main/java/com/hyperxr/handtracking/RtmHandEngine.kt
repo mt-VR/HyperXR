@@ -117,11 +117,43 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         return try {
             val e = OrtEnvironment.getEnvironment()
             val bytes = context.assets.open(DETECTOR).use { it.readBytes() }
-            detector = e.createSession(bytes, OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) })
             env = e
-            Diagnostics.log("Hand tracking: RTMPose-m on $device, RTMDet-nano on the CPU")
+            val cpu = e.createSession(bytes, OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) })
+            detector = cpu
+            detectorDevice = "CPU"
+            // the NPU too (NNAPI): kept only when it is really faster on this phone
+            val step = "rtmdet:nnapi"
+            if (!com.hyperxr.diagnostics.NativeCrashGuard.blocked(step)) runCatching {
+                val npu = com.hyperxr.diagnostics.NativeCrashGuard.run(step) {
+                    e.createSession(bytes, OrtSession.SessionOptions().apply {
+                        addNnapi(java.util.EnumSet.of(ai.onnxruntime.providers.NNAPIFlags.USE_FP16, ai.onnxruntime.providers.NNAPIFlags.CPU_DISABLED))
+                    })
+                }
+                val tCpu = timeDetector(cpu); val tNpu = timeDetector(npu)
+                if (tNpu < tCpu * 0.85f) { detector = npu; detectorDevice = "NPU"; cpu.close() } else npu.close()
+                Diagnostics.log("RTMDet: CPU %.1f ms, NPU %.1f ms -> %s".format(tCpu, tNpu, detectorDevice))
+            }.onFailure { Diagnostics.log("RTMDet on the NPU: ${it.message}") }
+            Diagnostics.log("Hand tracking: RTMPose-m on $device, RTMDet-nano on the $detectorDevice")
             true
         } catch (t: Throwable) { Diagnostics.log("RTMDet failed: ${t.message}"); close(); false }
+    }
+
+    /** Where the detector runs ("CPU" or "NPU"). */
+    @Volatile var detectorDevice = "-"; private set
+
+    /** Median of a few runs of [s] on an empty frame, milliseconds. */
+    private fun timeDetector(s: OrtSession): Float {
+        val e = env ?: return Float.MAX_VALUE
+        detIn.rewind()
+        val times = FloatArray(4)
+        OnnxTensor.createTensor(e, detIn, longArrayOf(1, 3, DET.toLong(), DET.toLong())).use { t ->
+            for (k in 0 until 5) {
+                val t0 = System.nanoTime()
+                s.run(mapOf("input" to t)).close()
+                if (k > 0) times[k - 1] = (System.nanoTime() - t0) / 1e6f
+            }
+        }
+        times.sort(); return (times[1] + times[2]) / 2
     }
 
     override fun process(bmp: Bitmap): List<RawHand> {
@@ -146,6 +178,12 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             val t0 = System.nanoTime()
             letterbox(bmp)
             addBoxes(detect())
+            // nothing in the whole picture: a second look at its centre, zoomed 2x, finds a hand
+            // that is small or far (an arm's length away is small at 320 px)
+            if (crops.isEmpty() && frame % 2 == 0L) {
+                letterbox(bmp, bmp.width * 0.25f, bmp.height * 0.25f, 2f)
+                addBoxes(detect())
+            }
             detectorMs = (System.nanoTime() - t0) / 1e6f
         } else if (crops.size < 2) {
             // one hand tracked: the second is looked for in the background, every 3rd frame, so the
@@ -239,17 +277,19 @@ class RtmHandEngine(private val context: Context) : HandEngine {
     }
 
     private var detScale = 1f
+    private var detX0 = 0f
+    private var detY0 = 0f
 
     /** The frame scaled into the detector's 320x320 letterbox (on the tracking thread; the bitmap is reused). */
-    private fun letterbox(bmp: Bitmap) {
-        val s = DET.toFloat() / maxOf(bmp.width, bmp.height)
+    private fun letterbox(bmp: Bitmap, x0: Float = 0f, y0: Float = 0f, zoom: Float = 1f) {
+        val s = DET.toFloat() / (maxOf(bmp.width, bmp.height) / zoom)
         // native: the letterbox straight into the detector's input (BGR planes, grey 114 padding)
-        detM[0] = 1f / s; detM[1] = 0f; detM[2] = 0f; detM[3] = 0f; detM[4] = 1f / s; detM[5] = 0f
+        detM[0] = 1f / s; detM[1] = 0f; detM[2] = x0; detM[3] = 0f; detM[4] = 1f / s; detM[5] = y0
         detBytes.rewind()
         detReady = YuvNative.available && YuvNative.warpToTensorNorm(bmp, detM, DET, DET, MEAN, INV_STD, 114f, true, detBytes)
-        detScale = s
+        detScale = s; detX0 = x0; detY0 = y0
         if (detReady) return
-        detMatrix.reset(); detMatrix.postScale(s, s)
+        detMatrix.reset(); detMatrix.postTranslate(-x0, -y0); detMatrix.postScale(s, s)
         detCanvas.drawColor(Color.rgb(114, 114, 114)); detCanvas.drawBitmap(bmp, detMatrix, paint)
         detScale = s
     }
@@ -259,6 +299,7 @@ class RtmHandEngine(private val context: Context) : HandEngine {
         val d = detector ?: return emptyList()
         val e = env ?: return emptyList()
         val s = detScale
+        val ox = detX0; val oy = detY0
         if (!detReady) {
             det.getPixels(detPixels, 0, DET, 0, 0, DET, DET)
             val plane = DET * DET
@@ -278,7 +319,7 @@ class RtmHandEngine(private val context: Context) : HandEngine {
             d.run(mapOf("input" to t)).use { r ->
                 @Suppress("UNCHECKED_CAST")
                 val dets = (r.get(0).value as Array<Array<FloatArray>>)[0]
-                return dets.filter { it[4] >= MIN_DETECTION }.sortedByDescending { it[4] }.take(2).map { floatArrayOf(it[0] / s, it[1] / s, it[2] / s, it[3] / s, it[4]) }
+                return dets.filter { it[4] >= MIN_DETECTION }.sortedByDescending { it[4] }.take(2).map { floatArrayOf(it[0] / s + ox, it[1] / s + oy, it[2] / s + ox, it[3] / s + oy, it[4]) }
             }
         }
     }

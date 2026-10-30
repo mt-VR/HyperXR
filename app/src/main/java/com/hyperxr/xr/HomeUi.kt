@@ -31,6 +31,17 @@ class LibraryHomePanel(private val a: LauncherActions, asWindow: Boolean) : XrPa
 
     private var section = Section.ALL
     private var page = 0
+    private var scrollAcc = 0f
+    override val scrollable: Boolean get() = true
+
+    /** Dragging the grid up shows the next page, down the previous one. */
+    override fun scrollBy(dyPx: Float) {
+        scrollAcc += dyPx
+        val step = 160f
+        while (scrollAcc > step) { page++; scrollAcc -= step }
+        while (scrollAcc < -step) { page = maxOf(0, page - 1); scrollAcc += step }
+        dirty = true
+    }
     private var minute = -1L
     private var battery = ""
     private var note: String? = null

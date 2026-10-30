@@ -215,6 +215,9 @@ fun HandsSection(a: MainActivity) {
         }
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
+        if (h.directTouch) ToggleRow("Toque com o polegar", h.thumbTouch, "O polegar também aperta botões; a ponta dele é medida pela profundidade (ARCore Depth)") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(thumbTouch = v)) }
+        }
         listOf("Polegar (só espaço)", "Indicador", "Médio", "Anelar", "Mínimo").forEachIndexed { f, name ->
             ToggleRow("Teclado na mesa: $name", f in h.tableFingers) { v ->
                 a.update { s -> val next = if (v) s.handTracking.tableFingers + f else s.handTracking.tableFingers - f

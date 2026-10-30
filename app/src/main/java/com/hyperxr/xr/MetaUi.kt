@@ -45,6 +45,17 @@ class MetaLibraryPanel(private val a: LauncherActions) : XrPanel(1.9f, 1.06f, ti
     private var filter = Filter.ALL
     private var order = Order.RECENT
     private var row = 0
+    private var scrollAcc = 0f
+    override val scrollable: Boolean get() = true
+
+    /** Dragging the grid moves it a row at a time (a little over half a row of drag per row). */
+    override fun scrollBy(dyPx: Float) {
+        scrollAcc += dyPx
+        val step = 110f
+        while (scrollAcc > step) { row++; scrollAcc -= step }
+        while (scrollAcc < -step) { row = maxOf(0, row - 1); scrollAcc += step }
+        dirty = true
+    }
     private var note: String? = null
     private var noteT = 0f
     private val search = UrlEditor({ a.closeKeyboard() }, { row = 0; dirty = true })

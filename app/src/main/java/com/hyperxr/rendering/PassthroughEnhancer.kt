@@ -31,6 +31,8 @@ class PassthroughEnhancer(private val context: Context) {
     var sharpness = 0.6f
 
     private var prog = 0
+    private var uTexMatrix = -1
+    private var uTex = -1
     private var vao = 0
     private var fbo = 0
     private var smallTex = 0
@@ -56,6 +58,7 @@ class PassthroughEnhancer(private val context: Context) {
     /** GL thread: the shrink pass and the grid textures; the model loads on the worker. */
     fun init() {
         prog = Gl.compile(SHRINK_VS, SHRINK_FS, "enhance-shrink")
+        uTexMatrix = GLES30.glGetUniformLocation(prog, "uTexMatrix"); uTex = GLES30.glGetUniformLocation(prog, "uTex")
         vao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(vao); FullscreenTriangle.bind(); GLES30.glBindVertexArray(0)
         val ids = IntArray(3)
@@ -149,10 +152,10 @@ class PassthroughEnhancer(private val context: Context) {
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glUseProgram(prog)
-        GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(prog, "uTexMatrix"), 1, false, camera.texMatrix, 0)
+        GLES30.glUniformMatrix4fv(uTexMatrix, 1, false, camera.texMatrix, 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, camera.textureId)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "uTex"), 0)
+        GLES30.glUniform1i(uTex, 0)
         GLES30.glBindVertexArray(vao)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         GLES30.glBindVertexArray(0)
