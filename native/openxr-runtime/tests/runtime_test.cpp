@@ -971,7 +971,7 @@ static void testPassthrough() {
     CHECK_RESULT(xrCreatePassthroughFB(s, &pci, &pt), XR_SUCCESS);
     XrPassthroughLayerCreateInfoFB lci{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
     lci.passthrough = pt;
-    lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB;
+    lci.purpose = static_cast<XrPassthroughLayerPurposeFB>(77);  // no such purpose
     XrPassthroughLayerFB layer;
     CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &layer), XR_ERROR_FEATURE_UNSUPPORTED);
     lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
@@ -979,7 +979,7 @@ static void testPassthrough() {
     CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &layer), XR_SUCCESS);
     XrGeometryInstanceCreateInfoFB gci{XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB};
     XrGeometryInstanceFB geo;
-    CHECK_RESULT(xrCreateGeometryInstanceFB(s, &gci, &geo), XR_ERROR_FEATURE_UNSUPPORTED);
+    CHECK_RESULT(xrCreateGeometryInstanceFB(s, &gci, &geo), XR_ERROR_FEATURE_UNSUPPORTED);  // XR_FB_triangle_mesh not enabled
     XrPassthroughStyleFB style{XR_TYPE_PASSTHROUGH_STYLE_FB};
     style.textureOpacityFactor = 2;
     CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_ERROR_VALIDATION_FAILURE);
@@ -2297,6 +2297,107 @@ static void testFaceFromVoice() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testTriangleMeshProjection() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_PASSTHROUGH_EXTENSION_NAME, XR_FB_TRIANGLE_MESH_EXTENSION_NAME,
+                          XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 4, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrBeginSession); LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame);
+    LOAD(inst, xrCreatePassthroughFB); LOAD(inst, xrCreatePassthroughLayerFB); LOAD(inst, xrCreateGeometryInstanceFB);
+    LOAD(inst, xrGeometryInstanceSetTransformFB); LOAD(inst, xrDestroyGeometryInstanceFB);
+    LOAD(inst, xrCreateTriangleMeshFB); LOAD(inst, xrDestroyTriangleMeshFB); LOAD(inst, xrTriangleMeshGetVertexBufferFB);
+    LOAD(inst, xrTriangleMeshGetIndexBufferFB); LOAD(inst, xrTriangleMeshBeginUpdateFB); LOAD(inst, xrTriangleMeshEndUpdateFB);
+    LOAD(inst, xrTriangleMeshBeginVertexBufferUpdateFB); LOAD(inst, xrTriangleMeshEndVertexBufferUpdateFB); LOAD(inst, xrGetFoveationEyeTrackedStateMETA);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    // an immutable quad, and a mutable mesh filled afterwards
+    const XrVector3f quad[4] = {{-0.5f, -0.5f, 0}, {0.5f, -0.5f, 0}, {0.5f, 0.5f, 0}, {-0.5f, 0.5f, 0}};
+    const uint32_t qidx[6] = {0, 1, 2, 0, 2, 3};
+    XrTriangleMeshCreateInfoFB mci{XR_TYPE_TRIANGLE_MESH_CREATE_INFO_FB};
+    mci.windingOrder = XR_WINDING_ORDER_CCW_FB; mci.vertexCount = 4; mci.vertexBuffer = quad; mci.triangleCount = 2; mci.indexBuffer = qidx;
+    XrTriangleMeshFB mesh;
+    CHECK_RESULT(xrCreateTriangleMeshFB(s, &mci, &mesh), XR_SUCCESS);
+    CHECK_RESULT(xrTriangleMeshBeginUpdateFB(mesh), XR_ERROR_CALL_ORDER_INVALID);  // not mutable
+    uint32_t badIdx[3] = {0, 1, 9};
+    mci.indexBuffer = badIdx; mci.triangleCount = 1;
+    XrTriangleMeshFB bad;
+    CHECK_RESULT(xrCreateTriangleMeshFB(s, &mci, &bad), XR_ERROR_VALIDATION_FAILURE);  // index past the vertices
+    XrTriangleMeshCreateInfoFB mut{XR_TYPE_TRIANGLE_MESH_CREATE_INFO_FB};
+    mut.flags = XR_TRIANGLE_MESH_MUTABLE_BIT_FB; mut.vertexCount = 8; mut.triangleCount = 4;
+    XrTriangleMeshFB dyn;
+    CHECK_RESULT(xrCreateTriangleMeshFB(s, &mut, &dyn), XR_SUCCESS);
+    XrVector3f* vb; uint32_t* ib;
+    CHECK_RESULT(xrTriangleMeshGetVertexBufferFB(dyn, &vb), XR_SUCCESS);
+    CHECK_RESULT(xrTriangleMeshGetIndexBufferFB(dyn, &ib), XR_SUCCESS);
+    CHECK_RESULT(xrTriangleMeshBeginUpdateFB(dyn), XR_SUCCESS);
+    for (int i = 0; i < 4; i++) vb[i] = quad[i];
+    for (int i = 0; i < 6; i++) ib[i] = qidx[i];
+    CHECK_RESULT(xrTriangleMeshEndUpdateFB(dyn, 4, 5), XR_ERROR_VALIDATION_FAILURE);  // more triangles than room for
+    CHECK_RESULT(xrTriangleMeshEndUpdateFB(dyn, 4, 2), XR_SUCCESS);
+    uint32_t vc = 0;
+    CHECK_RESULT(xrTriangleMeshBeginVertexBufferUpdateFB(dyn, &vc), XR_SUCCESS);
+    CHECK(vc == 4);
+    CHECK_RESULT(xrTriangleMeshEndVertexBufferUpdateFB(dyn), XR_SUCCESS);
+    // projected passthrough: geometry only on a projected layer
+    XrPassthroughCreateInfoFB pci{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+    pci.flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB;
+    XrPassthroughFB pt;
+    CHECK_RESULT(xrCreatePassthroughFB(s, &pci, &pt), XR_SUCCESS);
+    XrPassthroughLayerCreateInfoFB lci{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+    lci.passthrough = pt; lci.flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB; lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+    XrPassthroughLayerFB recon, proj;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &recon), XR_SUCCESS);
+    lci.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &lci, &proj), XR_SUCCESS);
+    XrGeometryInstanceCreateInfoFB gci{XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB};
+    gci.layer = recon; gci.mesh = mesh; gci.baseSpace = stage; gci.pose.orientation.w = 1; gci.pose.position = {0, 1.5f, -1}; gci.scale = {1, 1, 1};
+    XrGeometryInstanceFB geo;
+    CHECK_RESULT(xrCreateGeometryInstanceFB(s, &gci, &geo), XR_ERROR_UNEXPECTED_STATE_PASSTHROUGH_FB);
+    gci.layer = proj;
+    CHECK_RESULT(xrCreateGeometryInstanceFB(s, &gci, &geo), XR_SUCCESS);
+    XrGeometryInstanceTransformFB tf{XR_TYPE_GEOMETRY_INSTANCE_TRANSFORM_FB};
+    tf.baseSpace = stage; tf.time = monoNs(); tf.pose = gci.pose; tf.scale = {2, 2, 1};
+    CHECK_RESULT(xrGeometryInstanceSetTransformFB(geo, &tf), XR_SUCCESS);
+    // a frame with the projected layer goes through (the compositor ray-casts its triangles)
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr);
+    XrCompositionLayerPassthroughFB pl{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+    pl.layerHandle = proj;
+    const XrCompositionLayerBaseHeader* layers[1] = {reinterpret_cast<const XrCompositionLayerBaseHeader*>(&pl)};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; ei.displayTime = fs.predictedDisplayTime; ei.layerCount = 1; ei.layers = layers;
+    int64_t before = hxTestPassthroughWanted();
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_SUCCESS);
+    CHECK(hxTestPassthroughWanted() > before);  // projected passthrough needs the camera too
+    CHECK_RESULT(xrDestroyTriangleMeshFB(mesh), XR_SUCCESS);  // the instance stays, without a mesh
+    xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr);
+    ei.displayTime = fs.predictedDisplayTime;
+    CHECK_RESULT(xrEndFrame(s, &ei), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyGeometryInstanceFB(geo), XR_SUCCESS);
+    // eye-tracked foveation: never a gaze here
+    XrFoveationEyeTrackedStateMETA fst{XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META};
+    CHECK_RESULT(xrGetFoveationEyeTrackedStateMETA(s, &fst), XR_SUCCESS);
+    CHECK(!(fst.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META));
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);  // frees the mutable mesh
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -2334,6 +2435,7 @@ int main() {
     testRoomMeshAndPassthroughColor();
     testDepthGazeMicrogestures();
     testFaceFromVoice();
+    testTriangleMeshProjection();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

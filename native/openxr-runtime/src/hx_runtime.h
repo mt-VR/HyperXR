@@ -142,6 +142,9 @@ struct HxPassthroughState {
     int lutRes;
     float lutWeight;             // mix from A to B
     uint32_t version;            // changes whenever the map or a LUT's contents change
+    int reconstruction;          // the whole view (a reconstruction layer or ALPHA_BLEND)
+    const float* projected;      // projected-surface triangles, stage space, 9 floats each (XR_FB_triangle_mesh)
+    int projectedCount;
 };
 
 /** Shape of a non-projection layer. */

@@ -30,7 +30,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_FACE = 0x48584731, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_FACE = 0x48584731, MAGIC_MESH = 0x48585231, MAGIC_GEOM = 0x48584B31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -149,6 +149,7 @@ struct PassthroughLayer {
     uint8_t map[256 * 4];
     float brightness, contrast, saturation;
     ColorLut* lutA; ColorLut* lutB;
+    XrPassthroughLayerPurposeFB purpose;
     float lutWeight;
     uint32_t version;
     float keyboardHands[2];
@@ -796,6 +797,8 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateApiLayerProperties(uint32_t capacity, ui
 struct ExtDesc { const char* name; uint32_t version; };
 bool extEnabled(const Instance* inst, const char* name);
 void destroyDepthSwapchain(void* p);
+void freeMesh(void* p);
+int projectedTriangles(Session* s, PassthroughLayer* layer, XrTime time, float* out, int cap, int used);
 const ExtDesc kExtensions[] = {
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME, XR_KHR_android_create_instance_SPEC_VERSION},
@@ -853,6 +856,9 @@ const ExtDesc kExtensions[] = {
     {XR_META_HAND_TRACKING_MICROGESTURES_EXTENSION_NAME, XR_META_hand_tracking_microgestures_SPEC_VERSION},
     // face expressions from the voice (Meta's audio face tracking), no external cameras, no detached controllers
     {XR_FB_FACE_TRACKING_EXTENSION_NAME, XR_FB_face_tracking_SPEC_VERSION},
+    // meshes the passthrough can be projected on; eye-tracked foveation (there is no gaze: never valid)
+    {XR_FB_TRIANGLE_MESH_EXTENSION_NAME, XR_FB_triangle_mesh_SPEC_VERSION},
+    {XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME, XR_META_foveation_eye_tracked_SPEC_VERSION},
     {XR_FB_FACE_TRACKING2_EXTENSION_NAME, XR_FB_face_tracking2_SPEC_VERSION},
     {XR_OCULUS_EXTERNAL_CAMERA_EXTENSION_NAME, XR_OCULUS_external_camera_SPEC_VERSION},
     {XR_META_DETACHED_CONTROLLERS_EXTENSION_NAME, XR_META_detached_controllers_SPEC_VERSION},
@@ -1068,6 +1074,8 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsEnvironmentDepth = XR_TRUE;
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsHandRemoval = XR_TRUE;  // the room's depth has no hands in it
         }
+        if (n->type == XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META)
+            reinterpret_cast<XrSystemFoveationEyeTrackedPropertiesMETA*>(n)->supportsFoveationEyeTracked = XR_FALSE;
         if (n->type == XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemFaceTrackingPropertiesFB*>(n)->supportsFaceTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES2_FB) {
             reinterpret_cast<XrSystemFaceTrackingProperties2FB*>(n)->supportsVisualFaceTracking = XR_FALSE;  // no camera sees the face
@@ -1238,6 +1246,8 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
         static_cast<Passthrough*>(c)->magic = 0;
         free(c);
     }
+    while (void* c = takeChild(s, MAGIC_GEOM)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_MESH)) { freeMesh(c); }
     while (void* c = takeChild(s, MAGIC_FACE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_EYE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_DEPTH)) {
@@ -1667,7 +1677,9 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
     HxComposeView views[2] = {};
     uint32_t viewCount = 0;
     HxPassthroughState passthrough = {};
-    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) { passthrough.on = 1; passthrough.opacity = 1; passthrough.contrast = passthrough.saturation = 1; }
+    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) {
+        passthrough.on = 1; passthrough.opacity = 1; passthrough.contrast = passthrough.saturation = 1; passthrough.reconstruction = 1;
+    }
     HxComposeQuad quads[MAX_LAYERS];
     uint32_t quadCount = 0;
     const HxConfig& cfg = s->instance->cfg;
@@ -1680,8 +1692,16 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
             auto* p = reinterpret_cast<const XrCompositionLayerPassthroughFB*>(l);
             auto* pl = asObj<PassthroughLayer>(reinterpret_cast<uint64_t>(p->layerHandle), MAGIC_PT_LAYER);
             if (!pl || pl->session != s) return XR_ERROR_HANDLE_INVALID;
-            if (pl->running && isLive(pl->passthrough, MAGIC_PASSTHROUGH) && pl->passthrough->running && pl->opacity > 0 &&
-                pl->opacity >= passthrough.opacity) {
+            bool live = pl->running && isLive(pl->passthrough, MAGIC_PASSTHROUGH) && pl->passthrough->running && pl->opacity > 0;
+            if (live && pl->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB) {
+                static float projected[3 * 3 * 256];
+                passthrough.projectedCount = projectedTriangles(s, pl, info->displayTime, projected, 256, passthrough.projectedCount);
+                passthrough.projected = projected;
+                if (passthrough.projectedCount > 0 && !passthrough.on) { passthrough.on = 1; passthrough.opacity = pl->opacity; passthrough.contrast = passthrough.saturation = 1; }
+                continue;
+            }
+            if (live && pl->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB) passthrough.reconstruction = 1;
+            if (live && pl->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB && pl->opacity >= passthrough.opacity) {
                 passthrough.on = 1;
                 passthrough.opacity = pl->opacity;
                 // this layer's colour style
@@ -4125,13 +4145,15 @@ XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughLayerFB(XrSession h, const XrPas
     bool keyboard = (ci->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_HANDS_FB ||
                      ci->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_MASKED_HANDS_FB) &&
                     extEnabled(s->instance, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME);
-    if (ci->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB && !keyboard) return XR_ERROR_FEATURE_UNSUPPORTED;
+    bool projected = ci->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB;
+    if (ci->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB && !keyboard && !projected) return XR_ERROR_FEATURE_UNSUPPORTED;
     PassthroughLayer* l = alloc<PassthroughLayer>(MAGIC_PT_LAYER, s);
     if (!l) return XR_ERROR_OUT_OF_MEMORY;
     l->session = s;
     l->passthrough = p;
     l->running = (ci->flags & XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB) != 0;
     l->opacity = keyboard ? 0 : 1;
+    l->purpose = ci->purpose;
     l->contrast = l->saturation = 1;
     *out = reinterpret_cast<XrPassthroughLayerFB>(l);
     if (l->running) layerResumed(l);
@@ -4273,15 +4295,172 @@ XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerSetKeyboardHandsIntensityFB(XrPas
     return XR_SUCCESS;
 }
 
-XRAPI_ATTR XrResult XRAPI_CALL CreateGeometryInstanceFB(XrSession h, const XrGeometryInstanceCreateInfoFB* ci, XrGeometryInstanceFB* out) {
-    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
-    if (!ci || ci->type != XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
-    return XR_ERROR_FEATURE_UNSUPPORTED;  // no projected-surface layers (see CreatePassthroughLayerFB)
+// ------------------------------------------------------------------ meshes (XR_FB_triangle_mesh) and projected passthrough
+struct TriangleMesh {
+    uint32_t magic; Session* session; bool mutableMesh, updating, vertexUpdating; XrWindingOrderFB winding;
+    uint32_t vertexCapacity, triangleCapacity, vertexCount, triangleCount;
+    XrVector3f* vertices; uint32_t* indices;
+};
+struct GeometryInstance { uint32_t magic; Session* session; PassthroughLayer* layer; TriangleMesh* mesh; Space* space; XrPosef pose; XrVector3f scale; };
+
+void freeMesh(void* p) {
+    TriangleMesh* m = static_cast<TriangleMesh*>(p);
+    free(m->vertices); free(m->indices);
+    m->magic = 0;
+    free(m);
 }
 
-XRAPI_ATTR XrResult XRAPI_CALL DestroyGeometryInstanceFB(XrGeometryInstanceFB) { return XR_ERROR_HANDLE_INVALID; }
+TriangleMesh* asMesh(XrTriangleMeshFB h) { return asObj<TriangleMesh>(reinterpret_cast<uint64_t>(h), MAGIC_MESH); }
+GeometryInstance* asGeom(XrGeometryInstanceFB h) { return asObj<GeometryInstance>(reinterpret_cast<uint64_t>(h), MAGIC_GEOM); }
 
-XRAPI_ATTR XrResult XRAPI_CALL GeometryInstanceSetTransformFB(XrGeometryInstanceFB, const XrGeometryInstanceTransformFB*) { return XR_ERROR_HANDLE_INVALID; }
+XRAPI_ATTR XrResult XRAPI_CALL CreateTriangleMeshFB(XrSession h, const XrTriangleMeshCreateInfoFB* ci, XrTriangleMeshFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_TRIANGLE_MESH_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    bool mut = (ci->flags & XR_TRIANGLE_MESH_MUTABLE_BIT_FB) != 0;
+    // an immutable mesh comes with its data; a mutable one may be filled later
+    if (!mut && (!ci->vertexBuffer || !ci->indexBuffer || ci->vertexCount == 0 || ci->triangleCount == 0)) return XR_ERROR_VALIDATION_FAILURE;
+    if (ci->vertexCount > 65536 || ci->triangleCount > 65536) return XR_ERROR_VALIDATION_FAILURE;
+    for (uint32_t i = 0; ci->indexBuffer && i < ci->triangleCount * 3; i++) if (ci->indexBuffer[i] >= ci->vertexCount) return XR_ERROR_VALIDATION_FAILURE;
+    TriangleMesh* m = alloc<TriangleMesh>(MAGIC_MESH, s);
+    if (!m) return XR_ERROR_OUT_OF_MEMORY;
+    m->session = s; m->mutableMesh = mut; m->winding = ci->windingOrder;
+    m->vertexCapacity = ci->vertexCount; m->triangleCapacity = ci->triangleCount;
+    m->vertices = static_cast<XrVector3f*>(calloc(ci->vertexCount ? ci->vertexCount : 1, sizeof(XrVector3f)));
+    m->indices = static_cast<uint32_t*>(calloc(ci->triangleCount ? ci->triangleCount * 3 : 3, sizeof(uint32_t)));
+    if (!m->vertices || !m->indices) { unregisterHandle(m); freeMesh(m); return XR_ERROR_OUT_OF_MEMORY; }
+    if (ci->vertexBuffer) { memcpy(m->vertices, ci->vertexBuffer, sizeof(XrVector3f) * ci->vertexCount); m->vertexCount = ci->vertexCount; }
+    if (ci->indexBuffer) { memcpy(m->indices, ci->indexBuffer, sizeof(uint32_t) * 3 * ci->triangleCount); m->triangleCount = ci->triangleCount; }
+    *out = reinterpret_cast<XrTriangleMeshFB>(m);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyTriangleMeshFB(XrTriangleMeshFB h) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    forEachChild(m->session, MAGIC_GEOM, [&](void* c) { if (static_cast<GeometryInstance*>(c)->mesh == m) static_cast<GeometryInstance*>(c)->mesh = nullptr; });
+    unregisterHandle(m);
+    freeMesh(m);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshGetVertexBufferFB(XrTriangleMeshFB h, XrVector3f** out) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!out) return XR_ERROR_VALIDATION_FAILURE;
+    *out = m->vertices;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshGetIndexBufferFB(XrTriangleMeshFB h, uint32_t** out) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!out) return XR_ERROR_VALIDATION_FAILURE;
+    *out = m->indices;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshBeginUpdateFB(XrTriangleMeshFB h) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!m->mutableMesh || m->updating || m->vertexUpdating) return XR_ERROR_CALL_ORDER_INVALID;
+    m->updating = true;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshEndUpdateFB(XrTriangleMeshFB h, uint32_t vertexCount, uint32_t triangleCount) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!m->updating) return XR_ERROR_CALL_ORDER_INVALID;
+    if (vertexCount > m->vertexCapacity || triangleCount > m->triangleCapacity) return XR_ERROR_VALIDATION_FAILURE;
+    for (uint32_t i = 0; i < triangleCount * 3; i++) if (m->indices[i] >= vertexCount) return XR_ERROR_VALIDATION_FAILURE;
+    m->vertexCount = vertexCount; m->triangleCount = triangleCount;
+    m->updating = false;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshBeginVertexBufferUpdateFB(XrTriangleMeshFB h, uint32_t* outVertexCount) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!outVertexCount) return XR_ERROR_VALIDATION_FAILURE;
+    if (!m->mutableMesh || m->updating || m->vertexUpdating || m->triangleCount == 0) return XR_ERROR_CALL_ORDER_INVALID;
+    m->vertexUpdating = true;
+    *outVertexCount = m->vertexCount;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL TriangleMeshEndVertexBufferUpdateFB(XrTriangleMeshFB h) {
+    TriangleMesh* m = asMesh(h);
+    if (!m) return XR_ERROR_HANDLE_INVALID;
+    if (!m->vertexUpdating) return XR_ERROR_CALL_ORDER_INVALID;
+    m->vertexUpdating = false;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateGeometryInstanceFB(XrSession h, const XrGeometryInstanceCreateInfoFB* ci, XrGeometryInstanceFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_GEOMETRY_INSTANCE_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    if (!extEnabled(s->instance, XR_FB_TRIANGLE_MESH_EXTENSION_NAME)) return XR_ERROR_FEATURE_UNSUPPORTED;
+    PassthroughLayer* l = asPtLayer(ci->layer);
+    TriangleMesh* m = asMesh(ci->mesh);
+    Space* sp = asSpace(ci->baseSpace);
+    if (!l || !m || !sp) return XR_ERROR_HANDLE_INVALID;
+    if (l->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB) return XR_ERROR_UNEXPECTED_STATE_PASSTHROUGH_FB;
+    if (!hx::poseValid(ci->pose)) return XR_ERROR_POSE_INVALID;
+    GeometryInstance* g = alloc<GeometryInstance>(MAGIC_GEOM, s);
+    if (!g) return XR_ERROR_OUT_OF_MEMORY;
+    g->session = s; g->layer = l; g->mesh = m; g->space = sp; g->pose = ci->pose; g->scale = ci->scale;
+    *out = reinterpret_cast<XrGeometryInstanceFB>(g);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyGeometryInstanceFB(XrGeometryInstanceFB h) {
+    GeometryInstance* g = asGeom(h);
+    if (!g) return XR_ERROR_HANDLE_INVALID;
+    release(g);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GeometryInstanceSetTransformFB(XrGeometryInstanceFB h, const XrGeometryInstanceTransformFB* t) {
+    GeometryInstance* g = asGeom(h);
+    if (!g) return XR_ERROR_HANDLE_INVALID;
+    if (!t || t->type != XR_TYPE_GEOMETRY_INSTANCE_TRANSFORM_FB) return XR_ERROR_VALIDATION_FAILURE;
+    Space* sp = asSpace(t->baseSpace);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!hx::poseValid(t->pose)) return XR_ERROR_POSE_INVALID;
+    g->space = sp; g->pose = t->pose; g->scale = t->scale;
+    return XR_SUCCESS;
+}
+
+/** The triangles of [layer]'s geometry instances in stage space (9 floats each); returns how many fit in [cap]. */
+int projectedTriangles(Session* s, PassthroughLayer* layer, XrTime time, float* out, int cap, int used) {
+    int n = used;
+    forEachChild(s, MAGIC_GEOM, [&](void* c) {
+        GeometryInstance* g = static_cast<GeometryInstance*>(c);
+        if (g->layer != layer || !g->mesh || !isLive(g->space, MAGIC_SPACE)) return;
+        XrPosef base; bool bt;
+        if (!spaceInStage(g->space, time, &base, &bt)) return;
+        XrPosef world = hx::compose(base, g->pose);
+        const TriangleMesh* m = g->mesh;
+        for (uint32_t t = 0; t < m->triangleCount && n < cap; t++, n++)
+            for (int k = 0; k < 3; k++) {
+                XrVector3f v = m->vertices[m->indices[t * 3 + k]];
+                v = {v.x * g->scale.x, v.y * g->scale.y, v.z * g->scale.z};
+                v = hx::vadd(world.position, hx::qrot(world.orientation, v));
+                out[n * 9 + k * 3] = v.x; out[n * 9 + k * 3 + 1] = v.y; out[n * 9 + k * 3 + 2] = v.z;
+            }
+    });
+    return n;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetFoveationEyeTrackedStateMETA(XrSession h, XrFoveationEyeTrackedStateMETA* state) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!state || state->type != XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META) return XR_ERROR_VALIDATION_FAILURE;
+    for (auto& c : state->foveationCenter) c = {0, 0};  // no gaze: the centre of each view
+    state->flags = 0;
+    return XR_SUCCESS;
+}
 
 XRAPI_ATTR XrResult XRAPI_CALL PerfSettingsSetPerformanceLevelEXT(XrSession h, XrPerfSettingsDomainEXT domain, XrPerfSettingsLevelEXT level) {
     if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
@@ -4469,6 +4648,15 @@ const Entry kEntries[] = {
     HX_EXT(UpdatePassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
     HX_EXT(PassthroughLayerSetKeyboardHandsIntensityFB, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME),
+    HX_EXT(CreateTriangleMeshFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(DestroyTriangleMeshFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshGetVertexBufferFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshGetIndexBufferFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshBeginUpdateFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshEndUpdateFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshBeginVertexBufferUpdateFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(TriangleMeshEndVertexBufferUpdateFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
+    HX_EXT(GetFoveationEyeTrackedStateMETA, XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),

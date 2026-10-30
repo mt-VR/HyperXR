@@ -298,6 +298,7 @@ struct HxSessionGfx {
     GLuint vao;
     GLuint cameraTex;          // latest passthrough frame
     GLuint mapTex, lutTex[2];  // passthrough colour style
+    GLuint trisTex;            // projected passthrough triangles
     uint32_t styleVersion;
     uint32_t cameraSeq;        // HxCameraShared::seq of the frame in cameraTex
     uint32_t cameraW, cameraH;
@@ -380,13 +381,41 @@ uniform vec3 uBCS;          // brightness (-100..100), contrast, saturation
 uniform highp sampler3D uLutA, uLutB;
 uniform int uLutHasA;       // 0: A is the camera's own colour
 uniform float uLutWeight, uLutRes;
+// projected passthrough (XR_FB_triangle_mesh): the camera only on these triangles (stage space)
+uniform int uProjected, uTriCount;
+uniform highp sampler2D uTris;  // 3 texels (xyz) per triangle
+uniform vec3 uEyePos, uCamPos;
 SAMPLER_DECL
 vec3 cube(highp sampler3D lut, vec3 c) {
     // texel centres: 0 and 1 land on the first and last entries
     return texture(lut, c * ((uLutRes - 1.0) / uLutRes) + 0.5 / uLutRes).rgb;
 }
 void main() {
-    vec3 d = uCamRotInv * (uEyeRot * eyeDir());
+    vec3 wd = uEyeRot * eyeDir();
+    vec3 d = uCamRotInv * wd;
+    if (uProjected == 1) {
+        // nearest triangle on the eye's ray (Moller-Trumbore); the camera looks at that very point
+        float best = 1e9;
+        for (int i = 0; i < 256; i++) {
+            if (i >= uTriCount) break;
+            vec3 a = texelFetch(uTris, ivec2(i * 3, 0), 0).xyz;
+            vec3 e1 = texelFetch(uTris, ivec2(i * 3 + 1, 0), 0).xyz - a;
+            vec3 e2 = texelFetch(uTris, ivec2(i * 3 + 2, 0), 0).xyz - a;
+            vec3 p = cross(wd, e2);
+            float det = dot(e1, p);
+            if (abs(det) < 1e-8) continue;
+            vec3 t0 = uEyePos - a;
+            float u = dot(t0, p) / det;
+            if (u < 0.0 || u > 1.0) continue;
+            vec3 q = cross(t0, e1);
+            float v = dot(wd, q) / det;
+            if (v < 0.0 || u + v > 1.0) continue;
+            float t = dot(e2, q) / det;
+            if (t > 0.0 && t < best) best = t;
+        }
+        if (best > 1e8) discard;
+        d = uCamRotInv * (uEyePos + wd * best - uCamPos);
+    }
     if (d.z > -1e-4) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
     vec2 px = vec2(uIntr.z + uIntr.x * d.x / -d.z, uIntr.w - uIntr.y * d.y / -d.z);
     vec2 uv = px / uSize;
@@ -528,6 +557,7 @@ void initGl(HxSessionGfx* g) {
     glGenTextures(1, &g->cameraTex);
     glGenTextures(1, &g->mapTex);
     glGenTextures(2, g->lutTex);
+    glGenTextures(1, &g->trisTex);
     g->glReady = true;
 }
 
@@ -828,6 +858,7 @@ void gfxDestroySession(HxSessionGfx* g) {
         glDeleteTextures(1, &g->cameraTex);
         glDeleteTextures(1, &g->mapTex);
         glDeleteTextures(2, g->lutTex);
+        glDeleteTextures(1, &g->trisTex);
     }
     restore(s, g->dpy);
     if (g->window != EGL_NO_SURFACE) eglDestroySurface(g->dpy, g->window);
@@ -1151,6 +1182,26 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             glUniform1i(glGetUniformLocation(g->progCamera, "uLutA"), 2);
             glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_3D, g->lutTex[1]);
             glUniform1i(glGetUniformLocation(g->progCamera, "uLutB"), 3);
+            // projected surfaces only, when no layer shows the whole view
+            bool projectedOnly = !passthrough.reconstruction && passthrough.projectedCount > 0;
+            glUniform1i(glGetUniformLocation(g->progCamera, "uProjected"), projectedOnly ? 1 : 0);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uTriCount"), projectedOnly ? passthrough.projectedCount : 0);
+            glUniform3f(glGetUniformLocation(g->progCamera, "uEyePos"), eyePose.position.x, eyePose.position.y, eyePose.position.z);
+            XrVector3f camPos = hx::vadd(cameraHead.position, hx::qrot(cameraHead.orientation, XrVector3f{0, 0, -0.08f}));
+            glUniform3f(glGetUniformLocation(g->progCamera, "uCamPos"), camPos.x, camPos.y, camPos.z);
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, g->trisTex);
+            if (projectedOnly && eye == 0) {
+                static float texels[256 * 3 * 4];
+                for (int t = 0; t < passthrough.projectedCount * 3; t++) {
+                    texels[t * 4] = passthrough.projected[t * 3]; texels[t * 4 + 1] = passthrough.projected[t * 3 + 1];
+                    texels[t * 4 + 2] = passthrough.projected[t * 3 + 2]; texels[t * 4 + 3] = 1;
+                }
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, passthrough.projectedCount * 3, 1, 0, GL_RGBA, GL_FLOAT, texels);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            }
+            glUniform1i(glGetUniformLocation(g->progCamera, "uTris"), 4);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, g->cameraTex);
             glUniform1i(glGetUniformLocation(g->progCamera, "uTex"), 0);

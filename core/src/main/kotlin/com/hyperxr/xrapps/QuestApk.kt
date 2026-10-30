@@ -90,6 +90,8 @@ object QuestApk {
         "XR_META_environment_depth", "XR_FB_eye_tracking_social", "XR_META_hand_tracking_microgestures",
         // the face from the voice, no external cameras, no detached controllers
         "XR_FB_face_tracking", "XR_FB_face_tracking2", "XR_OCULUS_external_camera", "XR_META_detached_controllers",
+        // meshes for projected passthrough, eye-tracked foveation (never a gaze)
+        "XR_FB_triangle_mesh", "XR_META_foveation_eye_tracked",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */
