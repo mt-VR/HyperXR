@@ -5,6 +5,7 @@
 // and the screen touch, captured by the runtime's window inside the app, drive the app's actions
 // through the Touch or simple controller profile; controller poses follow the head (no 6DoF).
 #include "hx_runtime.h"
+#include "hx_handmesh.h"
 
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_reflection.h>
@@ -564,6 +565,8 @@ const ExtDesc kExtensions[] = {
     {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
     {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
     {XR_FB_HAND_TRACKING_AIM_EXTENSION_NAME, XR_FB_hand_tracking_aim_SPEC_VERSION},
+    {XR_FB_HAND_TRACKING_MESH_EXTENSION_NAME, XR_FB_hand_tracking_mesh_SPEC_VERSION},
+    {XR_FB_HAND_TRACKING_CAPSULES_EXTENSION_NAME, XR_FB_hand_tracking_capsules_SPEC_VERSION},
 #ifdef __ANDROID__
     {XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME, XR_KHR_android_thread_settings_SPEC_VERSION},
     {XR_FB_SWAPCHAIN_UPDATE_STATE_OPENGL_ES_EXTENSION_NAME, XR_FB_swapchain_update_state_opengl_es_SPEC_VERSION},
@@ -1814,6 +1817,45 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroyHandTrackerEXT(XrHandTrackerEXT h) {
     return XR_SUCCESS;
 }
 
+/** The hand meshes, built once (left, right). */
+hxhandmesh::Mesh gHandMesh[2];
+pthread_once_t gHandMeshOnce = PTHREAD_ONCE_INIT;
+void buildHandMeshes() { hxhandmesh::build(true, &gHandMesh[0]); hxhandmesh::build(false, &gHandMesh[1]); }
+
+XRAPI_ATTR XrResult XRAPI_CALL GetHandMeshFB(XrHandTrackerEXT h, XrHandTrackingMeshFB* mesh) {
+    HandTracker* t = asObj<HandTracker>(reinterpret_cast<uint64_t>(h), MAGIC_HAND);
+    if (!t) return XR_ERROR_HANDLE_INVALID;
+    if (!mesh || mesh->type != XR_TYPE_HAND_TRACKING_MESH_FB) return XR_ERROR_VALIDATION_FAILURE;
+    pthread_once(&gHandMeshOnce, buildHandMeshes);
+    const hxhandmesh::Mesh& m = gHandMesh[t->hand == XR_HAND_LEFT_EXT ? 0 : 1];
+    mesh->jointCountOutput = XR_HAND_JOINT_COUNT_EXT;
+    mesh->vertexCountOutput = hxhandmesh::kVertices;
+    mesh->indexCountOutput = hxhandmesh::kIndices;
+    // two-call idiom: all capacities zero asks for the sizes
+    if (mesh->jointCapacityInput == 0 && mesh->vertexCapacityInput == 0 && mesh->indexCapacityInput == 0) return XR_SUCCESS;
+    if (mesh->jointCapacityInput < XR_HAND_JOINT_COUNT_EXT || mesh->vertexCapacityInput < static_cast<uint32_t>(hxhandmesh::kVertices) ||
+        mesh->indexCapacityInput < static_cast<uint32_t>(hxhandmesh::kIndices))
+        return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!mesh->jointBindPoses || !mesh->jointRadii || !mesh->jointParents || !mesh->vertexPositions || !mesh->vertexNormals ||
+        !mesh->vertexUVs || !mesh->vertexBlendIndices || !mesh->vertexBlendWeights || !mesh->indices)
+        return XR_ERROR_VALIDATION_FAILURE;
+    for (int j = 0; j < XR_HAND_JOINT_COUNT_EXT; j++) {
+        const hxhands::Joint& b = m.bind[j];
+        mesh->jointBindPoses[j] = XrPosef{{b.q.x, b.q.y, b.q.z, b.q.w}, {b.p.x, b.p.y, b.p.z}};
+        mesh->jointRadii[j] = b.radius;
+        mesh->jointParents[j] = static_cast<XrHandJointEXT>(m.parents[j]);
+    }
+    for (int v = 0; v < hxhandmesh::kVertices; v++) {
+        mesh->vertexPositions[v] = {m.pos[v].x, m.pos[v].y, m.pos[v].z};
+        mesh->vertexNormals[v] = {m.normal[v].x, m.normal[v].y, m.normal[v].z};
+        mesh->vertexUVs[v] = {m.uv[v][0], m.uv[v][1]};
+        mesh->vertexBlendIndices[v] = {m.blendIndex[v], 0, 0, 0};
+        mesh->vertexBlendWeights[v] = {1, 0, 0, 0};
+    }
+    memcpy(mesh->indices, m.indices, sizeof(m.indices));
+    return XR_SUCCESS;
+}
+
 /** Hands older than this are not shown (the camera lost them, or HyperMagic stopped). */
 constexpr int64_t HAND_STALE_NS = 200000000LL;
 /** Where the phone's camera sits relative to the eyes in a viewer: a little in front of them. */
@@ -1840,10 +1882,16 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
     if (locs->jointCount != XR_HAND_JOINT_COUNT_EXT || !locs->jointLocations) return XR_ERROR_VALIDATION_FAILURE;
     XrHandJointVelocitiesEXT* vel = nullptr;
     XrHandTrackingAimStateFB* aim = nullptr;
+    XrHandTrackingScaleFB* scale = nullptr;
+    XrHandTrackingCapsulesStateFB* capsules = nullptr;
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(locs->next); n; n = n->next) {
         if (n->type == XR_TYPE_HAND_JOINT_VELOCITIES_EXT) vel = reinterpret_cast<XrHandJointVelocitiesEXT*>(n);
         if (n->type == XR_TYPE_HAND_TRACKING_AIM_STATE_FB) aim = reinterpret_cast<XrHandTrackingAimStateFB*>(n);
+        if (n->type == XR_TYPE_HAND_TRACKING_SCALE_FB) scale = reinterpret_cast<XrHandTrackingScaleFB*>(n);
+        if (n->type == XR_TYPE_HAND_TRACKING_CAPSULES_STATE_FB) capsules = reinterpret_cast<XrHandTrackingCapsulesStateFB*>(n);
     }
+    if (scale) { scale->sensorOutput = 1; scale->currentOutput = scale->overrideHandScale ? scale->overrideValueInput : 1; }
+    if (capsules) memset(capsules->capsules, 0, sizeof(capsules->capsules));
     if (vel) {
         if (vel->jointCount != XR_HAND_JOINT_COUNT_EXT || !vel->jointVelocities) return XR_ERROR_VALIDATION_FAILURE;
         for (uint32_t i = 0; i < vel->jointCount; i++) vel->jointVelocities[i].velocityFlags = 0;
@@ -1859,6 +1907,18 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
     if (!hands.tracked[side] || hxp::nowNs() - hands.timeNs[side] > HAND_STALE_NS) return XR_SUCCESS;
     hxhands::Joint joints[XR_HAND_JOINT_COUNT_EXT];
     if (!hxhands::toXrJoints(hands.joints[side], side == 0, joints)) return XR_SUCCESS;
+    // hand size against the mesh's bind pose (palm 9.5 cm); an app may override it
+    float measured = joints[XR_HAND_JOINT_WRIST_EXT].radius / 0.027f;
+    if (scale) {
+        scale->sensorOutput = measured;
+        scale->currentOutput = measured;
+        if (scale->overrideHandScale && scale->overrideValueInput > 0) {
+            float k = scale->overrideValueInput / measured;
+            hxhands::V wrist = joints[XR_HAND_JOINT_WRIST_EXT].p;
+            for (auto& j : joints) { j.p = hxhands::add(wrist, hxhands::mul(hxhands::sub(j.p, wrist), k)); j.radius *= k; }
+            scale->currentOutput = scale->overrideValueInput;
+        }
+    }
     // camera space -> stage: the camera rides with the head, so it is where the head was when
     // the hands were seen; then into the base space
     XrPosef head, basePose;
@@ -1875,6 +1935,17 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
                                                 XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
     }
     locs->isActive = XR_TRUE;
+    if (capsules) {
+        for (int b = 0; b < XR_HAND_TRACKING_CAPSULE_COUNT_FB; b++) {
+            int ja, jb;
+            hxhandmesh::bone(b, &ja, &jb);
+            XrHandCapsuleFB& c = capsules->capsules[b];
+            c.points[0] = locs->jointLocations[ja].pose.position;
+            c.points[1] = locs->jointLocations[jb].pose.position;
+            c.radius = joints[jb].radius < joints[ja].radius ? joints[jb].radius : joints[ja].radius;
+            c.joint = static_cast<XrHandJointEXT>(ja);
+        }
+    }
     if (aim) {
         // Meta's aim ray: from about the shoulder through the knuckles, pinch on the index
         XrPosef headNow;
@@ -2105,6 +2176,7 @@ const Entry kEntries[] = {
     HX_EXT(CreateHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
     HX_EXT(DestroyHandTrackerEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
     HX_EXT(LocateHandJointsEXT, XR_EXT_HAND_TRACKING_EXTENSION_NAME),
+    HX_EXT(GetHandMeshFB, XR_FB_HAND_TRACKING_MESH_EXTENSION_NAME),
 };
 #undef HX_FN
 #undef HX_EXT

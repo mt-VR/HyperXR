@@ -11,6 +11,7 @@
 
 #include "../src/hx_hands.h"
 #include "../src/hx_layers.h"
+#include "../src/hx_handmesh.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
@@ -1027,6 +1028,127 @@ static void testPassthrough() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** The procedural hand mesh: sizes, indices in range, faces pointing outwards, skinned to real joints. */
+static void testHandMeshGeometry() {
+    static hxhandmesh::Mesh m;
+    for (int left = 0; left < 2; left++) {
+        CHECK(hxhandmesh::build(left == 1, &m));
+        int outward = 0, inward = 0, badIndex = 0;
+        for (int t = 0; t < hxhandmesh::kIndices; t += 3) {
+            int a = m.indices[t], b = m.indices[t + 1], c = m.indices[t + 2];
+            if (a < 0 || b < 0 || c < 0 || a >= hxhandmesh::kVertices || b >= hxhandmesh::kVertices || c >= hxhandmesh::kVertices) { badIndex++; continue; }
+            hxhandmesh::V3 face = hxhandmesh::cross3(m.pos[b] - m.pos[a], m.pos[c] - m.pos[a]);
+            hxhandmesh::V3 avg = m.normal[a] + m.normal[b] + m.normal[c];
+            (hxhandmesh::dot3(face, avg) > 0 ? outward : inward)++;
+        }
+        CHECK(badIndex == 0);
+        CHECK(inward == 0 && outward == hxhandmesh::kIndices / 3);
+        int badBlend = 0;
+        for (int v = 0; v < hxhandmesh::kVertices; v++) if (m.blendIndex[v] < 2 || m.blendIndex[v] > 25) badBlend++;
+        CHECK(badBlend == 0);
+        // the mesh is about hand sized: 15-25 cm long, and the left hand is the right one mirrored
+        float minZ = 0, maxX = -1;
+        for (int v = 0; v < hxhandmesh::kVertices; v++) { if (m.pos[v].z < minZ) minZ = m.pos[v].z; if (m.pos[v].x > maxX) maxX = m.pos[v].x; }
+        CHECK(minZ < -0.15f && minZ > -0.25f);
+        CHECK(left == 1 ? maxX > 0.06f : maxX < 0.06f);  // the thumb sticks out to the right of a left hand
+        CHECK(m.parents[XR_HAND_JOINT_WRIST_EXT] == XR_HAND_JOINT_MAX_ENUM_EXT && m.parents[XR_HAND_JOINT_PALM_EXT] == XR_HAND_JOINT_WRIST_EXT);
+        CHECK(m.parents[XR_HAND_JOINT_INDEX_TIP_EXT] == XR_HAND_JOINT_INDEX_DISTAL_EXT && m.parents[XR_HAND_JOINT_LITTLE_METACARPAL_EXT] == XR_HAND_JOINT_WRIST_EXT);
+    }
+}
+
+static void testHandMeshAndCapsules() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_FB_HAND_TRACKING_MESH_EXTENSION_NAME,
+                          XR_FB_HAND_TRACKING_CAPSULES_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 4, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrCreateHandTrackerEXT); LOAD(inst, xrLocateHandJointsEXT); LOAD(inst, xrGetHandMeshFB);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrHandTrackerCreateInfoEXT hci{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+    hci.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+    hci.hand = XR_HAND_RIGHT_EXT;
+    XrHandTrackerEXT right;
+    CHECK_RESULT(xrCreateHandTrackerEXT(s, &hci, &right), XR_SUCCESS);
+
+    XrHandTrackingMeshFB mesh{XR_TYPE_HAND_TRACKING_MESH_FB};
+    CHECK_RESULT(xrGetHandMeshFB(right, &mesh), XR_SUCCESS);
+    CHECK(mesh.jointCountOutput == XR_HAND_JOINT_COUNT_EXT && mesh.vertexCountOutput == (uint32_t)hxhandmesh::kVertices &&
+          mesh.indexCountOutput == (uint32_t)hxhandmesh::kIndices);
+    static XrPosef bind[XR_HAND_JOINT_COUNT_EXT];
+    static float radii[XR_HAND_JOINT_COUNT_EXT];
+    static XrHandJointEXT parents[XR_HAND_JOINT_COUNT_EXT];
+    static XrVector3f pos[hxhandmesh::kVertices], nrm[hxhandmesh::kVertices];
+    static XrVector2f uvs[hxhandmesh::kVertices];
+    static XrVector4sFB bi[hxhandmesh::kVertices];
+    static XrVector4f bw[hxhandmesh::kVertices];
+    static int16_t idx[hxhandmesh::kIndices];
+    mesh.jointCapacityInput = XR_HAND_JOINT_COUNT_EXT; mesh.jointBindPoses = bind; mesh.jointRadii = radii; mesh.jointParents = parents;
+    mesh.vertexCapacityInput = hxhandmesh::kVertices - 1;
+    mesh.vertexPositions = pos; mesh.vertexNormals = nrm; mesh.vertexUVs = uvs; mesh.vertexBlendIndices = bi; mesh.vertexBlendWeights = bw;
+    mesh.indexCapacityInput = hxhandmesh::kIndices; mesh.indices = idx;
+    CHECK_RESULT(xrGetHandMeshFB(right, &mesh), XR_ERROR_SIZE_INSUFFICIENT);
+    mesh.vertexCapacityInput = hxhandmesh::kVertices;
+    CHECK_RESULT(xrGetHandMeshFB(right, &mesh), XR_SUCCESS);
+    CHECK(bw[0].x == 1 && bi[0].x >= 2 && idx[hxhandmesh::kIndices - 1] < hxhandmesh::kVertices);
+    CHECK(radii[XR_HAND_JOINT_PALM_EXT] > radii[XR_HAND_JOINT_INDEX_TIP_EXT] && parents[XR_HAND_JOINT_PALM_EXT] == XR_HAND_JOINT_WRIST_EXT);
+    // the index tip of the bind pose is in front of the wrist (fingers forward, -Z)
+    CHECK(bind[XR_HAND_JOINT_INDEX_TIP_EXT].position.z < bind[XR_HAND_JOINT_WRIST_EXT].position.z - 0.12f);
+
+    // capsules and scale ride along with the joints
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+    rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    hxTestSetHead(0, 0, 0, 1, 1);
+    HxHandShared h{};
+    h.magic = HX_HANDS_MAGIC;
+    rightHandPalmDown(h.joints[1]);
+    h.tracked[1] = 1; h.timeNs[1] = monoNs();
+    hxTestSetHands(&h);
+    XrHandJointLocationEXT joints[XR_HAND_JOINT_COUNT_EXT];
+    XrHandTrackingCapsulesStateFB caps{XR_TYPE_HAND_TRACKING_CAPSULES_STATE_FB};
+    XrHandTrackingScaleFB scale{XR_TYPE_HAND_TRACKING_SCALE_FB};
+    scale.next = &caps;
+    XrHandJointLocationsEXT locs{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+    locs.next = &scale;
+    locs.jointCount = XR_HAND_JOINT_COUNT_EXT;
+    locs.jointLocations = joints;
+    XrHandJointsLocateInfoEXT li{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+    li.baseSpace = stage;
+    li.time = monoNs();
+    CHECK_RESULT(xrLocateHandJointsEXT(right, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_TRUE);
+    // the test hand's palm (wrist to middle knuckle: 1 cm across, 9 cm forward) against the 9.5 cm bind hand
+    const double palm = sqrt(0.01 * 0.01 + 0.09 * 0.09);
+    CHECK(NEAR(scale.sensorOutput, palm / 0.095, 1e-4) && scale.currentOutput == scale.sensorOutput);
+    XrHandCapsuleFB& indexProx = caps.capsules[3 + 1];  // index finger, proximal bone
+    CHECK(indexProx.joint == XR_HAND_JOINT_INDEX_PROXIMAL_EXT);
+    CHECK(NEAR(indexProx.points[0].z, joints[XR_HAND_JOINT_INDEX_PROXIMAL_EXT].pose.position.z, 1e-5) &&
+          NEAR(indexProx.points[1].z, joints[XR_HAND_JOINT_INDEX_INTERMEDIATE_EXT].pose.position.z, 1e-5));
+    CHECK(indexProx.radius > 0.005f && indexProx.radius < 0.02f);
+    // an app forcing a bigger hand gets the joints spread from the wrist
+    float tipBefore = joints[XR_HAND_JOINT_MIDDLE_TIP_EXT].pose.position.z;
+    scale.overrideHandScale = XR_TRUE;
+    scale.overrideValueInput = scale.sensorOutput * 2;
+    CHECK_RESULT(xrLocateHandJointsEXT(right, &li, &locs), XR_SUCCESS);
+    float wristZ = joints[XR_HAND_JOINT_WRIST_EXT].pose.position.z;
+    CHECK(NEAR(joints[XR_HAND_JOINT_MIDDLE_TIP_EXT].pose.position.z - wristZ, 2 * (tipBefore - wristZ), 1e-4));
+    CHECK(NEAR(scale.currentOutput, scale.overrideValueInput, 1e-6));
+    hxTestSetHands(nullptr);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1053,6 +1175,8 @@ int main() {
     testLayerShapes();
     testLayerValidation();
     testPassthrough();
+    testHandMeshGeometry();
+    testHandMeshAndCapsules();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

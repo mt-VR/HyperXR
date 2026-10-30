@@ -63,7 +63,7 @@ object QuestApk {
         // Pico
         "XR_BD_controller_interaction",
         // hands (tracked by HyperMagic with the camera while the game runs)
-        "XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim",
+        "XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim", "XR_FB_hand_tracking_mesh", "XR_FB_hand_tracking_capsules",
         // curved panels and 180/360 images
         "XR_KHR_composition_layer_cylinder", "XR_KHR_composition_layer_equirect2",
         // mixed reality: the phone's camera behind the game
