@@ -1,0 +1,6 @@
+models/
+testdata/
+__pycache__/
+build/
+dist/
+*.spec

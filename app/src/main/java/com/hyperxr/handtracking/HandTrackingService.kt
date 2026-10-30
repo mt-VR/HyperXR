@@ -43,6 +43,10 @@ class HandTrackingService(private val context: Context) {
     private val handedness = HandednessResolver()
     @Volatile var status: String = "parado"; private set
     @Volatile var backendInUse: String = "-"; private set
+    /** HybridMagic: frames go to the PC's GPU while the HybridMagic PC program is connected. */
+    @Volatile var hybrid = false
+    /** Wraps a phone engine so the PC tracks while it is there (the phone's engine otherwise). */
+    private fun withPc(e: HandEngine): HandEngine = if (hybrid) com.hyperxr.hybrid.HybridHandEngine(e) else e
 
     val trackers = mapOf(Handedness.LEFT to HandTracker(Handedness.LEFT), Handedness.RIGHT to HandTracker(Handedness.RIGHT))
     private val fusion = DepthFusion()
@@ -147,8 +151,8 @@ class HandTrackingService(private val context: Context) {
             // RTMPose (OpenMMLab) first on every backend: NPU, GPU or CPU as asked, falling back down
             val rtm = RtmHandEngine(context)
             if (runCatching { rtm.start(backend) }.onFailure { Diagnostics.log("Hand tracking: RTMPose failed: ${it.message}") }.getOrDefault(false)) {
-                npu = rtm
-                backendInUse = "RTMPose · ${rtm.device}"
+                npu = withPc(rtm)
+                backendInUse = "RTMPose · ${rtm.device}" + if (hybrid) " + HybridMagic" else ""
                 status = "rodando"
                 synchronized(slotLock) { inflight = null; queued = null; restarting = false }
                 Diagnostics.log("Hand tracking: RTMPose on ${rtm.device}")
@@ -159,7 +163,7 @@ class HandTrackingService(private val context: Context) {
                 val e = NpuHandEngine(context)
                 val ok = runCatching { e.start() }.getOrDefault(false)
                 if (ok) {
-                    npu = e
+                    npu = withPc(e)
                     backendInUse = "MediaPipe NPU · ${e.device} (RTMPose indisponível)"
                     status = "rodando"
                     synchronized(slotLock) { inflight = null; queued = null; restarting = false }

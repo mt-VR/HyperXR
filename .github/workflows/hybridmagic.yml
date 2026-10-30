@@ -1,0 +1,54 @@
+# Builds the HybridMagic PC program (hybridmagic/) into a Windows folder with its .exe, the hand
+# models inside, and ONNX Runtime with DirectML (any GPU: NVIDIA, AMD, Intel), and publishes it.
+name: HybridMagic PC
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. hybridmagic-v0.1.0)"
+        required: true
+        default: "hybridmagic-v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: hybridmagic
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependencies
+        run: pip install -r requirements-windows.txt pyinstaller
+
+      - name: Engine test (CPU, mmpose test photos)
+        run: python test_engine.py
+
+      - name: Models
+        run: python -c "import hybridmagic; hybridmagic.fetch_models()"
+
+      - name: Build
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name HybridMagic --add-data "models;models" hybridmagic.py
+          Copy-Item README.md dist/HybridMagic/LEIA-ME.md
+          Compress-Archive -Path dist/HybridMagic -DestinationPath "HybridMagic-PC-${{ github.event.inputs.tag }}.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: HybridMagic PC ${{ github.event.inputs.tag }}
+          make_latest: false
+          body: |
+            HybridMagic: a placa de vídeo do PC rastreia as mãos para o HyperMagic no celular.
+            Extraia o zip, abra HybridMagic.exe e entre no modo VR no celular, no mesmo Wi-Fi. Os dois se acham sozinhos.
+            Detalhes em hybridmagic/README.md.
+          files: hybridmagic/HybridMagic-PC-${{ github.event.inputs.tag }}.zip

@@ -166,6 +166,7 @@ class XrEngine(
     private var passthrough: CameraPassthrough? = null
     private var tracker: HeadTracker? = null
     val hands = HandTrackingService(activity)
+    private var hybridStarted = false
     val guardian = com.hyperxr.guardian.HyperGuardian(activity)
     val joyCons = JoyConManager(activity)
     private val fusions = arrayOf(ControllerPoseFusion(), ControllerPoseFusion())
@@ -301,6 +302,7 @@ class XrEngine(
         }
         // the colour-marked controller is found in the frames hand tracking analyses
         if ((settings.handTracking.enabled || settings.controllers.colorController) && (arCore != null || passthrough != null)) {
+            if (settings.handTracking.hybridMagic && !hybridStarted) { hands.hybrid = true; com.hyperxr.hybrid.HybridLink.start(android.os.Build.MODEL); hybridStarted = true }
             input.handsAvailable = hands.start(settings.handTracking.backend)
         }
         ctx.trackingDescription = when {
@@ -920,6 +922,7 @@ class XrEngine(
         hands.colorTap = null
         colorTracker?.shutdown(); colorTracker = null
         hands.shutdown()
+        if (hybridStarted) { hybridStarted = false; com.hyperxr.hybrid.HybridLink.stop() }
         passthrough?.shutdown()
         arCore?.close()
         (tracker as? RotationVectorTracker)?.shutdown()

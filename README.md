@@ -373,6 +373,7 @@ Every release is built by [.github/workflows/release.yml](.github/workflows/rele
 |---|---|
 | `core/` | Pure Kotlin (JVM), testable without Android: maths, settings, launcher, capabilities, `.hyperx` format, permissions, glTF, hand pipeline, Direct Touch, Joy-Con fusion, gorilla locomotion, colour controller, game logic |
 | `app/` | Android app: 2D UI (Compose), XR engine (GLES 3), ARCore/Camera2, hand tracking (RTMPose / MediaPipe), controllers, audio, browser, spatial launcher, games |
+| `hybridmagic/` | HybridMagic PC: the PC's GPU tracks the hands for the phone (Python, ONNX Runtime + DirectML) |
 | `app/src/main/cpp/` | JNI: LuaJIT bridge, OpenXR (Khronos loader), NNAPI, emulator front end |
 | `app/src/main/assets/hxsdk/` | Trusted Lua SDK: `bootstrap.lua` (sandbox + `hx` API), `physics.lua`, `ui.lua`, `vmath.lua` |
 | `native/` | LuaJIT 2.1 (arm64-v8a, armeabi-v7a, x86_64), the HyperMagic OpenXR runtime, libretro cores |
@@ -390,7 +391,7 @@ Every release is built by [.github/workflows/release.yml](.github/workflows/rele
 - [Architecture](docs/ARCHITECTURE.md) · [SDK and the .hyperx format](docs/SDK.md) · [SDK security model](docs/SECURITY.md)
 - [Performance and latency](docs/PERFORMANCE.md) · [Hand tracking](docs/HAND_TRACKING.md) · [HyperMagic OpenXR runtime](docs/OPENXR_RUNTIME.md)
 - [Games inspired by Quest games](docs/QUEST_GAMES.md) · [Hand Physics Lab](docs/HAND_PHYSICS_LAB.md) · [Emulators](docs/EMULATORS.md)
-- [Controllers](docs/CONTROLLERS.md) · [HyperConnect](docs/HYPERCONNECT.md) · [Daydream](docs/DAYDREAM.md)
+- [Controllers](docs/CONTROLLERS.md) · [HyperConnect](docs/HYPERCONNECT.md) · [Daydream](docs/DAYDREAM.md) · [HybridMagic](hybridmagic/README.md)
 - [Icons](docs/ICONS.md) · [Tests](docs/TESTING.md) · [Feature status](docs/STATUS.md) · [Release notes](docs/releases/)
 
 <a id="guide-pt"></a>

@@ -198,6 +198,10 @@ fun HandsSection(a: MainActivity) {
         Note("NPU: o rastreador próprio do HyperMagic roda na NPU do celular via NNAPI " +
             (if (npuDevices.isEmpty()) "(nenhum acelerador NNAPI encontrado neste celular: ele usaria a CPU)" else "(acelerador: ${npuDevices.joinToString()})") +
             ", deixando a GPU livre para o VR. GPU: MediaPipe. Os dois passam pelo verificador que descarta pés, cortinas e outras pessoas.")
+        ToggleRow("HybridMagic (mãos pela placa de vídeo do PC)", h.hybridMagic,
+            "Com o programa HybridMagic aberto num PC no mesmo Wi-Fi, o PC rastreia as mãos com um modelo mais pesado e devolve os pontos. Sem o PC, o celular rastreia sozinho.") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(hybridMagic = v)) }
+        }
         ToggleRow("Usar ARCore Depth", h.useArCoreDepth, a.app.capabilities.last.arCoreDepth.detail) { v -> a.update { it.copy(handTracking = it.handTracking.copy(useArCoreDepth = v)) } }
         ToggleRow("Direct Touch", h.directTouch, "Tocar botões virtuais com o dedo indicador") { v -> a.update { it.copy(handTracking = it.handTracking.copy(directTouch = v)) } }
         listOf("Polegar (só espaço)", "Indicador", "Médio", "Anelar", "Mínimo").forEachIndexed { f, name ->

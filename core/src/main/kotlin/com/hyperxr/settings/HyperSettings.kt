@@ -80,6 +80,8 @@ data class HeadTrackingSettings(
 @Serializable
 data class HandTrackingSettings(
     val enabled: Boolean = true,
+    /** HybridMagic: the HybridMagic PC program, when it is open on the same Wi-Fi, tracks the hands on its GPU. */
+    val hybridMagic: Boolean = true,
     val backend: InferenceBackend = InferenceBackend.GPU,
     val useArCoreDepth: Boolean = true,
     /** Keep the camera at 60 fps even when this phone offers the Depth API only at 30 fps. */

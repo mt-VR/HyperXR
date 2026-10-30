@@ -1,0 +1,4 @@
+# running from source on Linux or macOS (on Windows: requirements-windows.txt, with DirectML)
+numpy
+opencv-python-headless
+onnxruntime
