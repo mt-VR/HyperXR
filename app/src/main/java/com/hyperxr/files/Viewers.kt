@@ -132,6 +132,7 @@ class ImageViewerPanel(private val host: MediaHost, private val items: List<Medi
             buttons += Triple("zout", "Zoom -") { zoom = (zoom / 1.5f).coerceAtLeast(1f); if (zoom == 1f) { panX = 0f; panY = 0f } }
             buttons += Triple("zin", "Zoom +") { zoom = (zoom * 1.5f).coerceAtMost(8f) }
             buttons += Triple("rot", "Girar") { rotation = (rotation + 90) % 360 }
+            if (sphere?.spherical != true && b != null && !item.name.contains("sbs", ignoreCase = true)) buttons += Triple("make3d", "Foto 3D") { make3d() }
         }
         if (sphere?.spherical == true) {
             if (immersiveTex == 0) buttons += Triple("360", "Ver em 360") { enterImmersive() }
@@ -144,6 +145,52 @@ class ImageViewerPanel(private val host: MediaHost, private val items: List<Medi
         val bw = (c.w - 2 * c.pad - (buttons.size - 1) * gap) / buttons.size.coerceAtLeast(1)
         buttons.forEachIndexed { i, (id, label, act) ->
             c.button(id, label, c.pad + i * (bw + gap), y, bw, 80f, accent = id == "360" || id == "exit360") { act(); dirty = true }
+        }
+    }
+
+    /**
+     * A side-by-side 3D copy of this photo, saved next to it in the gallery (Pictures/HyperMagic):
+     * Depth Anything V2 on the NPU says how near each point is and StereoFromDepth (PhoneXR's
+     * SpatialPhoto, by Samrat Beketov) draws the two eyes. The depth model is downloaded once.
+     */
+    private fun make3d() {
+        val it = item
+        status = "Foto 3D: preparando a IA de profundidade..."
+        mediaIo.execute {
+            val ctx = host.activity
+            val engine = com.hyperxr.handtracking.MonoDepthEngine(ctx)
+            try {
+                if (!engine.prepare()) throw IllegalStateException(engine.status)
+                status = "Foto 3D: calculando a profundidade..."; host.onGl { dirty = true }
+                val photo = it.decodeBitmap(ctx, 1600) ?: throw IllegalStateException("a foto não abriu")
+                val n = com.hyperxr.handtracking.MonoDepthEngine.SIZE
+                val small = Bitmap.createScaledBitmap(photo, n, n, true)
+                if (!engine.run(small)) throw IllegalStateException("a IA não respondeu")
+                small.recycle()
+                val near = com.hyperxr.media.StereoFromDepth.normalize(engine.disparity)
+                val w = photo.width; val h = photo.height
+                val src = IntArray(w * h).also { px -> photo.getPixels(px, 0, w, 0, 0, w, h) }
+                photo.recycle()
+                val (l, r) = com.hyperxr.media.StereoFromDepth.eyes(src, w, h, near, n, n)
+                val out = Bitmap.createBitmap(w * 2, h, Bitmap.Config.ARGB_8888)
+                out.setPixels(l, 0, w, 0, 0, w, h); out.setPixels(r, 0, w, w, 0, w, h)
+                val name = it.name.substringBeforeLast('.').ifEmpty { "foto" } + "_sbs_3d.jpg"
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (android.os.Build.VERSION.SDK_INT >= 29) put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/HyperMagic")
+                }
+                val uri = ctx.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw IllegalStateException("a galeria não deixou salvar")
+                ctx.contentResolver.openOutputStream(uri)?.use { s -> out.compress(Bitmap.CompressFormat.JPEG, 94, s) } ?: throw IllegalStateException("o arquivo não foi gravado")
+                out.recycle()
+                status = "Foto 3D salva: $name"
+            } catch (t: Throwable) {
+                status = "Foto 3D falhou: ${t.message}"
+                Diagnostics.log("Spatial photo: $t")
+            } finally {
+                engine.close()
+                host.onGl { dirty = true }
+            }
         }
     }
 

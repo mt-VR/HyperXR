@@ -487,6 +487,8 @@ demonstração). Detalhes e créditos em [minecraft/README.md](minecraft/README.
 
 HyperMagic (formerly HyperXR) is made in partnership with **Samrat Beketov**, author of **MagicXR**, who allowed the use of MagicXR's code in this project under the GPLv3. Parts that come from MagicXR are marked in the code with "MagicXR (Samrat Beketov)": so far, the pinch lock (a pinch only lets go after two open frames in a row and never counts with a closed hand). The logo was made together with Samrat.
 
+Samrat also brought his **PhoneXR** (github.com/samrat1games/phonexr) into HyperMagic. Ported from it, marked in the code with "PhoneXR (Samrat Beketov)": leaning and short steps from the accelerometer on phones without 6DoF (`core/.../headtracking/LeanTracker.kt`, from SensorSixDof) and 3D photos from ordinary photos (`core/.../media/StereoFromDepth.kt`, from SpatialPhoto).
+
 <a id="license"></a>
 
 ## License
@@ -508,7 +510,10 @@ HyperMagic is free software: you can redistribute it and/or modify it under the 
 - ViveMonkeCraft (downloaded from Modrinth by the GorillaCraft profile): MIT
 - GeckoView (Mozilla): MPL-2.0 (Maven `geckoview-arm64-v8a` and `geckoview-armeabi-v7a`)
 - Shizuku API: Apache-2.0
-- `openvr_driver.h` (Valve): BSD-3-Clause (`pc/third_party/openvr/LICENSE`)
+- Real-ESRGAN general x4v3 (Xintao Wang et al.), passthrough enhancement: BSD-3-Clause; int8 TFLite export by Qualcomm AI Hub (`app/src/main/assets/models/README.md`)
+- Depth Anything V2 Small (AI depth, 3D photos; downloaded once by the app): Apache-2.0, Qualcomm AI Hub release
+- Open Saber (leandrodreamer, port of NeoSpark314's Beep Saber), built from source for the HyperMagic runtime: MIT (`ports/opensaber`)
+- HybridMagic PC (`hybridmagic/`): ONNX Runtime (MIT), OpenCV (Apache-2.0), NumPy (BSD-3-Clause), PyInstaller (GPL-2.0 with bootloader exception)
 - MediaPipe Tasks GenAI: Apache-2.0; Qwen 2.5 models (downloaded by the user in the app): Apache-2.0
 - Hand models: MediaPipe Hand Landmarker, RTMDet-nano and RTMPose-m (OpenMMLab), MediaPipe selfie multiclass: Apache-2.0 (`app/src/main/assets/models/README.md`)
 - Game 3D models (`app/src/main/assets/games`): Kenney kits (www.kenney.nl), CC0, licence next to each kit

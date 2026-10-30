@@ -59,6 +59,11 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
     }
 
     var neckModel = true
+    /** Leaning and short steps from the linear accelerometer (PhoneXR's SensorSixDof, by Samrat Beketov). */
+    var lean = true
+    private val leanTracker = com.hyperxr.headtracking.LeanTracker()
+    private var accelNs = 0L
+    private val accelDev = Vec3(); private val accelWorld = Vec3()
     private var pendingRecenter = true
 
     override fun start() {
@@ -66,6 +71,7 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
         sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 0, 0, handler) }
             ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let { sm.registerListener(this, it, 0, 0, handler) }
         if (gyroHistory == null) sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, 0, 0, handler) }
+        if (lean) sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, 0, handler) }
     }
 
     override fun stop() { sm.unregisterListener(this) }
@@ -81,6 +87,15 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
                     sampleTimeNs = e.timestamp
                 }
                 Sensor.TYPE_GYROSCOPE -> gyro.set(e.values[0], e.values[1], e.values[2])
+                Sensor.TYPE_LINEAR_ACCELERATION -> {
+                    val dt = if (accelNs == 0L) 0f else (e.timestamp - accelNs) / 1e9f
+                    accelNs = e.timestamp
+                    // device -> Android world (the fused rotation) -> HyperXR world (Y up), with the recentred yaw
+                    deviceRot.rotate(accelDev.set(e.values[0], e.values[1], e.values[2]), accelWorld)
+                    worldFix.rotate(accelWorld, accelDev)
+                    yawOffset.rotate(accelDev, accelWorld)
+                    leanTracker.update(accelWorld.x, accelWorld.y, accelWorld.z, dt)
+                }
             }
         }
         Diagnostics.record(Stage.SENSOR_FUSION, System.nanoTime() - t0)
@@ -119,12 +134,13 @@ class RotationVectorTracker(context: Context, private val displayRotation: Int, 
             // eyes are ~8 cm in front of and ~7.5 cm above the neck pivot
             out.orientation.rotate(neck.set(0f, 0.075f, -0.08f), out.position)
             out.position.add(neckBase)
+            if (lean) synchronized(lock) { val o = leanTracker.offset; out.position.x += o[0]; out.position.y += o[1]; out.position.z += o[2] }
         } else {
             out.position.set(0f, 1.6f, 0f)
         }
     }
 
-    override fun recenter() { pendingRecenter = true }
+    override fun recenter() { pendingRecenter = true; synchronized(lock) { leanTracker.reset() } }
 
     fun shutdown() { stop(); thread.quitSafely() }
 }

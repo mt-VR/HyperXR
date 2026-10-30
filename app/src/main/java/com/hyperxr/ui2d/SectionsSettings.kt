@@ -52,8 +52,11 @@ fun HomeSection(a: MainActivity) {
             Text("Refazer a configuração inicial e o tutorial")
         }
     }
-    SectionCard("Parceria", "O HyperMagic é feito em parceria com Samrat Beketov, criador do MagicXR, que autorizou o uso do código do MagicXR neste app. Obrigado, Samrat!") {
-        Note("HyperMagic é software livre (GPLv3). Créditos completos no README do projeto.")
+    SectionCard("Parceria", "O HyperMagic é feito em parceria com Samrat Beketov, criador do MagicXR e do PhoneXR, que trouxe os dois para cá. Obrigado, Samrat!") {
+        Note("HyperMagic é software livre (GPLv3). Créditos completos abaixo e no README do projeto.")
+    }
+    SectionCard("Créditos e licenças", "Tudo o que o HyperMagic usa e não foi feito aqui: de quem é, a licença e para que serve") {
+        for (e in com.hyperxr.about.Credits.partners + com.hyperxr.about.Credits.thirdParty) KeyValue(e.name, "${e.author} · ${e.license} · ${e.use}")
     }
     SectionCard("Resumo do aparelho") {
         KeyValue("Aparelho", "${caps.manufacturer} ${caps.model} • Android ${caps.androidRelease} (API ${caps.androidSdk})")
