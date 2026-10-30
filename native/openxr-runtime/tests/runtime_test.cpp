@@ -1957,6 +1957,130 @@ static void testBodyTracking() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static void testRoomMeshAndPassthroughColor() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME,
+                          XR_FB_SCENE_EXTENSION_NAME, XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME, XR_FB_PASSTHROUGH_EXTENSION_NAME,
+                          XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 8, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrQuerySpacesFB); LOAD(inst, xrRetrieveSpaceQueryResultsFB); LOAD(inst, xrGetSpaceTriangleMeshMETA);
+    LOAD(inst, xrEnumerateSpaceSupportedComponentsFB); LOAD(inst, xrGetSpaceSemanticLabelsFB);
+    LOAD(inst, xrCreatePassthroughFB); LOAD(inst, xrCreatePassthroughLayerFB); LOAD(inst, xrPassthroughLayerSetStyleFB);
+    LOAD(inst, xrCreatePassthroughColorLutMETA); LOAD(inst, xrUpdatePassthroughColorLutMETA); LOAD(inst, xrDestroyPassthroughColorLutMETA);
+    LOAD(inst, xrPassthroughLayerSetKeyboardHandsIntensityFB);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    // an L-free 5-corner room
+    const float rx[5] = {-2, 2, 2.5f, 0, -2}, rz[5] = {2, 2, 0, -2, -2};
+    hxTestSetRoom(rx, rz, 5, 2.5f);
+    XrSpaceComponentFilterInfoFB mf{XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB};
+    mf.componentType = XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META;
+    XrSpaceQueryInfoFB q{XR_TYPE_SPACE_QUERY_INFO_FB};
+    q.queryAction = XR_SPACE_QUERY_ACTION_LOAD_FB;
+    q.filter = reinterpret_cast<const XrSpaceFilterInfoBaseHeaderFB*>(&mf);
+    XrAsyncRequestIdFB req;
+    CHECK_RESULT(xrQuerySpacesFB(s, reinterpret_cast<const XrSpaceQueryInfoBaseHeaderFB*>(&q), &req), XR_SUCCESS);
+    XrSpaceQueryResultFB res[4];
+    XrSpaceQueryResultsFB results{XR_TYPE_SPACE_QUERY_RESULTS_FB};
+    results.resultCapacityInput = 4; results.results = res;
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_SUCCESS);
+    CHECK(results.resultCountOutput == 1);
+    XrSpace mesh = res[0].space;
+    char label[32];
+    XrSemanticLabelsFB lab{XR_TYPE_SEMANTIC_LABELS_FB};
+    lab.bufferCapacityInput = sizeof(label); lab.buffer = label;
+    CHECK_RESULT(xrGetSpaceSemanticLabelsFB(s, mesh, &lab), XR_SUCCESS);
+    CHECK(strcmp(label, "GLOBAL_MESH") == 0);
+    uint32_t n = 0;
+    XrSpaceComponentTypeFB comps[8];
+    CHECK_RESULT(xrEnumerateSpaceSupportedComponentsFB(mesh, 8, &n, comps), XR_SUCCESS);
+    CHECK(n == 3 && comps[n - 1] == XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META);
+    XrSpaceTriangleMeshGetInfoMETA mgi{XR_TYPE_SPACE_TRIANGLE_MESH_GET_INFO_META};
+    XrSpaceTriangleMeshMETA tm{XR_TYPE_SPACE_TRIANGLE_MESH_META};
+    CHECK_RESULT(xrGetSpaceTriangleMeshMETA(mesh, &mgi, &tm), XR_SUCCESS);
+    CHECK(tm.vertexCountOutput == 2 * 6 + 4 * 5 && tm.indexCountOutput == 3 * 5 * 2 + 6 * 5);
+    XrVector3f verts[64]; uint32_t idx[128];
+    tm.vertexCapacityInput = 64; tm.vertices = verts; tm.indexCapacityInput = 128; tm.indices = idx;
+    CHECK_RESULT(xrGetSpaceTriangleMeshMETA(mesh, &mgi, &tm), XR_SUCCESS);
+    // every triangle faces into the room: its normal points towards the room's middle (0, 1.25, 0)
+    int wrong = 0;
+    for (uint32_t t = 0; t < tm.indexCountOutput; t += 3) {
+        XrVector3f a = verts[idx[t]], b = verts[idx[t + 1]], c = verts[idx[t + 2]];
+        float e1[3] = {b.x - a.x, b.y - a.y, b.z - a.z}, e2[3] = {c.x - a.x, c.y - a.y, c.z - a.z};
+        float nrm[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+        float cx = (a.x + b.x + c.x) / 3, cy = (a.y + b.y + c.y) / 3, cz = (a.z + b.z + c.z) / 3;
+        float toMid[3] = {0 - cx, 1.25f - cy, 0 - cz};
+        if (nrm[0] * toMid[0] + nrm[1] * toMid[1] + nrm[2] * toMid[2] <= 0) wrong++;
+    }
+    CHECK(wrong == 0);
+
+    // passthrough colour: Meta cubes and the FB styles
+    XrPassthroughCreateInfoFB pci{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+    XrPassthroughFB pt;
+    CHECK_RESULT(xrCreatePassthroughFB(s, &pci, &pt), XR_SUCCESS);
+    static uint8_t cube[16 * 16 * 16 * 3];
+    for (int i = 0; i < 16 * 16 * 16 * 3; i++) cube[i] = static_cast<uint8_t>(i);
+    XrPassthroughColorLutCreateInfoMETA lci{XR_TYPE_PASSTHROUGH_COLOR_LUT_CREATE_INFO_META};
+    lci.channels = XR_PASSTHROUGH_COLOR_LUT_CHANNELS_RGB_META; lci.resolution = 16;
+    lci.data.bufferSize = sizeof(cube) - 3; lci.data.buffer = cube;
+    XrPassthroughColorLutMETA lut;
+    CHECK_RESULT(xrCreatePassthroughColorLutMETA(pt, &lci, &lut), XR_ERROR_VALIDATION_FAILURE);  // wrong size
+    lci.data.bufferSize = sizeof(cube);
+    lci.resolution = 15;
+    CHECK_RESULT(xrCreatePassthroughColorLutMETA(pt, &lci, &lut), XR_ERROR_VALIDATION_FAILURE);  // not a power of two
+    lci.resolution = 16;
+    CHECK_RESULT(xrCreatePassthroughColorLutMETA(pt, &lci, &lut), XR_SUCCESS);
+    XrPassthroughColorLutUpdateInfoMETA up{XR_TYPE_PASSTHROUGH_COLOR_LUT_UPDATE_INFO_META};
+    up.data = lci.data;
+    CHECK_RESULT(xrUpdatePassthroughColorLutMETA(lut, &up), XR_SUCCESS);
+    XrPassthroughLayerCreateInfoFB plc{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+    plc.passthrough = pt; plc.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+    XrPassthroughLayerFB layer;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &plc, &layer), XR_SUCCESS);
+    XrPassthroughColorMapLutMETA cm{XR_TYPE_PASSTHROUGH_COLOR_MAP_LUT_META};
+    cm.colorLut = lut; cm.weight = 0.5f;
+    XrPassthroughStyleFB style{XR_TYPE_PASSTHROUGH_STYLE_FB};
+    style.textureOpacityFactor = 1; style.next = &cm;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_SUCCESS);
+    cm.weight = 2;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_ERROR_VALIDATION_FAILURE);
+    XrPassthroughBrightnessContrastSaturationFB bcs{XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB};
+    bcs.brightness = 10; bcs.contrast = 1.2f; bcs.saturation = 0;
+    style.next = &bcs;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_SUCCESS);
+    bcs.brightness = 500;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_ERROR_VALIDATION_FAILURE);
+    static XrPassthroughColorMapMonoToRgbaFB mono{XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_RGBA_FB};
+    for (int i = 0; i < 256; i++) mono.textureColorMap[i] = {i / 255.0f, 0, 0, 1};
+    style.next = &mono;
+    CHECK_RESULT(xrPassthroughLayerSetStyleFB(layer, &style), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyPassthroughColorLutMETA(lut), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyPassthroughColorLutMETA(lut), XR_ERROR_HANDLE_INVALID);
+    // keyboard hands: accepted, nothing to show without a tracked keyboard
+    plc.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_HANDS_FB;
+    XrPassthroughLayerFB kb;
+    CHECK_RESULT(xrCreatePassthroughLayerFB(s, &plc, &kb), XR_SUCCESS);
+    XrPassthroughKeyboardHandsIntensityFB kh{XR_TYPE_PASSTHROUGH_KEYBOARD_HANDS_INTENSITY_FB};
+    kh.leftHandIntensity = 0.5f; kh.rightHandIntensity = 1.5f;
+    CHECK_RESULT(xrPassthroughLayerSetKeyboardHandsIntensityFB(kb, &kh), XR_ERROR_VALIDATION_FAILURE);
+    kh.rightHandIntensity = 1;
+    CHECK_RESULT(xrPassthroughLayerSetKeyboardHandsIntensityFB(kb, &kh), XR_SUCCESS);
+    // a LUT left alive is freed with the session
+    CHECK_RESULT(xrCreatePassthroughColorLutMETA(pt, &lci, &lut), XR_SUCCESS);
+    hxTestSetRoom(nullptr, nullptr, 0, 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1991,6 +2115,7 @@ int main() {
     testPicoSpatialSensing();
     testBodySolver();
     testBodyTracking();
+    testRoomMeshAndPassthroughColor();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

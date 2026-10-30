@@ -25,7 +25,7 @@ struct Room {
     float height;                // floor to ceiling
 };
 
-enum Kind { ANCHOR = 0, ROOM = 1, FLOOR = 2, CEILING = 3, WALL = 4 };
+enum Kind { ANCHOR = 0, ROOM = 1, FLOOR = 2, CEILING = 3, WALL = 4, MESH = 5 };
 
 struct Plane {
     int kind;                    // FLOOR, CEILING or WALL

@@ -84,6 +84,8 @@ object QuestApk {
         "XR_BD_spatial_mesh", "XR_BD_spatial_plane",
         // bodies inferred from the head and the hands (Meta upper / full body, Pico)
         "XR_FB_body_tracking", "XR_META_body_tracking_full_body", "XR_BD_body_tracking",
+        // the room as a mesh, passthrough colour cubes, keyboard-hands passthrough layers
+        "XR_META_spatial_entity_mesh", "XR_META_passthrough_color_lut", "XR_FB_passthrough_keyboard_hands",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */

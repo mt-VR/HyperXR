@@ -297,6 +297,8 @@ struct HxSessionGfx {
     GLuint progProj, progProjArray, progQuad, progQuadArray, progCamera;
     GLuint vao;
     GLuint cameraTex;          // latest passthrough frame
+    GLuint mapTex, lutTex[2];  // passthrough colour style
+    uint32_t styleVersion;
     uint32_t cameraSeq;        // HxCameraShared::seq of the frame in cameraTex
     uint32_t cameraW, cameraH;
     float cameraIntr[4];       // fx, fy, cx, cy
@@ -371,14 +373,38 @@ uniform mat3 uCamRotInv;   // stage -> camera at capture time
 uniform vec4 uIntr;        // fx, fy, cx, cy (pixels, image y down)
 uniform vec2 uSize;        // frame size, pixels
 uniform float uOpacity;
+// colour style: 0 none, 1 luminance map (256 entries), 2 brightness/contrast/saturation, 3 colour cube(s)
+uniform int uColorMode;
+uniform sampler2D uMap;
+uniform vec3 uBCS;          // brightness (-100..100), contrast, saturation
+uniform highp sampler3D uLutA, uLutB;
+uniform int uLutHasA;       // 0: A is the camera's own colour
+uniform float uLutWeight, uLutRes;
 SAMPLER_DECL
+vec3 cube(highp sampler3D lut, vec3 c) {
+    // texel centres: 0 and 1 land on the first and last entries
+    return texture(lut, c * ((uLutRes - 1.0) / uLutRes) + 0.5 / uLutRes).rgb;
+}
 void main() {
     vec3 d = uCamRotInv * (uEyeRot * eyeDir());
     if (d.z > -1e-4) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
     vec2 px = vec2(uIntr.z + uIntr.x * d.x / -d.z, uIntr.w - uIntr.y * d.y / -d.z);
     vec2 uv = px / uSize;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-    fragColor = vec4(SAMPLE(uv).rgb * uOpacity, 1.0);
+    vec3 c = SAMPLE(uv).rgb;
+    float a = 1.0;
+    float y = dot(c, vec3(0.299, 0.587, 0.114));
+    if (uColorMode == 1) {
+        vec4 m = texture(uMap, vec2((y * 255.0 + 0.5) / 256.0, 0.5));
+        c = m.rgb; a = m.a;
+    } else if (uColorMode == 2) {
+        c = (c - 0.5) * uBCS.y + 0.5 + uBCS.x / 100.0;
+        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uBCS.z);
+    } else if (uColorMode == 3) {
+        vec3 from = uLutHasA == 1 ? cube(uLutA, clamp(c, 0.0, 1.0)) : c;
+        c = mix(from, cube(uLutB, clamp(c, 0.0, 1.0)), uLutWeight);
+    }
+    fragColor = vec4(clamp(c, 0.0, 1.0) * uOpacity * a, 1.0);
 })";
 
 // Quad, cylinder and equirect layers: the ray from the current eye, in the layer's space, hits a
@@ -500,6 +526,8 @@ void initGl(HxSessionGfx* g) {
     g->progCamera = program(kCamera, false);
     glGenVertexArrays(1, &g->vao);
     glGenTextures(1, &g->cameraTex);
+    glGenTextures(1, &g->mapTex);
+    glGenTextures(2, g->lutTex);
     g->glReady = true;
 }
 
@@ -789,6 +817,8 @@ void gfxDestroySession(HxSessionGfx* g) {
         glDeleteProgram(g->progQuad); glDeleteProgram(g->progQuadArray); glDeleteProgram(g->progCamera);
         glDeleteVertexArrays(1, &g->vao);
         glDeleteTextures(1, &g->cameraTex);
+        glDeleteTextures(1, &g->mapTex);
+        glDeleteTextures(2, g->lutTex);
     }
     restore(s, g->dpy);
     if (g->window != EGL_NO_SURFACE) eglDestroySurface(g->dpy, g->window);
@@ -890,6 +920,34 @@ bool applyCustomBlend(const int f[4]) {
     return true;
 }
 
+/** Uploads the passthrough's colour style (map, cubes) when it changed. */
+void updateStyle(HxSessionGfx* g, const HxPassthroughState& pt) {
+    if (pt.version == g->styleVersion) return;
+    g->styleVersion = pt.version;
+    auto params = [](GLenum target) {
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (target == GL_TEXTURE_3D) glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    };
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (pt.colorMode == HX_COLOR_MAP && pt.map) {
+        glBindTexture(GL_TEXTURE_2D, g->mapTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pt.map);
+        params(GL_TEXTURE_2D);
+    }
+    if (pt.colorMode == HX_COLOR_LUT && pt.lutB && pt.lutRes > 1) {
+        const uint8_t* cubes[2] = {pt.lutA, pt.lutB};
+        for (int i = 0; i < 2; i++) {
+            if (!cubes[i]) continue;
+            glBindTexture(GL_TEXTURE_3D, g->lutTex[i]);
+            glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, pt.lutRes, pt.lutRes, pt.lutRes, 0, GL_RGBA, GL_UNSIGNED_BYTE, cubes[i]);
+            params(GL_TEXTURE_3D);
+        }
+    }
+}
+
 /** Uploads the newest passthrough frame into g->cameraTex; false when there is none yet. */
 bool updateCameraTexture(HxSessionGfx* g) {
     HxCameraShared* c = cameraFrames();
@@ -963,6 +1021,18 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             glUniform2f(glGetUniformLocation(g->progCamera, "uSize"), static_cast<float>(g->cameraW), static_cast<float>(g->cameraH));
             glUniform1f(glGetUniformLocation(g->progCamera, "uOpacity"), passthrough.opacity);
             glUniform1i(glGetUniformLocation(g->progCamera, "uSrgb"), 0);
+            updateStyle(g, passthrough);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uColorMode"), passthrough.colorMode);
+            glUniform3f(glGetUniformLocation(g->progCamera, "uBCS"), passthrough.brightness, passthrough.contrast, passthrough.saturation);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uLutHasA"), passthrough.lutA ? 1 : 0);
+            glUniform1f(glGetUniformLocation(g->progCamera, "uLutWeight"), passthrough.lutWeight);
+            glUniform1f(glGetUniformLocation(g->progCamera, "uLutRes"), static_cast<float>(passthrough.lutRes > 1 ? passthrough.lutRes : 2));
+            glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, g->mapTex);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uMap"), 1);
+            glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_3D, g->lutTex[0]);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uLutA"), 2);
+            glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_3D, g->lutTex[1]);
+            glUniform1i(glGetUniformLocation(g->progCamera, "uLutB"), 3);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, g->cameraTex);
             glUniform1i(glGetUniformLocation(g->progCamera, "uTex"), 0);

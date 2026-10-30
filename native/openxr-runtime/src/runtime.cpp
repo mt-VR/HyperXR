@@ -30,7 +30,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -138,7 +138,19 @@ struct Foveation { uint32_t magic; };
 
 /** XR_FB_passthrough: the feature (started / paused) and its layers (running / paused, style). */
 struct Passthrough { uint32_t magic; Session* session; bool running; };
-struct PassthroughLayer { uint32_t magic; Session* session; Passthrough* passthrough; bool running; float opacity; };
+/** XR_META_passthrough_color_lut: a colour cube, kept as RGBA8. */
+struct ColorLut { uint32_t magic; Passthrough* passthrough; int res; uint8_t* rgba; uint32_t version; };
+struct PassthroughLayer {
+    uint32_t magic; Session* session; Passthrough* passthrough; bool running; float opacity;
+    // style (XrPassthroughStyleFB and the colour maps chained to it)
+    int colorMode;
+    uint8_t map[256 * 4];
+    float brightness, contrast, saturation;
+    ColorLut* lutA; ColorLut* lutB;
+    float lutWeight;
+    uint32_t version;
+    float keyboardHands[2];
+};
 
 /** XR_EXT_hand_tracking tracker: one hand, joints from HyperMagic's camera hand tracking. */
 struct HandTracker { uint32_t magic; Session* session; XrHandEXT hand; };
@@ -759,6 +771,10 @@ const ExtDesc kExtensions[] = {
     {XR_FB_SPATIAL_ENTITY_CONTAINER_EXTENSION_NAME, XR_FB_spatial_entity_container_SPEC_VERSION},
     {XR_FB_SCENE_EXTENSION_NAME, XR_FB_scene_SPEC_VERSION},
     {XR_FB_SCENE_CAPTURE_EXTENSION_NAME, XR_FB_scene_capture_SPEC_VERSION},
+    {XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME, XR_META_spatial_entity_mesh_SPEC_VERSION},
+    // passthrough colour: Meta's colour cubes, and the keyboard-hands layer (no tracked keyboard to show)
+    {XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME, XR_META_passthrough_color_lut_SPEC_VERSION},
+    {XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME, XR_FB_passthrough_keyboard_hands_SPEC_VERSION},
     // controller models (HyperMagic's own, glTF), per-layer blend factors, and two hints accepted
     {XR_FB_RENDER_MODEL_EXTENSION_NAME, XR_FB_render_model_SPEC_VERSION},
     // Pico (ByteDance) spatial sensing: anchors, the room (scene), its planes and its mesh, with futures
@@ -978,6 +994,8 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemSimultaneousHandsAndControllersPropertiesMETA*>(n)->supportsSimultaneousHandsAndControllers = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_KEYBOARD_TRACKING_PROPERTIES_FB)
             reinterpret_cast<XrSystemKeyboardTrackingPropertiesFB*>(n)->supportsKeyboardTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_COLOR_LUT_PROPERTIES_META)
+            reinterpret_cast<XrSystemPassthroughColorLutPropertiesMETA*>(n)->maxColorLutResolution = 64;
         if (n->type == XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemBodyTrackingPropertiesFB*>(n)->supportsBodyTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_PROPERTIES_BODY_TRACKING_FULL_BODY_META)
             reinterpret_cast<XrSystemPropertiesBodyTrackingFullBodyMETA*>(n)->supportsFullBodyTracking = XR_TRUE;
@@ -1135,7 +1153,11 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_FOVEATION)) { static_cast<Foveation*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PT_LAYER)) { static_cast<PassthroughLayer*>(c)->magic = 0; free(c); }
-    while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) { static_cast<Passthrough*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) {
+        while (void* l = takeChild(c, MAGIC_LUT)) { ColorLut* lut = static_cast<ColorLut*>(l); free(lut->rgba); lut->magic = 0; free(lut); }
+        static_cast<Passthrough*>(c)->magic = 0;
+        free(c);
+    }
     while (void* c = takeChild(s, MAGIC_BODY)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_SNAP)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_ANCHOR_BD)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
@@ -1558,7 +1580,7 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
     HxComposeView views[2] = {};
     uint32_t viewCount = 0;
     HxPassthroughState passthrough = {};
-    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) { passthrough.on = 1; passthrough.opacity = 1; }
+    if (info->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) { passthrough.on = 1; passthrough.opacity = 1; passthrough.contrast = passthrough.saturation = 1; }
     HxComposeQuad quads[MAX_LAYERS];
     uint32_t quadCount = 0;
     const HxConfig& cfg = s->instance->cfg;
@@ -1571,9 +1593,21 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
             auto* p = reinterpret_cast<const XrCompositionLayerPassthroughFB*>(l);
             auto* pl = asObj<PassthroughLayer>(reinterpret_cast<uint64_t>(p->layerHandle), MAGIC_PT_LAYER);
             if (!pl || pl->session != s) return XR_ERROR_HANDLE_INVALID;
-            if (pl->running && isLive(pl->passthrough, MAGIC_PASSTHROUGH) && pl->passthrough->running && pl->opacity > 0) {
+            if (pl->running && isLive(pl->passthrough, MAGIC_PASSTHROUGH) && pl->passthrough->running && pl->opacity > 0 &&
+                pl->opacity >= passthrough.opacity) {
                 passthrough.on = 1;
-                passthrough.opacity = pl->opacity > passthrough.opacity ? pl->opacity : passthrough.opacity;
+                passthrough.opacity = pl->opacity;
+                // this layer's colour style
+                passthrough.colorMode = pl->colorMode;
+                passthrough.map = pl->map;
+                passthrough.brightness = pl->brightness; passthrough.contrast = pl->contrast; passthrough.saturation = pl->saturation;
+                passthrough.lutA = pl->lutA ? pl->lutA->rgba : nullptr;
+                passthrough.lutB = pl->lutB ? pl->lutB->rgba : nullptr;
+                passthrough.lutRes = pl->lutB ? pl->lutB->res : 0;
+                passthrough.lutWeight = pl->lutWeight;
+                passthrough.version = pl->version * 7919u + (pl->lutA ? pl->lutA->version * 104729u : 0) + (pl->lutB ? pl->lutB->version : 0) +
+                                      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pl));
+                if (passthrough.colorMode == HX_COLOR_LUT && !passthrough.lutB) passthrough.colorMode = HX_COLOR_NONE;
             }
             continue;
         }
@@ -2286,6 +2320,9 @@ uint32_t componentsOf(int kind) {
         case hxscene::ANCHOR: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB);
         case hxscene::ROOM: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB) |
                                    bit(XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB);
+        // the room's global mesh (XR_META_spatial_entity_mesh); its triangle mesh component is not a
+        // bit here (its value is too large) and is always there
+        case hxscene::MESH: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB);
         default: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_BOUNDED_2D_FB) |
                         bit(XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB);
     }
@@ -2326,6 +2363,8 @@ void buildScene(Session* s) {
     hxscene::Plane planes[hxscene::MAX_PLANES];
     int n = hxscene::build(r, planes, s->floorOutline, s->ceilingOutline);
     addEntity(s, hxscene::ROOM, hxscene::sceneUuid(r, hxscene::ROOM, 0), XrPosef{{0, 0, 0, 1}, planes[0].pose.position});
+    if (extEnabled(s->instance, XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME))
+        addEntity(s, hxscene::MESH, hxscene::sceneUuid(r, hxscene::MESH, 0), XrPosef{{0, 0, 0, 1}, planes[0].pose.position});
     for (int i = 0; i < n; i++) {
         SceneEntity* e = addEntity(s, planes[i].kind, hxscene::sceneUuid(r, planes[i].kind, i), planes[i].pose);
         if (!e) break;
@@ -2422,13 +2461,16 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateSpaceSupportedComponentsFB(XrSpace h, ui
     if (!count) return XR_ERROR_VALIDATION_FAILURE;
     SceneEntity* e = entityOf(sp);
     uint32_t mask = e ? componentsOf(e->kind) : 0, n = 0;
+    bool mesh = e && e->kind == hxscene::MESH;
     for (uint32_t c = 0; c < 8; c++) if (mask & (1u << c)) n++;
+    if (mesh) n++;
     *count = n;
     if (capacity == 0) return XR_SUCCESS;
     if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
     if (!types) return XR_ERROR_VALIDATION_FAILURE;
     n = 0;
     for (uint32_t c = 0; c < 8; c++) if (mask & (1u << c)) types[n++] = static_cast<XrSpaceComponentTypeFB>(c);
+    if (mesh) types[n++] = XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META;
     return XR_SUCCESS;
 }
 
@@ -2437,8 +2479,17 @@ XRAPI_ATTR XrResult XRAPI_CALL SetSpaceComponentStatusFB(XrSpace h, const XrSpac
     if (!sp) return XR_ERROR_HANDLE_INVALID;
     if (!info || info->type != XR_TYPE_SPACE_COMPONENT_STATUS_SET_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
     SceneEntity* e = entityOf(sp);
-    if (!e || info->componentType > XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB || !(componentsOf(e->kind) & bit(info->componentType)))
+    bool meshComponent = e && e->kind == hxscene::MESH && info->componentType == XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META;
+    if (!meshComponent && (!e || info->componentType > XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB || !(componentsOf(e->kind) & bit(info->componentType))))
         return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    if (meshComponent) {  // always on: report the request as done
+        XrEventDataSpaceSetStatusCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB};
+        ev.requestId = *requestId = newRequest(sp->session->instance);
+        ev.result = info->enabled ? XR_SUCCESS : XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+        ev.space = h; ev.uuid = e->uuid; ev.componentType = info->componentType; ev.enabled = XR_TRUE;
+        pushEvent(sp->session->instance, &ev, sizeof(ev));
+        return XR_SUCCESS;
+    }
     if (info->enabled) e->enabled |= bit(info->componentType); else e->enabled &= ~bit(info->componentType);
     // asking for the state it is already in also completes (apps wait for the event either way)
     XrEventDataSpaceSetStatusCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB};
@@ -2457,6 +2508,9 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSpaceComponentStatusFB(XrSpace h, XrSpaceCompo
     if (!sp) return XR_ERROR_HANDLE_INVALID;
     if (!status || status->type != XR_TYPE_SPACE_COMPONENT_STATUS_FB) return XR_ERROR_VALIDATION_FAILURE;
     SceneEntity* e = entityOf(sp);
+    if (e && e->kind == hxscene::MESH && type == XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META) {
+        status->enabled = XR_TRUE; status->changePending = XR_FALSE; return XR_SUCCESS;
+    }
     if (!e || type > XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB || !(componentsOf(e->kind) & bit(type))) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
     status->enabled = (e->enabled & bit(type)) ? XR_TRUE : XR_FALSE;
     status->changePending = XR_FALSE;
@@ -2474,6 +2528,7 @@ bool passes(const SceneEntity& e, const XrSpaceFilterInfoBaseHeaderFB* f) {
     }
     if (f->type == XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB) {
         auto* c = reinterpret_cast<const XrSpaceComponentFilterInfoFB*>(f);
+        if (c->componentType == XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META) return e.kind == hxscene::MESH;
         return c->componentType <= XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB && (componentsOf(e.kind) & bit(c->componentType)) &&
                (e.kind != hxscene::ANCHOR || e.stored);
     }
@@ -2623,7 +2678,8 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSpaceSemanticLabelsFB(XrSession h, XrSpace spa
     XrResult err;
     SceneEntity* e = withComponent(s, space, XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB, &err);
     if (!e) return err;
-    const char* label = e->kind == hxscene::FLOOR ? "FLOOR" : e->kind == hxscene::CEILING ? "CEILING" : "WALL_FACE";
+    const char* label = e->kind == hxscene::FLOOR ? "FLOOR" : e->kind == hxscene::CEILING ? "CEILING" :
+                        e->kind == hxscene::MESH ? "GLOBAL_MESH" : "WALL_FACE";
     uint32_t need = static_cast<uint32_t>(strlen(label)) + 1;
     out->bufferCountOutput = need;
     if (out->bufferCapacityInput == 0) return XR_SUCCESS;
@@ -2671,6 +2727,63 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSpaceRoomLayoutFB(XrSession h, XrSpace space, 
     if (!out->wallUuids) return XR_ERROR_VALIDATION_FAILURE;
     walls = 0;
     for (int i = 0; i < s->entityCount; i++) if (s->entities[i].kind == hxscene::WALL) out->wallUuids[walls++] = s->entities[i].uuid;
+    return XR_SUCCESS;
+}
+
+/** The whole room as one mesh (XR_META_spatial_entity_mesh), in the mesh entity's space: floor and ceiling fans, two triangles per wall, facing into the room. */
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceTriangleMeshMETA(XrSpace h, const XrSpaceTriangleMeshGetInfoMETA* info, XrSpaceTriangleMeshMETA* out) {
+    Space* sp = asSpace(h);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_TRIANGLE_MESH_GET_INFO_META || !out || out->type != XR_TYPE_SPACE_TRIANGLE_MESH_META) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = entityOf(sp);
+    if (!e || e->kind != hxscene::MESH) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    Session* s = sp->session;
+    const hxscene::Room& r = s->room;
+    const int n = r.count;
+    uint32_t verts = static_cast<uint32_t>(2 * (n + 1) + 4 * n), idx = static_cast<uint32_t>(3 * n * 2 + 6 * n);
+    out->vertexCountOutput = verts;
+    out->indexCountOutput = idx;
+    if (out->vertexCapacityInput == 0 && out->indexCapacityInput == 0) return XR_SUCCESS;
+    if (out->vertexCapacityInput < verts || out->indexCapacityInput < idx) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!out->vertices || !out->indices) return XR_ERROR_VALIDATION_FAILURE;
+    XrVector3f c = e->pose.position;  // the mesh's origin: middle of the floor
+    uint32_t v = 0, k = 0;
+    // floor (y = 0) and ceiling fans around the middle
+    for (int level = 0; level < 2; level++) {
+        float y = level == 0 ? 0 : r.height;
+        uint32_t centre = v;
+        out->vertices[v++] = {0, y, 0};
+        for (int i = 0; i < n; i++) out->vertices[v++] = {r.x[i] - c.x, y, r.z[i] - c.z};
+        for (int i = 0; i < n; i++) {
+            uint32_t a = centre + 1 + static_cast<uint32_t>(i), b = centre + 1 + static_cast<uint32_t>((i + 1) % n);
+            out->indices[k++] = centre;
+            // the floor faces up, the ceiling down (the outline's turning direction decides the order)
+            bool ccwUp = (r.x[i] - c.x) * (r.z[(i + 1) % n] - c.z) - (r.x[(i + 1) % n] - c.x) * (r.z[i] - c.z) < 0;
+            bool up = level == 0;
+            if (ccwUp == up) { out->indices[k++] = a; out->indices[k++] = b; } else { out->indices[k++] = b; out->indices[k++] = a; }
+        }
+    }
+    // walls: a quad per edge, facing the middle of the room
+    for (int i = 0; i < n; i++) {
+        int j = (i + 1) % n;
+        uint32_t q = v;
+        out->vertices[v++] = {r.x[i] - c.x, 0, r.z[i] - c.z};
+        out->vertices[v++] = {r.x[j] - c.x, 0, r.z[j] - c.z};
+        out->vertices[v++] = {r.x[j] - c.x, r.height, r.z[j] - c.z};
+        out->vertices[v++] = {r.x[i] - c.x, r.height, r.z[i] - c.z};
+        // the face normal of (q, q+1, q+2) is up x edge; flip when it points away from the middle
+        float ex = r.x[j] - r.x[i], ez = r.z[j] - r.z[i];
+        float nx = -ez, nz = ex;  // the normal of (q, q+1, q+2)
+        float mx = (r.x[i] + r.x[j]) * 0.5f - c.x, mz = (r.z[i] + r.z[j]) * 0.5f - c.z;
+        bool inward = nx * -mx + nz * -mz > 0;
+        if (inward) {
+            out->indices[k++] = q; out->indices[k++] = q + 1; out->indices[k++] = q + 2;
+            out->indices[k++] = q; out->indices[k++] = q + 2; out->indices[k++] = q + 3;
+        } else {
+            out->indices[k++] = q; out->indices[k++] = q + 2; out->indices[k++] = q + 1;
+            out->indices[k++] = q; out->indices[k++] = q + 3; out->indices[k++] = q + 2;
+        }
+    }
     return XR_SUCCESS;
 }
 
@@ -3597,6 +3710,7 @@ void layerResumed(PassthroughLayer* l) {
 XRAPI_ATTR XrResult XRAPI_CALL DestroyPassthroughFB(XrPassthroughFB h) {
     Passthrough* p = asPassthrough(h);
     if (!p) return XR_ERROR_HANDLE_INVALID;
+    while (void* c = takeChild(p, MAGIC_LUT)) { ColorLut* lut = static_cast<ColorLut*>(c); free(lut->rgba); lut->magic = 0; free(lut); }
     release(p);
     return XR_SUCCESS;
 }
@@ -3622,14 +3736,19 @@ XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughLayerFB(XrSession h, const XrPas
     if (!ci || ci->type != XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
     Passthrough* p = asPassthrough(ci->passthrough);
     if (!p || p->session != s) return XR_ERROR_HANDLE_INVALID;
-    // only the whole camera view: surfaces projected onto app meshes need XR_FB_triangle_mesh
-    if (ci->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB) return XR_ERROR_FEATURE_UNSUPPORTED;
+    // the whole camera view; keyboard-hands layers are accepted (there is no tracked keyboard, so
+    // they show nothing); surfaces projected onto app meshes need XR_FB_triangle_mesh
+    bool keyboard = (ci->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_HANDS_FB ||
+                     ci->purpose == XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_MASKED_HANDS_FB) &&
+                    extEnabled(s->instance, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME);
+    if (ci->purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB && !keyboard) return XR_ERROR_FEATURE_UNSUPPORTED;
     PassthroughLayer* l = alloc<PassthroughLayer>(MAGIC_PT_LAYER, s);
     if (!l) return XR_ERROR_OUT_OF_MEMORY;
     l->session = s;
     l->passthrough = p;
     l->running = (ci->flags & XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB) != 0;
-    l->opacity = 1;
+    l->opacity = keyboard ? 0 : 1;
+    l->contrast = l->saturation = 1;
     *out = reinterpret_cast<XrPassthroughLayerFB>(l);
     if (l->running) layerResumed(l);
     return XR_SUCCESS;
@@ -3663,8 +3782,110 @@ XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerSetStyleFB(XrPassthroughLayerFB h
     if (!l) return XR_ERROR_HANDLE_INVALID;
     if (!style || style->type != XR_TYPE_PASSTHROUGH_STYLE_FB) return XR_ERROR_VALIDATION_FAILURE;
     if (style->textureOpacityFactor < 0 || style->textureOpacityFactor > 1) return XR_ERROR_VALIDATION_FAILURE;
-    // opacity is honoured; edge rendering and colour maps are accepted and not drawn
+    // opacity and the colour maps are drawn; the edge colour is accepted (the phone's camera gives no edges)
+    int mode = HX_COLOR_NONE;
+    for (auto* n = reinterpret_cast<const XrBaseInStructure*>(style->next); n; n = n->next) {
+        if (n->type == XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_RGBA_FB) {
+            auto* m = reinterpret_cast<const XrPassthroughColorMapMonoToRgbaFB*>(n);
+            for (int i = 0; i < 256; i++) {
+                const XrColor4f& c = m->textureColorMap[i];
+                const float v[4] = {c.r, c.g, c.b, c.a};
+                for (int k = 0; k < 4; k++) l->map[i * 4 + k] = static_cast<uint8_t>((v[k] < 0 ? 0 : v[k] > 1 ? 1 : v[k]) * 255.0f + 0.5f);
+            }
+            mode = HX_COLOR_MAP;
+        } else if (n->type == XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_MONO_FB) {
+            auto* m = reinterpret_cast<const XrPassthroughColorMapMonoToMonoFB*>(n);
+            for (int i = 0; i < 256; i++) { l->map[i * 4] = l->map[i * 4 + 1] = l->map[i * 4 + 2] = m->textureColorMap[i]; l->map[i * 4 + 3] = 255; }
+            mode = HX_COLOR_MAP;
+        } else if (n->type == XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB) {
+            auto* b = reinterpret_cast<const XrPassthroughBrightnessContrastSaturationFB*>(n);
+            if (b->brightness < -100 || b->brightness > 100 || b->contrast < 0 || b->saturation < 0) return XR_ERROR_VALIDATION_FAILURE;
+            l->brightness = b->brightness; l->contrast = b->contrast; l->saturation = b->saturation;
+            mode = HX_COLOR_BCS;
+        } else if (n->type == XR_TYPE_PASSTHROUGH_COLOR_MAP_LUT_META) {
+            auto* m = reinterpret_cast<const XrPassthroughColorMapLutMETA*>(n);
+            ColorLut* lut = asObj<ColorLut>(reinterpret_cast<uint64_t>(m->colorLut), MAGIC_LUT);
+            if (!lut || m->weight < 0 || m->weight > 1) return lut ? XR_ERROR_VALIDATION_FAILURE : XR_ERROR_HANDLE_INVALID;
+            l->lutA = nullptr; l->lutB = lut; l->lutWeight = m->weight;
+            mode = HX_COLOR_LUT;
+        } else if (n->type == XR_TYPE_PASSTHROUGH_COLOR_MAP_INTERPOLATED_LUT_META) {
+            auto* m = reinterpret_cast<const XrPassthroughColorMapInterpolatedLutMETA*>(n);
+            ColorLut* a = asObj<ColorLut>(reinterpret_cast<uint64_t>(m->sourceColorLut), MAGIC_LUT);
+            ColorLut* b = asObj<ColorLut>(reinterpret_cast<uint64_t>(m->targetColorLut), MAGIC_LUT);
+            if (!a || !b) return XR_ERROR_HANDLE_INVALID;
+            if (a->res != b->res || m->weight < 0 || m->weight > 1) return XR_ERROR_VALIDATION_FAILURE;
+            l->lutA = a; l->lutB = b; l->lutWeight = m->weight;
+            mode = HX_COLOR_LUT;
+        }
+    }
+    l->colorMode = mode;
     l->opacity = style->textureOpacityFactor;
+    l->version++;
+    return XR_SUCCESS;
+}
+
+/** Copies a colour cube from the app into RGBA8 (RGB cubes get an opaque alpha). */
+XrResult readLut(int channels, uint32_t res, const XrPassthroughColorLutDataMETA& data, uint8_t* out) {
+    size_t texels = static_cast<size_t>(res) * res * res;
+    if (data.bufferSize != texels * static_cast<size_t>(channels) || !data.buffer) return XR_ERROR_VALIDATION_FAILURE;
+    for (size_t i = 0; i < texels; i++) {
+        out[i * 4] = data.buffer[i * channels]; out[i * 4 + 1] = data.buffer[i * channels + 1]; out[i * 4 + 2] = data.buffer[i * channels + 2];
+        out[i * 4 + 3] = channels == 4 ? data.buffer[i * channels + 3] : 255;
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughColorLutMETA(XrPassthroughFB h, const XrPassthroughColorLutCreateInfoMETA* ci, XrPassthroughColorLutMETA* out) {
+    Passthrough* p = asPassthrough(h);
+    if (!p) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_PASSTHROUGH_COLOR_LUT_CREATE_INFO_META || !out) return XR_ERROR_VALIDATION_FAILURE;
+    int channels = ci->channels == XR_PASSTHROUGH_COLOR_LUT_CHANNELS_RGB_META ? 3 : ci->channels == XR_PASSTHROUGH_COLOR_LUT_CHANNELS_RGBA_META ? 4 : 0;
+    if (!channels || ci->resolution < 2 || ci->resolution > 64 || (ci->resolution & (ci->resolution - 1))) return XR_ERROR_VALIDATION_FAILURE;
+    uint8_t* rgba = static_cast<uint8_t*>(malloc(static_cast<size_t>(ci->resolution) * ci->resolution * ci->resolution * 4));
+    if (!rgba) return XR_ERROR_OUT_OF_MEMORY;
+    XrResult r = readLut(channels, ci->resolution, ci->data, rgba);
+    if (r != XR_SUCCESS) { free(rgba); return r; }
+    ColorLut* lut = alloc<ColorLut>(MAGIC_LUT, p);
+    if (!lut) { free(rgba); return XR_ERROR_OUT_OF_MEMORY; }
+    lut->passthrough = p; lut->res = static_cast<int>(ci->resolution); lut->rgba = rgba; lut->version = 1;
+    *out = reinterpret_cast<XrPassthroughColorLutMETA>(lut);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL UpdatePassthroughColorLutMETA(XrPassthroughColorLutMETA h, const XrPassthroughColorLutUpdateInfoMETA* info) {
+    ColorLut* lut = asObj<ColorLut>(reinterpret_cast<uint64_t>(h), MAGIC_LUT);
+    if (!lut) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_PASSTHROUGH_COLOR_LUT_UPDATE_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    // same size and channel count as at creation (the buffer size tells which)
+    size_t texels = static_cast<size_t>(lut->res) * lut->res * lut->res;
+    int channels = info->data.bufferSize == texels * 3 ? 3 : info->data.bufferSize == texels * 4 ? 4 : 0;
+    if (!channels) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult r = readLut(channels, static_cast<uint32_t>(lut->res), info->data, lut->rgba);
+    if (r == XR_SUCCESS) lut->version++;
+    return r;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyPassthroughColorLutMETA(XrPassthroughColorLutMETA h) {
+    ColorLut* lut = asObj<ColorLut>(reinterpret_cast<uint64_t>(h), MAGIC_LUT);
+    if (!lut) return XR_ERROR_HANDLE_INVALID;
+    // layers still pointing at it stop using it
+    forEachChild(lut->passthrough->session, MAGIC_PT_LAYER, [&](void* c) {
+        PassthroughLayer* l = static_cast<PassthroughLayer*>(c);
+        if (l->lutA == lut || l->lutB == lut) { l->lutA = l->lutB = nullptr; if (l->colorMode == HX_COLOR_LUT) l->colorMode = HX_COLOR_NONE; l->version++; }
+    });
+    free(lut->rgba);
+    release(lut);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerSetKeyboardHandsIntensityFB(XrPassthroughLayerFB h, const XrPassthroughKeyboardHandsIntensityFB* intensity) {
+    PassthroughLayer* l = asPtLayer(h);
+    if (!l) return XR_ERROR_HANDLE_INVALID;
+    if (!intensity || intensity->type != XR_TYPE_PASSTHROUGH_KEYBOARD_HANDS_INTENSITY_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (intensity->leftHandIntensity < 0 || intensity->leftHandIntensity > 1 || intensity->rightHandIntensity < 0 || intensity->rightHandIntensity > 1)
+        return XR_ERROR_VALIDATION_FAILURE;
+    l->keyboardHands[0] = intensity->leftHandIntensity;
+    l->keyboardHands[1] = intensity->rightHandIntensity;
     return XR_SUCCESS;
 }
 
@@ -3839,6 +4060,11 @@ const Entry kEntries[] = {
     HX_EXT(UnpersistSpatialAnchorCompleteBD, XR_BD_SPATIAL_ANCHOR_EXTENSION_NAME),
     HX_EXT(CaptureSceneAsyncBD, XR_BD_SPATIAL_SCENE_EXTENSION_NAME),
     HX_EXT(CaptureSceneCompleteBD, XR_BD_SPATIAL_SCENE_EXTENSION_NAME),
+    HX_EXT(GetSpaceTriangleMeshMETA, XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME),
+    HX_EXT(CreatePassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
+    HX_EXT(UpdatePassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
+    HX_EXT(DestroyPassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
+    HX_EXT(PassthroughLayerSetKeyboardHandsIntensityFB, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),

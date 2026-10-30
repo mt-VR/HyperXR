@@ -128,10 +128,19 @@ struct HxComposeView {
     int blend[4];        // XR_FB_composition_layer_alpha_blend factors (XrBlendFactorFB), -1: none
 };
 
-/** Passthrough for one frame: the phone's camera behind the app's layers. */
+/** Passthrough for one frame: the phone's camera behind the app's layers, and its colour style. */
+enum HxColorMode : int { HX_COLOR_NONE = 0, HX_COLOR_MAP = 1, HX_COLOR_BCS = 2, HX_COLOR_LUT = 3 };
 struct HxPassthroughState {
     int on;
     float opacity;
+    int colorMode;               // HxColorMode
+    const uint8_t* map;          // HX_COLOR_MAP: 256 RGBA8 entries indexed by the camera's luminance
+    float brightness, contrast, saturation;  // HX_COLOR_BCS (Meta's units: -100..100, x, x)
+    const uint8_t* lutA;         // HX_COLOR_LUT: RGBA8 cube of lutRes^3 (null: the camera's own colour)
+    const uint8_t* lutB;
+    int lutRes;
+    float lutWeight;             // mix from A to B
+    uint32_t version;            // changes whenever the map or a LUT's contents change
 };
 
 /** Shape of a non-projection layer. */
