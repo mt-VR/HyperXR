@@ -71,6 +71,8 @@ object QuestApk {
         // anchors and the room (Meta scene model)
         "XR_FB_spatial_entity", "XR_FB_spatial_entity_query", "XR_FB_spatial_entity_storage", "XR_FB_spatial_entity_container",
         "XR_FB_scene", "XR_FB_scene_capture",
+        // controller models, per-layer blending, local dimming, headset id
+        "XR_FB_render_model", "XR_FB_composition_layer_alpha_blend", "XR_META_local_dimming", "XR_META_headset_id",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */

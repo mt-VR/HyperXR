@@ -125,6 +125,7 @@ struct HxComposeView {
     XrFovf fov;
     int blendAlpha;      // drawn over what is behind it (passthrough) with the image's alpha
     int premultiplied;   // the alpha is already multiplied into the colour (OpenXR's default)
+    int blend[4];        // XR_FB_composition_layer_alpha_blend factors (XrBlendFactorFB), -1: none
 };
 
 /** Passthrough for one frame: the phone's camera behind the app's layers. */
@@ -151,6 +152,7 @@ struct HxComposeQuad {
     // cylinder: radius, central angle, width / height; equirect: radius (0 = infinitely far),
     // central horizontal angle, upper and lower vertical angles
     float radius, centralAngle, aspectRatio, upperAngle, lowerAngle;
+    int blend[4];        // XR_FB_composition_layer_alpha_blend factors (XrBlendFactorFB), -1: none
 };
 
 namespace hxp {

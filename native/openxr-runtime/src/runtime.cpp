@@ -7,6 +7,7 @@
 #include "hx_runtime.h"
 #include "hx_handmesh.h"
 #include "hx_scene.h"
+#include "hx_rendermodel.h"
 
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_reflection.h>
@@ -598,6 +599,11 @@ const ExtDesc kExtensions[] = {
     {XR_FB_SPATIAL_ENTITY_CONTAINER_EXTENSION_NAME, XR_FB_spatial_entity_container_SPEC_VERSION},
     {XR_FB_SCENE_EXTENSION_NAME, XR_FB_scene_SPEC_VERSION},
     {XR_FB_SCENE_CAPTURE_EXTENSION_NAME, XR_FB_scene_capture_SPEC_VERSION},
+    // controller models (HyperMagic's own, glTF), per-layer blend factors, and two hints accepted
+    {XR_FB_RENDER_MODEL_EXTENSION_NAME, XR_FB_render_model_SPEC_VERSION},
+    {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
+    {XR_META_LOCAL_DIMMING_EXTENSION_NAME, XR_META_local_dimming_SPEC_VERSION},
+    {XR_META_HEADSET_ID_EXTENSION_NAME, XR_META_headset_id_SPEC_VERSION},
     // menus and video players of Quest apps: curved panels and 360/180 images
     {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
     {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
@@ -779,6 +785,8 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(p->next); n; n = n->next) {
         if (n->type == XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB) reinterpret_cast<XrSystemColorSpacePropertiesFB*>(n)->colorSpace = XR_COLOR_SPACE_REC709_FB;
         if (n->type == XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT) reinterpret_cast<XrSystemHandTrackingPropertiesEXT*>(n)->supportsHandTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_RENDER_MODEL_PROPERTIES_FB) reinterpret_cast<XrSystemRenderModelPropertiesFB*>(n)->supportsRenderModelLoading = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_HEADSET_ID_PROPERTIES_META) memset(&reinterpret_cast<XrSystemHeadsetIdPropertiesMETA*>(n)->id, 0, sizeof(XrUuidEXT));  // not a Meta headset
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB) reinterpret_cast<XrSystemPassthroughPropertiesFB*>(n)->supportsPassthrough = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB)
             reinterpret_cast<XrSystemPassthroughProperties2FB*>(n)->capabilities = XR_PASSTHROUGH_CAPABILITY_BIT_FB | XR_PASSTHROUGH_CAPABILITY_COLOR_BIT_FB;
@@ -1305,6 +1313,22 @@ XRAPI_ATTR XrResult XRAPI_CALL BeginFrame(XrSession h, const XrFrameBeginInfo* i
     return discarded ? XR_FRAME_DISCARDED : XR_SUCCESS;
 }
 
+/**
+ * XR_FB_composition_layer_alpha_blend: the layer's own blend factors ([out] stays all -1 when the
+ * layer has none): source and destination for colour, then for alpha (XrBlendFactorFB values).
+ */
+void customBlend(Instance* inst, const XrCompositionLayerBaseHeader* l, int out[4]) {
+    out[0] = out[1] = out[2] = out[3] = -1;
+    if (!extEnabled(inst, XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME)) return;
+    for (auto* n = reinterpret_cast<const XrBaseInStructure*>(l->next); n; n = n->next) {
+        if (n->type != XR_TYPE_COMPOSITION_LAYER_ALPHA_BLEND_FB) continue;
+        auto* b = reinterpret_cast<const XrCompositionLayerAlphaBlendFB*>(n);
+        const XrBlendFactorFB f[4] = {b->srcFactorColor, b->dstFactorColor, b->srcFactorAlpha, b->dstFactorAlpha};
+        for (int i = 0; i < 4; i++) out[i] = f[i] <= XR_BLEND_FACTOR_ONE_MINUS_DST_ALPHA_FB ? static_cast<int>(f[i]) : -1;
+        if (out[0] < 0 || out[1] < 0 || out[2] < 0 || out[3] < 0) out[0] = out[1] = out[2] = out[3] = -1;
+    }
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info) {
     Session* s = asSession(h);
     if (!s) return XR_ERROR_HANDLE_INVALID;
@@ -1369,6 +1393,7 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
                 cv.fov = pv.fov;
                 cv.blendAlpha = (p->layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0;
                 cv.premultiplied = (p->layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT) == 0;
+                customBlend(s->instance, l, cv.blend);
             }
             if (located) viewCount = 2;
         } else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD || l->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR ||
@@ -1420,6 +1445,7 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
             cq.headLocked = 0;
             cq.blendAlpha = (l->layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0;
             cq.eye = vis == XR_EYE_VISIBILITY_LEFT ? 0 : vis == XR_EYE_VISIBILITY_RIGHT ? 1 : -1;
+            customBlend(s->instance, l, cq.blend);
             quads[quadCount++] = cq;
         } else {
             return XR_ERROR_LAYER_INVALID;
@@ -2418,6 +2444,61 @@ XRAPI_ATTR XrResult XRAPI_CALL RequestSceneCaptureFB(XrSession h, const XrSceneC
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ controller models (XR_FB_render_model)
+const char* const kRenderModelPaths[2] = {"/model_fb/controller/left", "/model_fb/controller/right"};
+constexpr XrRenderModelKeyFB kRenderModelKeyBase = 0x48580001;  // + 0 left, + 1 right
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateRenderModelPathsFB(XrSession h, uint32_t capacity, uint32_t* count, XrRenderModelPathInfoFB* paths) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = 2;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < 2) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!paths) return XR_ERROR_VALIDATION_FAILURE;
+    for (int i = 0; i < 2; i++) {
+        if (paths[i].type != XR_TYPE_RENDER_MODEL_PATH_INFO_FB) return XR_ERROR_VALIDATION_FAILURE;
+        XrResult r = stringToPath(s->instance, kRenderModelPaths[i], &paths[i].path);
+        if (r != XR_SUCCESS) return r;
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetRenderModelPropertiesFB(XrSession h, XrPath path, XrRenderModelPropertiesFB* props) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!props || props->type != XR_TYPE_RENDER_MODEL_PROPERTIES_FB) return XR_ERROR_VALIDATION_FAILURE;
+    int which = -1;
+    for (int i = 0; i < 2; i++) {
+        XrPath p = XR_NULL_PATH;
+        if (stringToPath(s->instance, kRenderModelPaths[i], &p) == XR_SUCCESS && p == path) which = i;
+    }
+    if (which < 0) return XR_ERROR_PATH_UNSUPPORTED;
+    // the model is plain glTF 2.0 (one mesh, one material): it fits both Meta subsets
+    props->vendorId = 0x4858;
+    copyStr(props->modelName, XR_MAX_RENDER_MODEL_NAME_SIZE_FB, which == 0 ? "HyperMagic Controller Left" : "HyperMagic Controller Right");
+    props->modelKey = kRenderModelKeyBase + static_cast<XrRenderModelKeyFB>(which);
+    props->modelVersion = 1;
+    props->flags = XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_1_BIT_FB | XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_2_BIT_FB;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL LoadRenderModelFB(XrSession h, const XrRenderModelLoadInfoFB* info, XrRenderModelBufferFB* buffer) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_RENDER_MODEL_LOAD_INFO_FB || !buffer || buffer->type != XR_TYPE_RENDER_MODEL_BUFFER_FB)
+        return XR_ERROR_VALIDATION_FAILURE;
+    if (info->modelKey != kRenderModelKeyBase && info->modelKey != kRenderModelKeyBase + 1) return XR_ERROR_RENDER_MODEL_KEY_INVALID_FB;
+    bool left = info->modelKey == kRenderModelKeyBase;
+    size_t size = hxrendermodel::glb(left, nullptr, 0);
+    if (size == 0) return XR_ERROR_RUNTIME_FAILURE;
+    buffer->bufferCountOutput = static_cast<uint32_t>(size);
+    if (buffer->bufferCapacityInput == 0) return XR_SUCCESS;
+    if (buffer->bufferCapacityInput < size) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!buffer->buffer) return XR_ERROR_VALIDATION_FAILURE;
+    return hxrendermodel::glb(left, buffer->buffer, buffer->bufferCapacityInput) == size ? XR_SUCCESS : XR_ERROR_RUNTIME_FAILURE;
+}
+
 // ------------------------------------------------------------------ passthrough (XR_FB_passthrough)
 XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughFB(XrSession h, const XrPassthroughCreateInfoFB* ci, XrPassthroughFB* out) {
     Session* s = asSession(h);
@@ -2628,6 +2709,9 @@ const Entry kEntries[] = {
     HX_EXT(GetSpaceBoundary2DFB, XR_FB_SCENE_EXTENSION_NAME),
     HX_EXT(GetSpaceRoomLayoutFB, XR_FB_SCENE_EXTENSION_NAME),
     HX_EXT(RequestSceneCaptureFB, XR_FB_SCENE_CAPTURE_EXTENSION_NAME),
+    HX_EXT(EnumerateRenderModelPathsFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
+    HX_EXT(GetRenderModelPropertiesFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
+    HX_EXT(LoadRenderModelFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),

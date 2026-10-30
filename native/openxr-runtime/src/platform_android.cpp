@@ -866,6 +866,15 @@ void gfxReleaseImage(HxSwapchainGfx* sc, uint32_t index) {
     glFlush();
 }
 
+/** XR_FB_composition_layer_alpha_blend: turns blending on with the layer's factors; false if it has none. */
+bool applyCustomBlend(const int f[4]) {
+    if (f[0] < 0) return false;
+    static const GLenum gl[6] = {GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(gl[f[0]], gl[f[1]], gl[f[2]], gl[f[3]]);
+    return true;
+}
+
 /** Uploads the newest passthrough frame into g->cameraTex; false when there is none yet. */
 bool updateCameraTexture(HxSessionGfx* g) {
     HxCameraShared* c = cameraFrames();
@@ -950,7 +959,8 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             glUseProgram(prog);
             // over the camera, the app's alpha says how much of the room shows through
             bool over = camera && v.blendAlpha;
-            if (over) { glEnable(GL_BLEND); glBlendFunc(v.premultiplied ? GL_ONE : GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
+            if (applyCustomBlend(v.blend)) over = true;
+            else if (over) { glEnable(GL_BLEND); glBlendFunc(v.premultiplied ? GL_ONE : GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
             else glDisable(GL_BLEND);
             glUniform1i(glGetUniformLocation(prog, "uKeepAlpha"), over ? 1 : 0);
             glUniform2f(glGetUniformLocation(prog, "uEyeTan"), tanH, tanV);
@@ -967,7 +977,9 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             if (q.eye >= 0 && q.eye != eye) continue;  // eyeVisibility (stereo 3D panels and videos)
             GLuint prog = q.swapchain->target == GL_TEXTURE_2D_ARRAY ? g->progQuadArray : g->progQuad;
             glUseProgram(prog);
-            if (q.blendAlpha) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); } else glDisable(GL_BLEND);
+            bool custom = applyCustomBlend(q.blend);
+            if (custom) {}
+            else if (q.blendAlpha) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); } else glDisable(GL_BLEND);
             glUniform2f(glGetUniformLocation(prog, "uEyeTan"), tanH, tanV);
             glUniform2f(glGetUniformLocation(prog, "uK"), k1, k2);
             mat3FromQuat(eyePose.orientation, m);
@@ -983,7 +995,7 @@ void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const
             glUniform1f(glGetUniformLocation(prog, "uAspect"), q.aspectRatio);
             glUniform1f(glGetUniformLocation(prog, "uUpper"), q.upperAngle);
             glUniform1f(glGetUniformLocation(prog, "uLower"), q.lowerAngle);
-            glUniform1i(glGetUniformLocation(prog, "uBlend"), q.blendAlpha);
+            glUniform1i(glGetUniformLocation(prog, "uBlend"), (q.blendAlpha || custom) ? 1 : 0);
             bindLayerTexture(prog, q.swapchain, q.imageIndex, q.arraySlice, q.rect);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }

@@ -12,6 +12,7 @@
 #include "../src/hx_hands.h"
 #include "../src/hx_layers.h"
 #include "../src/hx_handmesh.h"
+#include "../src/hx_rendermodel.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
@@ -1343,6 +1344,83 @@ static void testSpatialEntitiesAndScene() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** The controller model: a valid .glb whose triangles face outwards. */
+static void testRenderModel() {
+    static hxrendermodel::Geometry g;
+    for (int left = 0; left < 2; left++) {
+        hxrendermodel::build(left == 1, &g);
+        int inward = 0, badIndex = 0;
+        for (int t = 0; t < hxrendermodel::kIndices; t += 3) {
+            int a = g.index[t], b = g.index[t + 1], c = g.index[t + 2];
+            if (a >= hxrendermodel::kVertices || b >= hxrendermodel::kVertices || c >= hxrendermodel::kVertices) { badIndex++; continue; }
+            float e1[3], e2[3], f[3], nsum = 0;
+            for (int k = 0; k < 3; k++) { e1[k] = g.pos[b][k] - g.pos[a][k]; e2[k] = g.pos[c][k] - g.pos[a][k]; }
+            f[0] = e1[1] * e2[2] - e1[2] * e2[1]; f[1] = e1[2] * e2[0] - e1[0] * e2[2]; f[2] = e1[0] * e2[1] - e1[1] * e2[0];
+            for (int k = 0; k < 3; k++) nsum += f[k] * (g.normal[a][k] + g.normal[b][k] + g.normal[c][k]);
+            if (nsum <= 0) inward++;
+        }
+        CHECK(badIndex == 0 && inward == 0);
+    }
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_RENDER_MODEL_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 2, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance); LOAD(inst, xrEnumerateRenderModelPathsFB); LOAD(inst, xrGetRenderModelPropertiesFB);
+    LOAD(inst, xrLoadRenderModelFB); LOAD(inst, xrPathToString);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemRenderModelPropertiesFB rmp{XR_TYPE_SYSTEM_RENDER_MODEL_PROPERTIES_FB};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &rmp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(rmp.supportsRenderModelLoading == XR_TRUE);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    uint32_t n = 0;
+    CHECK_RESULT(xrEnumerateRenderModelPathsFB(s, 0, &n, nullptr), XR_SUCCESS);
+    CHECK(n == 2);
+    XrRenderModelPathInfoFB paths[2] = {{XR_TYPE_RENDER_MODEL_PATH_INFO_FB}, {XR_TYPE_RENDER_MODEL_PATH_INFO_FB}};
+    CHECK_RESULT(xrEnumerateRenderModelPathsFB(s, 2, &n, paths), XR_SUCCESS);
+    char text[128];
+    uint32_t len = 0;
+    CHECK_RESULT(xrPathToString(inst, paths[1].path, sizeof(text), &len, text), XR_SUCCESS);
+    CHECK(strcmp(text, "/model_fb/controller/right") == 0);
+    XrRenderModelPropertiesFB props{XR_TYPE_RENDER_MODEL_PROPERTIES_FB};
+    CHECK_RESULT(xrGetRenderModelPropertiesFB(s, paths[1].path, &props), XR_SUCCESS);
+    CHECK(props.modelKey != XR_NULL_RENDER_MODEL_KEY_FB && (props.flags & XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_2_BIT_FB));
+    XrRenderModelLoadInfoFB li{XR_TYPE_RENDER_MODEL_LOAD_INFO_FB};
+    li.modelKey = 12345;
+    XrRenderModelBufferFB buf{XR_TYPE_RENDER_MODEL_BUFFER_FB};
+    CHECK_RESULT(xrLoadRenderModelFB(s, &li, &buf), XR_ERROR_RENDER_MODEL_KEY_INVALID_FB);
+    li.modelKey = props.modelKey;
+    CHECK_RESULT(xrLoadRenderModelFB(s, &li, &buf), XR_SUCCESS);
+    CHECK(buf.bufferCountOutput > 1000);
+    static uint8_t glb[65536];
+    buf.bufferCapacityInput = buf.bufferCountOutput - 1; buf.buffer = glb;
+    CHECK_RESULT(xrLoadRenderModelFB(s, &li, &buf), XR_ERROR_SIZE_INSUFFICIENT);
+    buf.bufferCapacityInput = sizeof(glb);
+    CHECK_RESULT(xrLoadRenderModelFB(s, &li, &buf), XR_SUCCESS);
+    // the .glb layout: header, a JSON chunk, a BIN chunk, all lengths adding up
+    uint32_t magic, version, total, jsonLen, jsonType, binLen, binType;
+    memcpy(&magic, glb, 4); memcpy(&version, glb + 4, 4); memcpy(&total, glb + 8, 4);
+    memcpy(&jsonLen, glb + 12, 4); memcpy(&jsonType, glb + 16, 4);
+    CHECK(magic == 0x46546C67u && version == 2 && total == buf.bufferCountOutput);
+    CHECK(jsonType == 0x4E4F534Au && jsonLen % 4 == 0 && glb[20] == '{');
+    memcpy(&binLen, glb + 20 + jsonLen, 4); memcpy(&binType, glb + 24 + jsonLen, 4);
+    CHECK(binType == 0x004E4942u && 28 + jsonLen + binLen == total);
+    char json[2100] = {};
+    memcpy(json, glb + 20, jsonLen < 2099 ? jsonLen : 2099);
+    CHECK(strstr(json, "\"version\":\"2.0\"") && strstr(json, "right_controller") && strstr(json, "\"POSITION\":0"));
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1372,6 +1450,7 @@ int main() {
     testHandMeshGeometry();
     testHandMeshAndCapsules();
     testSpatialEntitiesAndScene();
+    testRenderModel();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }
