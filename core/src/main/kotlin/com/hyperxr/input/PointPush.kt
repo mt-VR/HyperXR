@@ -100,13 +100,22 @@ class PointPush {
         fun isIndexLeading(j: Array<Vec3>, eye: Vec3): Boolean {
             val bones = j[HandJoint.INDEX_MCP].distanceTo(j[HandJoint.INDEX_PIP]) + j[HandJoint.INDEX_PIP].distanceTo(j[HandJoint.INDEX_DIP]) +
                 j[HandJoint.INDEX_DIP].distanceTo(j[HandJoint.INDEX_TIP])
-            if (j[HandJoint.INDEX_MCP].distanceTo(j[HandJoint.INDEX_TIP]) / bones.coerceAtLeast(1e-4f) < 0.82f) return false
+            if (j[HandJoint.INDEX_MCP].distanceTo(j[HandJoint.INDEX_TIP]) / bones.coerceAtLeast(1e-4f) < 0.8f) return false
             if (j[HandJoint.THUMB_TIP].distanceTo(j[HandJoint.INDEX_TIP]) < 0.035f) return false
+            // ahead of the other fingertips, seen from the eyes (the per-finger depth of a phone's
+            // tracker is estimated: it counts only as a small part, the reach from the wrist does)
+            val wrist = j[HandJoint.WRIST]
+            val palm = wrist.distanceTo(j[HandJoint.MIDDLE_MCP]).coerceAtLeast(0.02f)
+            val index = wrist.distanceTo(j[HandJoint.INDEX_TIP])
+            if (index < palm * 1.45f) return false
             val reach = j[HandJoint.INDEX_TIP].distanceTo(eye)
+            var behind = 0
             for (f in intArrayOf(HandJoint.MIDDLE_TIP, HandJoint.RING_TIP, HandJoint.PINKY_TIP)) {
-                if (j[f].distanceTo(eye) > reach - 0.015f) return false
+                val shorter = wrist.distanceTo(j[f]) < index - palm * 0.2f
+                val nearer = j[f].distanceTo(eye) < reach - 0.015f
+                if (shorter || nearer) behind++
             }
-            return true
+            return behind >= 2
         }
 
         /**

@@ -100,7 +100,16 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
      * push is measured as the fingertip moving away from the eyes, which stays right even when the
      * hand's absolute depth is a few centimetres off.
      */
-    private val touchPokes = arrayOf(com.hyperxr.input.PointPush().apply { leadingIndexCounts = true }, com.hyperxr.input.PointPush().apply { leadingIndexCounts = true })
+    private val touchPokes = Array(2) { com.hyperxr.input.PointPush().apply { leadingIndexCounts = true; pressM = 0.018f; baselineTauS = 0.8f } }
+    /** Holding the fingertip still over a button also clicks (no depth needed at all). */
+    private val touchDwell = Array(2) { com.hyperxr.input.DwellClick(dwellNs = 850_000_000L, tolerance = 0.03f) }
+    /** Where the fingertip aimed a moment ago: a push drifts sideways, the aim must not. */
+    private val aimHistory = Array(2) { Array(12) { Vec3() } }
+    private val aimTimes = Array(2) { LongArray(12) }
+    private val aimHead = IntArray(2)
+    private val frozenAim = Array(2) { Vec3() }
+    private val touchWasPressed = BooleanArray(2)
+    private val touchHit = arrayOfNulls<Vec3>(2)
     private val touchRays = arrayOf(RayPointer(7, PointerSource.HAND_RAY), RayPointer(8, PointerSource.HAND_RAY))
     private val touchRayOut = arrayOf(Ray(), Ray())
     private val ray = Ray()
@@ -476,14 +485,22 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val canPoke = directTouch && !pointMode && h.isUsable && !menuOpen && !labBusy && touches[i].hovered == null &&
                 handRays[i].captured == null && h.gesture != com.hyperxr.handtracking.Gesture.PINCH
             val poked = touchPokes[i].update(if (canPoke) h.joints else null, input.head.position, h.depthSource == DepthSource.HAND_SIZE_PRIOR, now)
+            touchHit[i] = null
             if (canPoke && touchPokes[i].pointing) {
                 val r = touchRayOut[i]
                 r.origin.set(input.head.position)
                 r.direction.set(h.joints[HandJoint.INDEX_TIP]).sub(input.head.position).normalize()
-                touchRays[i].update(r, poked, surfaces, now)
-                trackHit(touchRays[i], r)
+                // remember the aim; when the push starts, keep the aim from just before it
+                val k = aimHead[i]; aimHistory[i][k].set(r.direction); aimTimes[i][k] = now; aimHead[i] = (k + 1) % 12
+                if (poked && !touchWasPressed[i]) aimBefore(i, now - AIM_LOOKBACK_NS, frozenAim[i])
+                if (poked && r.direction.dot(frozenAim[i]) > DRAG_START_COS) r.direction.set(frozenAim[i])
+                touchWasPressed[i] = poked
+                // the fingertip held still on a button clicks too
+                val dwellClick = !poked && touchDwell[i].update(touchRays[i].hovered, touchRays[i].hitU, touchRays[i].hitV, now)
+                touchRays[i].update(r, poked || dwellClick, surfaces, now)
+                if (!touchRays[i].hitDistance.isNaN()) touchHit[i] = r.pointAt(touchRays[i].hitDistance - 0.004f)
                 dragWindows(touchRays[i], r, poked)
-            } else touchRays[i].update(null, false, surfaces, now)
+            } else { touchRays[i].update(null, false, surfaces, now); touchDwell[i].reset(); touchWasPressed[i] = false }
         }
         // gaze: screen tap / viewer button, or dwell (look at a button to click it)
         input.gazeRay(ray)
@@ -506,6 +523,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private var bWasDown = false
     private var bDownNs = 0L
     private val STICK_SCROLL_PX_PER_SEC = 1400f
+    /** How far back the aim of a push is taken from (before the finger moved forward). */
+    private val AIM_LOOKBACK_NS = 180_000_000L
+    /** A held push that moves the aim more than this drags (scrolls) instead of staying put. */
+    private val DRAG_START_COS = kotlin.math.cos(Math.toRadians(4.0)).toFloat()
     /** Joy-Con stick and thumb-slide scrolling of panels (the library), panel pixels. */
     private val PANEL_STICK_PX_PER_SEC = 520f
     private val PANEL_MICRO_PX = 700f
@@ -612,6 +633,18 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
     }
 
+    /** The fingertip's aim direction at about [t] (the newest one not after it). */
+    private fun aimBefore(hand: Int, t: Long, out: Vec3) {
+        var best = (aimHead[hand] - 1 + 12) % 12
+        for (n in 1..12) {
+            val k = (aimHead[hand] - n + 12) % 12
+            if (aimTimes[hand][k] == 0L) break
+            best = k
+            if (aimTimes[hand][k] <= t) break
+        }
+        out.set(aimHistory[hand][best])
+    }
+
     private fun trackHit(p: RayPointer, r: Ray) {
         if (!p.hitDistance.isNaN()) hitPoints += r.pointAt(p.hitDistance - 0.004f)
     }
@@ -655,6 +688,22 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 r.width = sz; r.height = sz; r.radius = 0f
                 r.alpha = dwell.progress
                 r.overlay = true
+            }
+        }
+        // the index fingertip's touch point, with the hold-to-click ring and the push filling it
+        for (i in 0..1) {
+            val hp = touchHit[i] ?: continue
+            val head = ctx.input.head.position
+            val base = 0.014f * head.distanceTo(hp)
+            val p = ctx.scene.addPanel()
+            p.texture = reticleTex; p.pose.position.set(hp); faceTowards(p.pose, head)
+            p.width = base; p.height = base; p.radius = 0f; p.overlay = true
+            val k = maxOf(touchDwell[i].progress, touchPokes[i].progress)
+            if (k > 0.05f) {
+                val ring = ctx.scene.addPanel()
+                ring.texture = ringTex; ring.pose.set(p.pose)
+                val sz = base * (3.2f - 1.6f * k)
+                ring.width = sz; ring.height = sz; ring.radius = 0f; ring.alpha = k; ring.overlay = true
             }
         }
         for (hp in hitPoints) {
