@@ -178,6 +178,10 @@ fun HeadSection(a: MainActivity) {
             a.update { it.copy(headTracking = it.headTracking.copy(source = v)) }
         }
         SliderRow("Predição de movimento", h.predictionMs, 0f..40f, { "%.0f ms".format(it) }) { v -> a.update { it.copy(headTracking = it.headTracking.copy(predictionMs = v)) } }
+        SliderRow("Estabilização do giroscópio", h.stabilization, 0f..1f, { if (it < 0.01f) "desligada" else "${(it * 100).toInt()}%" }) { v ->
+            a.update { it.copy(headTracking = it.headTracking.copy(stabilization = v)) }
+        }
+        Note("Tira o tremor da imagem com a cabeça parada (mãos segurando o óculos, ruído do sensor); ao virar a cabeça, segue na hora.")
         ToggleRow("Recentralizar ao iniciar", h.recenterOnStart) { v -> a.update { it.copy(headTracking = it.headTracking.copy(recenterOnStart = v)) } }
         CapabilityRow("Vetor de rotação", caps.rotationVector)
         CapabilityRow("Giroscópio", caps.gyroscope)

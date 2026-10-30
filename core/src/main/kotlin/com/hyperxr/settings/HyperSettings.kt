@@ -78,6 +78,8 @@ data class HeadTrackingSettings(
     /** Motion-to-photon prediction horizon applied to rotation, milliseconds. */
     val predictionMs: Float = 16f,
     val smoothing: Float = 0.0f,
+    /** Gyroscope stabilization: takes the tremble out of the view while the head is still, 0 (off) .. 1. */
+    val stabilization: Float = 0.6f,
     val recenterOnStart: Boolean = true,
 )
 

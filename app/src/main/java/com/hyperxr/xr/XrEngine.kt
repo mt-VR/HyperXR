@@ -377,7 +377,14 @@ class XrEngine(
             if (latchNs != 0L) photonClock.onRendered((if (waited) System.nanoTime() else cpuDoneNs) - latchNs)
         }
         val predictionNs = predictionNs()
-        synchronized(input) { tracker?.pose(predictionNs, input.head) }
+        synchronized(input) {
+            tracker?.pose(predictionNs, input.head)
+            // the tremble of the hands holding the viewer and the gyroscope's noise, taken out
+            // over the camera image (which shakes with the real head) only half, so virtual things
+            // stay put on the real world
+            headStabilizer.strength = settings.headTracking.stabilization * (if (scene.background == Background.PASSTHROUGH) 0.5f else 1f)
+            if (tracker != null) headStabilizer.apply(input.head.orientation, dt)
+        }
 
         var xrFrame = 0
         if (openXrSession != 0L) {
@@ -503,6 +510,7 @@ class XrEngine(
 
     private var photonNs = 0L
     private val renderedOrientation = com.hyperxr.math.Quat()
+    private val headStabilizer = com.hyperxr.headtracking.HeadStabilizer()
     private val warpPose = Pose()
 
     /**
@@ -515,6 +523,8 @@ class XrEngine(
         if (t == null || !settings.graphics.timewarp) { com.hyperxr.math.Timewarp.identity(compositor.warp); return }
         val left = (photonNs - System.nanoTime()).coerceAtLeast(0L)
         synchronized(input) { t.pose(left, warpPose) }
+        // the same stabilization as the rendered frame, or the warp would add the tremble back
+        headStabilizer.correction.mul(warpPose.orientation, warpPose.orientation)
         com.hyperxr.math.Timewarp.matrix(renderedOrientation, warpPose.orientation, compositor.warp)
     }
 
