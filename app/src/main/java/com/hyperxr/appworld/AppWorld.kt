@@ -144,9 +144,31 @@ class AppWorld(private val ctx: XrContext, private val a: LauncherActions, priva
     fun update(dt: Float) {
         // things scheduled for later (the HyperBot's chirps)
         clock += dt
-        if (laterQueue.isNotEmpty()) laterQueue.removeAll { (at, fn) -> if (at <= clock) { fn(); true } else false }
+        if (laterQueue.isNotEmpty()) {
+            // taken out first: a callback may schedule more while they run
+            val due = laterQueue.filter { it.first <= clock }
+            laterQueue.removeAll(due)
+            for ((_, fn) in due) runCatching(fn).onFailure { Diagnostics.log("App-to-World: ${it.message}") }
+        }
         syncBot(dt)
-        for (o in objects) o.update(dt)
+        for (o in objects.toList()) guarded(o) { o.update(dt) }
+    }
+
+    /** Objects that failed this session (they stay off until the VR mode starts again). */
+    private val broken = HashSet<String>()
+
+    /**
+     * Runs one object's step; an object that throws is taken off the world instead of closing the
+     * whole VR mode, and the error goes to the diagnostics log.
+     */
+    private inline fun guarded(o: WorldObject, step: () -> Unit) {
+        try { step() } catch (t: Throwable) {
+            Diagnostics.log("App-to-World: ${o.key} failed and was removed: $t")
+            broken += o.key
+            objects.remove(o)
+            if (moving === o) moving = null
+            runCatching { o.release() }
+        }
     }
 
     private var clock = 0f
@@ -161,7 +183,7 @@ class AppWorld(private val ctx: XrContext, private val a: LauncherActions, priva
         botCheck = 1f
         val on = app.settings.current.launcher.hyperBot
         val there = has(HyperBot.KEY)
-        if (on && !there) {
+        if (on && !there && HyperBot.KEY !in broken) {
             // in front of you, a little to the right, at desk height (it finds the table itself)
             add(HyperBot(this).also { it.slot.set(-18f, 0.55f, -0.42f) }); save()
         } else if (!on && there) toggle(HyperBot.KEY)
@@ -174,7 +196,7 @@ class AppWorld(private val ctx: XrContext, private val a: LauncherActions, priva
 
     fun submit() {
         val head = ctx.input.head.position
-        for (o in objects) {
+        for (o in objects.toList()) guarded(o) {
             o.faceUser(head)
             o.draw()
         }
