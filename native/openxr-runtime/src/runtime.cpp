@@ -119,7 +119,14 @@ struct Session {
     struct SpaceQuery { XrAsyncRequestIdFB id; int count; int16_t entity[256]; } queries[8];
     int nextQuery;
     XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
+    XrPath handProfile;      // hand_interaction_ext when the app has bindings for it (used alongside)
     HxInput input;           // snapshot taken by xrSyncActions
+    HxHandShared hands;      // hands snapshot taken by xrSyncActions
+    bool handsOk;
+    // XR_META_performance_metrics
+    bool metrics;
+    int64_t frameWaitNs, appCpuNs, composeNs;
+    uint32_t droppedFrames;
 };
 
 /** XR_FB_foveation profile: kept only so its handle is valid (the whole image is always drawn). */
@@ -354,6 +361,88 @@ bool validName(const char* s, size_t cap) {
 }
 
 
+// ------------------------------------------------------------------ hands as input
+/** Hands older than this are not used (the camera lost them, or HyperMagic stopped). */
+constexpr int64_t HAND_STALE_NS = 200000000LL;
+/** Where the phone's camera sits relative to the eyes in a viewer: a little in front of them. */
+constexpr float CAMERA_FORWARD_M = 0.08f;
+
+/** Look-rotation whose -Z points along [dir] with +Y as close to world up as possible. */
+XrQuaternionf lookAlong(XrVector3f dir) {
+    hxhands::V z = hxhands::norm({-dir.x, -dir.y, -dir.z}, {0, 0, 1});
+    hxhands::V up = fabsf(z.y) > 0.98f ? hxhands::V{0, 0, -1} : hxhands::V{0, 1, 0};
+    hxhands::V x = hxhands::norm(hxhands::cross(up, z), {1, 0, 0});
+    hxhands::V y = hxhands::cross(z, x);
+    hxhands::Q q = hxhands::fromAxes(x, y, z);
+    return {q.x, q.y, q.z, q.w};
+}
+
+/**
+ * One tracked hand in stage space: the 26 OpenXR joints ([joints], in the camera's space) and the
+ * camera's pose when they were seen ([camera]); false when the hand is not tracked or too old.
+ */
+bool handInStage(const HxConfig& cfg, const HxHandShared& h, int side, hxhands::Joint joints[XR_HAND_JOINT_COUNT_EXT], XrPosef* camera) {
+    if (!h.tracked[side] || hxp::nowNs() - h.timeNs[side] > HAND_STALE_NS) return false;
+    if (!hxhands::toXrJoints(h.joints[side], side == 0, joints)) return false;
+    XrPosef head;
+    if (!hxp::headPose(h.timeNs[side], cfg, &head)) return false;
+    *camera = hx::compose(head, XrPosef{{0, 0, 0, 1}, {0, 0, -CAMERA_FORWARD_M}});
+    return true;
+}
+
+XrPosef jointPose(const XrPosef& camera, const hxhands::Joint& j) {
+    return hx::compose(camera, XrPosef{{j.q.x, j.q.y, j.q.z, j.q.w}, {j.p.x, j.p.y, j.p.z}});
+}
+
+/** Meta's aim ray: from about the shoulder through the knuckles (between the index and the thumb). */
+XrPosef handAim(const HxConfig& cfg, const HxHandShared& h, int side, const XrPosef& camera, XrTime time) {
+    XrPosef headNow;
+    if (!hxp::headPose(time, cfg, &headNow)) headNow = camera;
+    XrQuaternionf yaw = hx::yawOnly(headNow.orientation);
+    XrVector3f shoulder = hx::vadd(headNow.position, hx::qrot(yaw, {side == 0 ? -0.17f : 0.17f, -0.22f, 0.05f}));
+    XrPosef knuckles = hx::compose(camera, XrPosef{{0, 0, 0, 1}, {
+        (h.joints[side][hxhands::INDEX_MCP][0] + h.joints[side][2][0]) * 0.5f,
+        (h.joints[side][hxhands::INDEX_MCP][1] + h.joints[side][2][1]) * 0.5f,
+        (h.joints[side][hxhands::INDEX_MCP][2] + h.joints[side][2][2]) * 0.5f}});
+    XrVector3f dir = {knuckles.position.x - shoulder.x, knuckles.position.y - shoulder.y, knuckles.position.z - shoulder.z};
+    return XrPosef{lookAlong(dir), knuckles.position};
+}
+
+/** Closure of the hand 0 (open) .. 1 (fist): how near the middle, ring and little tips are to the palm. */
+float graspOf(const HxHandShared& h, int side) {
+    hxhands::V wrist = hxhands::v(h.joints[side][0]), mid = hxhands::v(h.joints[side][hxhands::MIDDLE_MCP]);
+    float palm = hxhands::len(hxhands::sub(mid, wrist));
+    if (palm < 1e-3f) return 0;
+    hxhands::V centre = hxhands::lerp(wrist, mid, 0.5f);
+    float d = 0;
+    static const int tips[3] = {12, 16, 20};
+    for (int tip : tips) d += hxhands::len(hxhands::sub(hxhands::v(h.joints[side][tip]), centre));
+    float r = d / 3 / palm;  // ~1.4 open, ~0.4 in a fist
+    float g = (1.2f - r) / 0.8f;
+    return g < 0 ? 0 : (g > 1 ? 1 : g);
+}
+
+enum HandPoseKind { HAND_POSE_GRIP, HAND_POSE_AIM, HAND_POSE_PINCH, HAND_POSE_POKE };
+
+/** A hand_interaction_ext pose of a tracked hand, in stage space. */
+bool handPose(Session* s, int side, int kind, XrTime time, XrPosef* out) {
+    if (!s->handsOk) return false;
+    hxhands::Joint j[XR_HAND_JOINT_COUNT_EXT];
+    XrPosef camera;
+    if (!handInStage(s->instance->cfg, s->hands, side, j, &camera)) return false;
+    XrPosef aim = handAim(s->instance->cfg, s->hands, side, camera, time);
+    switch (kind) {
+        case HAND_POSE_GRIP: *out = jointPose(camera, j[XR_HAND_JOINT_PALM_EXT]); return true;
+        case HAND_POSE_AIM: *out = aim; return true;
+        case HAND_POSE_PINCH: {
+            XrPosef a = jointPose(camera, j[XR_HAND_JOINT_THUMB_TIP_EXT]), b = jointPose(camera, j[XR_HAND_JOINT_INDEX_TIP_EXT]);
+            *out = XrPosef{aim.orientation, {(a.position.x + b.position.x) * 0.5f, (a.position.y + b.position.y) * 0.5f, (a.position.z + b.position.z) * 0.5f}};
+            return true;
+        }
+        default: *out = jointPose(camera, j[XR_HAND_JOINT_INDEX_TIP_EXT]); return true;
+    }
+}
+
 // ------------------------------------------------------------------ input sources
 // Profiles the app may have suggested bindings for, in order of preference. Every one is driven
 // by the same physical input (gamepad / Joy-Cons + screen touch).
@@ -366,7 +455,10 @@ const char* const kProfiles[] = {
     "/interaction_profiles/bytedance/pico_neo3_controller",
     "/interaction_profiles/bytedance/pico_g3_controller",
     "/interaction_profiles/khr/simple_controller",
+    // the hands themselves (XR_EXT_hand_interaction): pinch, aim, grasp and poke from hand tracking
+    "/interaction_profiles/ext/hand_interaction_ext",
 };
+const char* const kHandProfile = "/interaction_profiles/ext/hand_interaction_ext";
 
 bool profileSupported(const char* p) {
     for (const char* k : kProfiles) if (strcmp(k, p) == 0) return true;
@@ -414,7 +506,7 @@ SrcKind evalSource(const char* path, bool simple, const HxInput& in, int* handOu
     if (strcmp(id, "trigger") == 0) {
         if (!*comp || strcmp(comp, "value") == 0) { v[0] = trig; return SRC_FLOAT; }
         if (strcmp(comp, "click") == 0) { v[0] = trig > 0.5f ? 1.f : 0.f; return SRC_BOOL; }
-        if (strcmp(comp, "touch") == 0 || strcmp(comp, "proximity") == 0) { v[0] = trig > 0.05f ? 1.f : 0.f; return SRC_BOOL; }
+        if (strcmp(comp, "touch") == 0 || strcmp(comp, "proximity") == 0 || strcmp(comp, "proximity_fb") == 0) { v[0] = trig > 0.05f ? 1.f : 0.f; return SRC_BOOL; }
         return SRC_NONE;
     }
     if (strcmp(id, "squeeze") == 0) {
@@ -432,6 +524,12 @@ SrcKind evalSource(const char* path, bool simple, const HxInput& in, int* handOu
         if (strcmp(comp, "touch") == 0) { v[0] = ((in.buttons & thumb) || x * x + y * y > 0.01f) ? 1.f : 0.f; return SRC_BOOL; }
         return SRC_NONE;
     }
+    // XR_FB_touch_controller_proximity: the thumb is near the face buttons / stick when any is used
+    if (strcmp(id, "thumb_fb") == 0 && strcmp(comp, "proximity_fb") == 0) {
+        uint32_t face = h == 0 ? (HX_BTN_X | HX_BTN_Y | HX_BTN_THUMB_L) : (HX_BTN_A | HX_BTN_B | HX_BTN_THUMB_R);
+        v[0] = ((in.buttons & face) || in.stick[h][0] * in.stick[h][0] + in.stick[h][1] * in.stick[h][1] > 0.01f) ? 1.f : 0.f;
+        return SRC_BOOL;
+    }
     if (strcmp(comp, "click") != 0 && strcmp(comp, "touch") != 0) return SRC_NONE;
     if (h == 1 && strcmp(id, "a") == 0) return btn(HX_BTN_A);
     if (h == 1 && strcmp(id, "b") == 0) return btn(HX_BTN_B);
@@ -443,6 +541,42 @@ SrcKind evalSource(const char* path, bool simple, const HxInput& in, int* handOu
     return SRC_NONE;
 }
 
+/**
+ * One hand_interaction_ext source from the hands snapshot of the last xrSyncActions: pinch, aim
+ * activation and grasp values (and their _ready_ext: the hand is tracked), and the four poses.
+ */
+SrcKind evalHandSource(const char* path, const HxHandShared& hands, bool handsOk, int* handOut, float v[2]) {
+    const char* rest = nullptr;
+    int h = handOf(path, &rest);
+    *handOut = h;
+    v[0] = v[1] = 0;
+    if (h < 0 || strncmp(rest, "/input/", 7) != 0) return SRC_NONE;
+    const char* q = rest + 7;
+    if (strcmp(q, "aim/pose") == 0 || strcmp(q, "grip/pose") == 0 || strcmp(q, "pinch_ext/pose") == 0 || strcmp(q, "poke_ext/pose") == 0)
+        return SRC_POSE;
+    bool tracked = handsOk && hands.tracked[h] && hxp::nowNs() - hands.timeNs[h] <= HAND_STALE_NS;
+    float pinch = tracked ? (hands.pinch[h] < 0 ? 0 : (hands.pinch[h] > 1 ? 1 : hands.pinch[h])) : 0;
+    struct { const char* name; float value; } values[] = {
+        {"pinch_ext/value", pinch}, {"aim_activate_ext/value", pinch}, {"grasp_ext/value", tracked ? graspOf(hands, h) : 0}};
+    for (auto& e : values) if (strcmp(q, e.name) == 0) { v[0] = e.value; return SRC_FLOAT; }
+    if (strcmp(q, "pinch_ext/ready_ext") == 0 || strcmp(q, "aim_activate_ext/ready_ext") == 0 || strcmp(q, "grasp_ext/ready_ext") == 0) {
+        v[0] = tracked ? 1.f : 0.f;
+        return SRC_BOOL;
+    }
+    return SRC_NONE;
+}
+
+/** Pose kind of a hand_interaction_ext pose path, or -1. */
+int handPoseKind(const char* path) {
+    const char* rest = nullptr;
+    if (handOf(path, &rest) < 0) return -1;
+    if (strcmp(rest, "/input/grip/pose") == 0) return HAND_POSE_GRIP;
+    if (strcmp(rest, "/input/aim/pose") == 0) return HAND_POSE_AIM;
+    if (strcmp(rest, "/input/pinch_ext/pose") == 0) return HAND_POSE_PINCH;
+    if (strcmp(rest, "/input/poke_ext/pose") == 0) return HAND_POSE_POKE;
+    return -1;
+}
+
 bool isSimpleProfile(Instance* inst, XrPath profile) {
     const char* p = pathString(inst, profile);
     return p && strcmp(p, "/interaction_profiles/khr/simple_controller") == 0;
@@ -452,16 +586,18 @@ bool isSimpleProfile(Instance* inst, XrPath profile) {
 ActionValue evalAction(Session* s, Action* a, int slot) {
     ActionValue r{};
     Instance* inst = s->instance;
-    if (s->profile == XR_NULL_PATH) return r;
+    if (s->profile == XR_NULL_PATH && s->handProfile == XR_NULL_PATH) return r;
     bool simple = isSimpleProfile(inst, s->profile);
     float best = -1;
+    // the controller profile and, alongside it, the hands (simultaneous hands and controllers)
     for (int i = 0; i < inst->bindingCount; i++) {
         const auto& b = inst->bindings[i];
-        if (b.profile != s->profile || b.action != a) continue;
+        bool hands = b.profile == s->handProfile && s->handProfile != XR_NULL_PATH;
+        if ((b.profile != s->profile && !hands) || b.action != a) continue;
         const char* path = pathString(inst, b.path);
         if (!path) continue;
         int hand; float v[2];
-        SrcKind k = evalSource(path, simple, s->input, &hand, v);
+        SrcKind k = hands ? evalHandSource(path, s->hands, s->handsOk, &hand, v) : evalSource(path, simple, s->input, &hand, v);
         if (k == SRC_NONE || (slot < 2 && hand != slot)) continue;
         bool compatible = (a->type == XR_ACTION_TYPE_BOOLEAN_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
                           (a->type == XR_ACTION_TYPE_FLOAT_INPUT && (k == SRC_BOOL || k == SRC_FLOAT)) ||
@@ -500,10 +636,14 @@ bool controllerPose(Session* s, int hand, XrTime time, XrPosef* out) {
 }
 
 // ------------------------------------------------------------------ poses
+/** Set by spaceInStage when the pose it returned came from a tracked hand (its position is real). */
+thread_local bool tPoseFromHand = false;
+
 /** Pose of a space in stage space at [time]. */
 bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
     Instance* inst = sp->session->instance;
     *tracked = true;
+    tPoseFromHand = false;
     if (sp->entity > 0) {
         const SceneEntity& e = sp->session->entities[sp->entity - 1];
         if (!(e.enabled & (1u << XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB))) { *tracked = false; return false; }
@@ -532,9 +672,25 @@ bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
             Session* s = sp->session;
             Action* a = sp->action;
             *tracked = false;
-            if (!a || !isLive(a, MAGIC_ACTION) || s->profile == XR_NULL_PATH) return false;
+            if (!a || !isLive(a, MAGIC_ACTION) || (s->profile == XR_NULL_PATH && s->handProfile == XR_NULL_PATH)) return false;
             int slot = slotOf(inst, sp->subaction);
             if (slot == 3) return false;
+            // a tracked hand bound through hand_interaction_ext gives its real pose
+            if (s->handProfile != XR_NULL_PATH)
+                for (int i = 0; i < inst->bindingCount; i++) {
+                    const auto& b = inst->bindings[i];
+                    if (b.profile != s->handProfile || b.action != a) continue;
+                    const char* path = pathString(inst, b.path);
+                    int kind = path ? handPoseKind(path) : -1;
+                    int h = path ? handOf(path, nullptr) : -1;
+                    XrPosef hp;
+                    if (kind < 0 || (slot < 2 && h != slot) || !handPose(s, h, kind, time, &hp)) continue;
+                    *out = hx::compose(hp, sp->offset);
+                    *tracked = true;
+                    tPoseFromHand = true;
+                    return true;
+                }
+            if (s->profile == XR_NULL_PATH || s->profile == s->handProfile) return false;
             int hand = -1;
             for (int h = 0; h < 2 && hand < 0; h++) if ((slot == 2 || slot == h) && evalAction(s, a, h).active) hand = h;
             if (hand < 0) return false;
@@ -604,6 +760,23 @@ const ExtDesc kExtensions[] = {
     {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
     {XR_META_LOCAL_DIMMING_EXTENSION_NAME, XR_META_local_dimming_SPEC_VERSION},
     {XR_META_HEADSET_ID_EXTENSION_NAME, XR_META_headset_id_SPEC_VERSION},
+    // hands as controllers, and both at once; Touch proximity; haptics as envelopes and PCM
+    {XR_EXT_HAND_INTERACTION_EXTENSION_NAME, XR_EXT_hand_interaction_SPEC_VERSION},
+    {XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME, XR_META_simultaneous_hands_and_controllers_SPEC_VERSION},
+    {XR_FB_TOUCH_CONTROLLER_PROXIMITY_EXTENSION_NAME, XR_FB_touch_controller_proximity_SPEC_VERSION},
+    {XR_FB_HAPTIC_AMPLITUDE_ENVELOPE_EXTENSION_NAME, XR_FB_haptic_amplitude_envelope_SPEC_VERSION},
+    {XR_FB_HAPTIC_PCM_EXTENSION_NAME, XR_FB_haptic_pcm_SPEC_VERSION},
+    // frame timings, layer sizes, capture-only flags, keyboards, passthrough preferences and events,
+    // saving several anchors at once, Android session states
+    {XR_META_PERFORMANCE_METRICS_EXTENSION_NAME, XR_META_performance_metrics_SPEC_VERSION},
+    {XR_META_RECOMMENDED_LAYER_RESOLUTION_EXTENSION_NAME, XR_META_recommended_layer_resolution_SPEC_VERSION},
+    {XR_FB_COMPOSITION_LAYER_SECURE_CONTENT_EXTENSION_NAME, XR_FB_composition_layer_secure_content_SPEC_VERSION},
+    {XR_META_AUTOMATIC_LAYER_FILTER_EXTENSION_NAME, XR_META_automatic_layer_filter_SPEC_VERSION},
+    {XR_FB_KEYBOARD_TRACKING_EXTENSION_NAME, XR_FB_keyboard_tracking_SPEC_VERSION},
+    {XR_META_PASSTHROUGH_PREFERENCES_EXTENSION_NAME, XR_META_passthrough_preferences_SPEC_VERSION},
+    {XR_META_PASSTHROUGH_LAYER_RESUMED_EVENT_EXTENSION_NAME, XR_META_passthrough_layer_resumed_event_SPEC_VERSION},
+    {XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME, XR_FB_spatial_entity_storage_batch_SPEC_VERSION},
+    {XR_OCULUS_ANDROID_SESSION_STATE_ENABLE_EXTENSION_NAME, XR_OCULUS_android_session_state_enable_SPEC_VERSION},
     // menus and video players of Quest apps: curved panels and 360/180 images
     {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
     {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
@@ -785,6 +958,10 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(p->next); n; n = n->next) {
         if (n->type == XR_TYPE_SYSTEM_COLOR_SPACE_PROPERTIES_FB) reinterpret_cast<XrSystemColorSpacePropertiesFB*>(n)->colorSpace = XR_COLOR_SPACE_REC709_FB;
         if (n->type == XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT) reinterpret_cast<XrSystemHandTrackingPropertiesEXT*>(n)->supportsHandTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_SIMULTANEOUS_HANDS_AND_CONTROLLERS_PROPERTIES_META)
+            reinterpret_cast<XrSystemSimultaneousHandsAndControllersPropertiesMETA*>(n)->supportsSimultaneousHandsAndControllers = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_KEYBOARD_TRACKING_PROPERTIES_FB)
+            reinterpret_cast<XrSystemKeyboardTrackingPropertiesFB*>(n)->supportsKeyboardTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_RENDER_MODEL_PROPERTIES_FB) reinterpret_cast<XrSystemRenderModelPropertiesFB*>(n)->supportsRenderModelLoading = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_HEADSET_ID_PROPERTIES_META) memset(&reinterpret_cast<XrSystemHeadsetIdPropertiesMETA*>(n)->id, 0, sizeof(XrUuidEXT));  // not a Meta headset
         if (n->type == XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB) reinterpret_cast<XrSystemPassthroughPropertiesFB*>(n)->supportsPassthrough = XR_TRUE;
@@ -1075,7 +1252,9 @@ XrResult locate(Space* sp, Space* base, XrTime time, XrSpaceLocation* loc) {
     XrPosef a, b;
     bool ta, tb;
     bool okA = spaceInStage(sp, time, &a, &ta);
+    bool handA = tPoseFromHand;
     bool okB = spaceInStage(base, time, &b, &tb);
+    bool handB = tPoseFromHand;
     XrSpaceVelocity* vel = nullptr;
     for (auto* n = reinterpret_cast<XrBaseOutStructure*>(loc->next); n; n = n->next)
         if (n->type == XR_TYPE_SPACE_VELOCITY) vel = reinterpret_cast<XrSpaceVelocity*>(n);
@@ -1085,7 +1264,7 @@ XrResult locate(Space* sp, Space* base, XrTime time, XrSpaceLocation* loc) {
     // orientation is tracked; position comes from a neck model (and controllers ride with the
     // head), so it is valid but not tracked
     bool viewInvolved = sp->type == XR_REFERENCE_SPACE_TYPE_VIEW || base->type == XR_REFERENCE_SPACE_TYPE_VIEW ||
-                        sp->action != nullptr || base->action != nullptr;
+                        (sp->action != nullptr && !handA) || (base->action != nullptr && !handB);
     loc->locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
                          XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | (viewInvolved ? 0 : XR_SPACE_LOCATION_POSITION_TRACKED_BIT);
     return XR_SUCCESS;
@@ -1284,6 +1463,7 @@ XRAPI_ATTR XrResult XRAPI_CALL WaitFrame(XrSession h, const XrFrameWaitInfo* inf
     XrTime predicted = now + 2 * period;
     if (predicted <= s->lastPredicted) predicted = s->lastPredicted + 1;
     s->lastPredicted = predicted;
+    s->frameWaitNs = hxp::nowNs();
     fs->predictedDisplayTime = predicted;
     fs->predictedDisplayPeriod = period;
     fs->shouldRender = (s->state == XR_SESSION_STATE_VISIBLE || s->state == XR_SESSION_STATE_FOCUSED) ? XR_TRUE : XR_FALSE;
@@ -1339,6 +1519,11 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
     if (info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_OPAQUE && info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
         return XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED;
     if (info->layerCount > MAX_LAYERS) return XR_ERROR_LAYER_LIMIT_EXCEEDED;
+    {
+        int64_t now = hxp::nowNs();
+        if (s->frameWaitNs) s->appCpuNs = now - s->frameWaitNs;
+        if (now > info->displayTime) s->droppedFrames++;  // the frame came too late for its display time
+    }
     if (info->layerCount > 0 && !info->layers) return XR_ERROR_VALIDATION_FAILURE;
 
     HxComposeView views[2] = {};
@@ -1459,7 +1644,9 @@ XRAPI_ATTR XrResult XRAPI_CALL EndFrame(XrSession h, const XrFrameEndInfo* info)
         // late latch: the newest head pose for timewarp, predicted to this frame's display time
         if (!hxp::headPose(info->displayTime, cfg, &head)) head = s->lastHead;
         s->lastHead = head;
+        int64_t c0 = hxp::nowNs();
         hxp::gfxCompose(s->gfx, cfg, head, views, viewCount, quads, quadCount, passthrough);
+        s->composeNs = hxp::nowNs() - c0;
     }
     if (passthrough.on) hxp::passthroughWanted();
     s->frameCount++;
@@ -1602,6 +1789,13 @@ XRAPI_ATTR XrResult XRAPI_CALL AttachSessionActionSets(XrSession h, const XrSess
         }
         if (s->profile != XR_NULL_PATH) break;
     }
+    s->handProfile = XR_NULL_PATH;
+    XrPath hp;
+    if (stringToPath(inst, kHandProfile, &hp) == XR_SUCCESS)
+        for (int i = 0; i < inst->bindingCount; i++) {
+            const auto& bd = inst->bindings[i];
+            if (bd.profile == hp && isLive(bd.action, MAGIC_ACTION) && actionAttachedTo(s, static_cast<Action*>(bd.action))) s->handProfile = hp;
+        }
     XrEventDataInteractionProfileChanged ev{XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED};
     ev.session = h;
     pushEvent(s->instance, &ev, sizeof(ev));
@@ -1691,6 +1885,9 @@ XRAPI_ATTR XrResult XRAPI_CALL SyncActions(XrSession h, const XrActionsSyncInfo*
     }
     bool focused = s->state == XR_SESSION_STATE_FOCUSED;
     if (focused) hxp::readInput(&s->input);
+    // hands for hand_interaction_ext (asking for them keeps HyperMagic's camera on)
+    if (focused && s->handProfile != XR_NULL_PATH) s->handsOk = hxp::readHands(&s->hands, true);
+    else s->handsOk = false;
     XrTime now = hxp::nowNs();
     // every attached action is updated; those outside the active sets (or unfocused) go inactive
     for (uint32_t k = 0; k < s->attachedCount; k++) {
@@ -1759,6 +1956,48 @@ XRAPI_ATTR XrResult XRAPI_CALL ApplyHapticFeedback(XrSession h, const XrHapticAc
     if (a->type != XR_ACTION_TYPE_VIBRATION_OUTPUT) return XR_ERROR_ACTION_TYPE_MISMATCH;
     if (!actionAttached(s, a)) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
     if (s->state != XR_SESSION_STATE_FOCUSED) return XR_SESSION_NOT_FOCUSED;
+    // a single pulse, an amplitude envelope (Meta) or PCM samples (Meta): HyperMagic rumbles the
+    // controller of that hand with the duration and the average strength
+    float amplitude = 0;
+    int64_t duration = 0;
+    if (fb->type == XR_TYPE_HAPTIC_VIBRATION) {
+        auto* v = reinterpret_cast<const XrHapticVibration*>(fb);
+        amplitude = v->amplitude;
+        duration = v->duration <= 0 ? 20000000LL : v->duration;  // XR_MIN_HAPTIC_DURATION: the shortest pulse
+    } else if (fb->type == XR_TYPE_HAPTIC_AMPLITUDE_ENVELOPE_VIBRATION_FB && extEnabled(s->instance, XR_FB_HAPTIC_AMPLITUDE_ENVELOPE_EXTENSION_NAME)) {
+        auto* e = reinterpret_cast<const XrHapticAmplitudeEnvelopeVibrationFB*>(fb);
+        if (e->amplitudeCount > 0 && !e->amplitudes) return XR_ERROR_VALIDATION_FAILURE;
+        for (uint32_t i = 0; i < e->amplitudeCount; i++) amplitude += e->amplitudes[i];
+        amplitude = e->amplitudeCount ? amplitude / static_cast<float>(e->amplitudeCount) : 0;
+        duration = e->duration;
+    } else if (fb->type == XR_TYPE_HAPTIC_PCM_VIBRATION_FB && extEnabled(s->instance, XR_FB_HAPTIC_PCM_EXTENSION_NAME)) {
+        auto* p = reinterpret_cast<const XrHapticPcmVibrationFB*>(fb);
+        if ((p->bufferSize > 0 && !p->buffer) || !p->samplesConsumed || !(p->sampleRate > 0)) return XR_ERROR_VALIDATION_FAILURE;
+        float sum = 0;
+        for (uint32_t i = 0; i < p->bufferSize; i++) sum += fabsf(p->buffer[i]);
+        amplitude = p->bufferSize ? sum / static_cast<float>(p->bufferSize) : 0;
+        duration = static_cast<int64_t>(p->bufferSize / p->sampleRate * 1e9f);
+        *p->samplesConsumed = p->bufferSize;
+    } else {
+        return XR_ERROR_VALIDATION_FAILURE;
+    }
+    if (amplitude < 0) amplitude = 0;
+    if (amplitude > 1) amplitude = 1;
+    if (duration > 2000000000LL) duration = 2000000000LL;
+    int slot = slotOf(s->instance, info->subactionPath);
+    if (slot == 3) return XR_ERROR_PATH_UNSUPPORTED;
+    for (int h = 0; h < 2; h++) if ((slot == 2 || slot == h) && evalAction(s, a, h).active) hxp::haptic(h, amplitude, duration);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetDeviceSampleRateFB(XrSession h, const XrHapticActionInfo* info, XrDevicePcmSampleRateGetInfoFB* rate) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_HAPTIC_ACTION_INFO || !rate || rate->type != XR_TYPE_DEVICE_PCM_SAMPLE_RATE_STATE_FB) return XR_ERROR_VALIDATION_FAILURE;
+    Action* a = asAction(info->action);
+    if (!a) return XR_ERROR_HANDLE_INVALID;
+    if (a->type != XR_ACTION_TYPE_VIBRATION_OUTPUT) return XR_ERROR_ACTION_TYPE_MISMATCH;
+    rate->sampleRate = 2000;  // the rate the samples are averaged at (Touch controllers use 2 kHz too)
     return XR_SUCCESS;
 }
 
@@ -1771,6 +2010,8 @@ XRAPI_ATTR XrResult XRAPI_CALL StopHapticFeedback(XrSession h, const XrHapticAct
     if (a->type != XR_ACTION_TYPE_VIBRATION_OUTPUT) return XR_ERROR_ACTION_TYPE_MISMATCH;
     if (!actionAttached(s, a)) return XR_ERROR_ACTIONSET_NOT_ATTACHED;
     if (s->state != XR_SESSION_STATE_FOCUSED) return XR_SESSION_NOT_FOCUSED;
+    int slot = slotOf(s->instance, info->subactionPath);
+    for (int hd = 0; hd < 2; hd++) if (slot == 2 || slot == hd) hxp::haptic(hd, 0, 0);
     return XR_SUCCESS;
 }
 
@@ -1921,21 +2162,6 @@ XRAPI_ATTR XrResult XRAPI_CALL GetHandMeshFB(XrHandTrackerEXT h, XrHandTrackingM
     return XR_SUCCESS;
 }
 
-/** Hands older than this are not shown (the camera lost them, or HyperMagic stopped). */
-constexpr int64_t HAND_STALE_NS = 200000000LL;
-/** Where the phone's camera sits relative to the eyes in a viewer: a little in front of them. */
-constexpr float CAMERA_FORWARD_M = 0.08f;
-
-/** Look-rotation whose -Z points along [dir] with +Y as close to world up as possible. */
-XrQuaternionf lookAlong(XrVector3f dir) {
-    hxhands::V z = hxhands::norm({-dir.x, -dir.y, -dir.z}, {0, 0, 1});
-    hxhands::V up = fabsf(z.y) > 0.98f ? hxhands::V{0, 0, -1} : hxhands::V{0, 1, 0};
-    hxhands::V x = hxhands::norm(hxhands::cross(up, z), {1, 0, 0});
-    hxhands::V y = hxhands::cross(z, x);
-    hxhands::Q q = hxhands::fromAxes(x, y, z);
-    return {q.x, q.y, q.z, q.w};
-}
-
 XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrHandJointsLocateInfoEXT* info, XrHandJointLocationsEXT* locs) {
     HandTracker* t = asObj<HandTracker>(reinterpret_cast<uint64_t>(h), MAGIC_HAND);
     if (!t) return XR_ERROR_HANDLE_INVALID;
@@ -2012,18 +2238,7 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
         }
     }
     if (aim) {
-        // Meta's aim ray: from about the shoulder through the knuckles, pinch on the index
-        XrPosef headNow;
-        if (!hxp::headPose(info->time, inst->cfg, &headNow)) headNow = head;
-        XrQuaternionf yaw = hx::yawOnly(headNow.orientation);
-        XrVector3f shoulder = hx::vadd(headNow.position, hx::qrot(yaw, {side == 0 ? -0.17f : 0.17f, -0.22f, 0.05f}));
-        XrPosef knuckles = hx::compose(camera, XrPosef{{0, 0, 0, 1}, {
-            (hands.joints[side][hxhands::INDEX_MCP][0] + hands.joints[side][2][0]) * 0.5f,
-            (hands.joints[side][hxhands::INDEX_MCP][1] + hands.joints[side][2][1]) * 0.5f,
-            (hands.joints[side][hxhands::INDEX_MCP][2] + hands.joints[side][2][2]) * 0.5f}});
-        XrVector3f dir = {knuckles.position.x - shoulder.x, knuckles.position.y - shoulder.y, knuckles.position.z - shoulder.z};
-        XrPosef aimStage{lookAlong(dir), knuckles.position};
-        aim->aimPose = hx::compose(hx::inverse(basePose), aimStage);
+        aim->aimPose = hx::compose(hx::inverse(basePose), handAim(inst->cfg, hands, side, camera, info->time));
         float pinch = hands.pinch[side] < 0 ? 0 : (hands.pinch[side] > 1 ? 1 : hands.pinch[side]);
         aim->pinchStrengthIndex = pinch;
         aim->status = XR_HAND_TRACKING_AIM_COMPUTED_BIT_FB | XR_HAND_TRACKING_AIM_VALID_BIT_FB |
@@ -2499,6 +2714,154 @@ XRAPI_ATTR XrResult XRAPI_CALL LoadRenderModelFB(XrSession h, const XrRenderMode
     return hxrendermodel::glb(left, buffer->buffer, buffer->bufferCapacityInput) == size ? XR_SUCCESS : XR_ERROR_RUNTIME_FAILURE;
 }
 
+// ------------------------------------------------------------------ smaller Meta extensions
+/** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
+const char* const kPerfCounters[] = {
+    "/perfmetrics_meta/app/cpu_frametime",
+    "/perfmetrics_meta/app/gpu_frametime",
+    "/perfmetrics_meta/app/motion_to_photon_latency",
+    "/perfmetrics_meta/compositor/cpu_frametime",
+    "/perfmetrics_meta/compositor/gpu_frametime",
+    "/perfmetrics_meta/compositor/dropped_frame_count",
+    "/perfmetrics_meta/compositor/spacewarp_mode",
+    "/perfmetrics_meta/device/cpu_utilization_average",
+    "/perfmetrics_meta/device/cpu_utilization_worst",
+    "/perfmetrics_meta/device/gpu_utilization",
+};
+constexpr uint32_t kPerfCounterCount = sizeof(kPerfCounters) / sizeof(kPerfCounters[0]);
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumeratePerformanceMetricsCounterPathsMETA(XrInstance h, uint32_t capacity, uint32_t* count, XrPath* paths) {
+    Instance* inst = asInstance(h);
+    if (!inst) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = kPerfCounterCount;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < kPerfCounterCount) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!paths) return XR_ERROR_VALIDATION_FAILURE;
+    for (uint32_t i = 0; i < kPerfCounterCount; i++) {
+        XrResult r = stringToPath(inst, kPerfCounters[i], &paths[i]);
+        if (r != XR_SUCCESS) return r;
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SetPerformanceMetricsStateMETA(XrSession h, const XrPerformanceMetricsStateMETA* state) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!state || state->type != XR_TYPE_PERFORMANCE_METRICS_STATE_META) return XR_ERROR_VALIDATION_FAILURE;
+    s->metrics = state->enabled == XR_TRUE;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetPerformanceMetricsStateMETA(XrSession h, XrPerformanceMetricsStateMETA* state) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!state || state->type != XR_TYPE_PERFORMANCE_METRICS_STATE_META) return XR_ERROR_VALIDATION_FAILURE;
+    state->enabled = s->metrics ? XR_TRUE : XR_FALSE;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL QueryPerformanceMetricsCounterMETA(XrSession h, XrPath path, XrPerformanceMetricsCounterMETA* counter) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!counter || counter->type != XR_TYPE_PERFORMANCE_METRICS_COUNTER_META) return XR_ERROR_VALIDATION_FAILURE;
+    if (!s->metrics) return XR_ERROR_VALIDATION_FAILURE;  // the app must turn the metrics on first
+    const char* p = pathString(s->instance, path);
+    int which = -1;
+    for (uint32_t i = 0; p && i < kPerfCounterCount; i++) if (strcmp(p, kPerfCounters[i]) == 0) which = static_cast<int>(i);
+    if (which < 0) return XR_ERROR_PATH_UNSUPPORTED;
+    counter->counterFlags = 0;
+    counter->counterUnit = XR_PERFORMANCE_METRICS_COUNTER_UNIT_GENERIC_META;
+    counter->uintValue = 0;
+    counter->floatValue = 0;
+    auto ms = [&](int64_t ns) {
+        counter->counterFlags = XR_PERFORMANCE_METRICS_COUNTER_ANY_VALUE_VALID_BIT_META | XR_PERFORMANCE_METRICS_COUNTER_FLOAT_VALUE_VALID_BIT_META;
+        counter->counterUnit = XR_PERFORMANCE_METRICS_COUNTER_UNIT_MILLISECONDS_META;
+        counter->floatValue = static_cast<float>(ns) / 1e6f;
+    };
+    auto count = [&](uint32_t v) {
+        counter->counterFlags = XR_PERFORMANCE_METRICS_COUNTER_ANY_VALUE_VALID_BIT_META | XR_PERFORMANCE_METRICS_COUNTER_UINT_VALUE_VALID_BIT_META;
+        counter->uintValue = v;
+    };
+    switch (which) {
+        case 0: ms(s->appCpuNs); break;                                   // from xrWaitFrame to xrEndFrame
+        case 2: ms(s->lastPredicted > s->frameWaitNs ? s->lastPredicted - s->frameWaitNs : 0); break;  // pose to display
+        case 3: ms(s->composeNs); break;
+        case 5: count(s->droppedFrames); break;
+        case 6: count(0); break;                                          // no space warp
+        default: break;                                                   // GPU times and utilisation: not readable on a phone
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetRecommendedLayerResolutionMETA(XrSession h, const XrRecommendedLayerResolutionGetInfoMETA* info, XrRecommendedLayerResolutionMETA* res) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_GET_INFO_META || !info->layer || !res ||
+        res->type != XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_META)
+        return XR_ERROR_VALIDATION_FAILURE;
+    if (info->predictedDisplayTime <= 0) return XR_ERROR_TIME_INVALID;
+    // a projection view is best at the size of one eye of the screen; other layers keep their own
+    res->isValid = info->layer->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION ? XR_TRUE : XR_FALSE;
+    res->recommendedImageDimensions = {s->instance->cfg.eyeWidthPx, s->instance->cfg.eyeHeightPx};
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL QuerySystemTrackedKeyboardFB(XrSession h, const XrKeyboardTrackingQueryFB* query, XrKeyboardTrackingDescriptionFB* keyboard) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!query || query->type != XR_TYPE_KEYBOARD_TRACKING_QUERY_FB || !keyboard) return XR_ERROR_VALIDATION_FAILURE;
+    // no keyboard is tracked by the phone's camera: a Bluetooth keyboard still types into the game
+    memset(keyboard, 0, sizeof(*keyboard));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateKeyboardSpaceFB(XrSession h, const XrKeyboardSpaceCreateInfoFB* ci, XrSpace* out) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_KEYBOARD_SPACE_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_ERROR_FEATURE_UNSUPPORTED;  // there is no tracked keyboard id to make a space for
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetPassthroughPreferencesMETA(XrSession h, XrPassthroughPreferencesMETA* prefs) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!prefs || prefs->type != XR_TYPE_PASSTHROUGH_PREFERENCES_META) return XR_ERROR_VALIDATION_FAILURE;
+    prefs->flags = 0;  // start apps in VR (the user turns the camera on in the game)
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SaveSpaceListFB(XrSession h, const XrSpaceListSaveInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_LIST_SAVE_INFO_FB || !requestId || (info->spaceCount > 0 && !info->spaces)) return XR_ERROR_VALIDATION_FAILURE;
+    if (info->location != XR_SPACE_STORAGE_LOCATION_LOCAL_FB) return XR_ERROR_VALIDATION_FAILURE;
+    for (uint32_t i = 0; i < info->spaceCount; i++) {
+        Space* sp = asSpace(info->spaces[i]);
+        if (!sp || sp->session != s) return XR_ERROR_HANDLE_INVALID;
+        SceneEntity* e = entityOf(sp);
+        if (!e || !(componentsOf(e->kind) & bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB))) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    }
+    for (uint32_t i = 0; i < info->spaceCount; i++) entityOf(asSpace(info->spaces[i]))->stored = true;
+    persistAnchors(s);
+    XrEventDataSpaceListSaveCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_LIST_SAVE_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(s->instance);
+    ev.result = XR_SUCCESS;
+    pushEvent(s->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
+/** Hands and controllers already work together here (both drive actions); the calls are accepted. */
+XRAPI_ATTR XrResult XRAPI_CALL ResumeSimultaneousHandsAndControllersTrackingMETA(XrSession h, const XrSimultaneousHandsAndControllersTrackingResumeInfoMETA* info) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SIMULTANEOUS_HANDS_AND_CONTROLLERS_TRACKING_RESUME_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL PauseSimultaneousHandsAndControllersTrackingMETA(XrSession h, const XrSimultaneousHandsAndControllersTrackingPauseInfoMETA* info) {
+    if (!asSession(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SIMULTANEOUS_HANDS_AND_CONTROLLERS_TRACKING_PAUSE_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;
+}
+
 // ------------------------------------------------------------------ passthrough (XR_FB_passthrough)
 XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughFB(XrSession h, const XrPassthroughCreateInfoFB* ci, XrPassthroughFB* out) {
     Session* s = asSession(h);
@@ -2515,6 +2878,15 @@ XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughFB(XrSession h, const XrPassthro
 
 Passthrough* asPassthrough(XrPassthroughFB h) { return asObj<Passthrough>(reinterpret_cast<uint64_t>(h), MAGIC_PASSTHROUGH); }
 PassthroughLayer* asPtLayer(XrPassthroughLayerFB h) { return asObj<PassthroughLayer>(reinterpret_cast<uint64_t>(h), MAGIC_PT_LAYER); }
+
+/** XR_META_passthrough_layer_resumed_event: a layer shows the camera again. */
+void layerResumed(PassthroughLayer* l) {
+    if (!extEnabled(l->session->instance, XR_META_PASSTHROUGH_LAYER_RESUMED_EVENT_EXTENSION_NAME)) return;
+    XrEventDataPassthroughLayerResumedMETA ev{XR_TYPE_EVENT_DATA_PASSTHROUGH_LAYER_RESUMED_META};
+    ev.layer = reinterpret_cast<XrPassthroughLayerFB>(l);
+    pushEvent(l->session->instance, &ev, sizeof(ev));
+}
+
 
 XRAPI_ATTR XrResult XRAPI_CALL DestroyPassthroughFB(XrPassthroughFB h) {
     Passthrough* p = asPassthrough(h);
@@ -2553,6 +2925,7 @@ XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughLayerFB(XrSession h, const XrPas
     l->running = (ci->flags & XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB) != 0;
     l->opacity = 1;
     *out = reinterpret_cast<XrPassthroughLayerFB>(l);
+    if (l->running) layerResumed(l);
     return XR_SUCCESS;
 }
 
@@ -2573,7 +2946,9 @@ XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerPauseFB(XrPassthroughLayerFB h) {
 XRAPI_ATTR XrResult XRAPI_CALL PassthroughLayerResumeFB(XrPassthroughLayerFB h) {
     PassthroughLayer* l = asPtLayer(h);
     if (!l) return XR_ERROR_HANDLE_INVALID;
+    bool was = l->running;
     l->running = true;
+    if (!was) layerResumed(l);
     return XR_SUCCESS;
 }
 
@@ -2712,6 +3087,18 @@ const Entry kEntries[] = {
     HX_EXT(EnumerateRenderModelPathsFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
     HX_EXT(GetRenderModelPropertiesFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
     HX_EXT(LoadRenderModelFB, XR_FB_RENDER_MODEL_EXTENSION_NAME),
+    HX_EXT(GetDeviceSampleRateFB, XR_FB_HAPTIC_PCM_EXTENSION_NAME),
+    HX_EXT(EnumeratePerformanceMetricsCounterPathsMETA, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME),
+    HX_EXT(SetPerformanceMetricsStateMETA, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME),
+    HX_EXT(GetPerformanceMetricsStateMETA, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME),
+    HX_EXT(QueryPerformanceMetricsCounterMETA, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME),
+    HX_EXT(GetRecommendedLayerResolutionMETA, XR_META_RECOMMENDED_LAYER_RESOLUTION_EXTENSION_NAME),
+    HX_EXT(QuerySystemTrackedKeyboardFB, XR_FB_KEYBOARD_TRACKING_EXTENSION_NAME),
+    HX_EXT(CreateKeyboardSpaceFB, XR_FB_KEYBOARD_TRACKING_EXTENSION_NAME),
+    HX_EXT(GetPassthroughPreferencesMETA, XR_META_PASSTHROUGH_PREFERENCES_EXTENSION_NAME),
+    HX_EXT(SaveSpaceListFB, XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME),
+    HX_EXT(ResumeSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
+    HX_EXT(PauseSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),

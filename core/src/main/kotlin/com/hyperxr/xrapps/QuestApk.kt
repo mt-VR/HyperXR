@@ -73,6 +73,12 @@ object QuestApk {
         "XR_FB_scene", "XR_FB_scene_capture",
         // controller models, per-layer blending, local dimming, headset id
         "XR_FB_render_model", "XR_FB_composition_layer_alpha_blend", "XR_META_local_dimming", "XR_META_headset_id",
+        // hands as controllers, Touch proximity, haptics, and the smaller Meta extensions
+        "XR_EXT_hand_interaction", "XR_META_simultaneous_hands_and_controllers", "XR_FB_touch_controller_proximity",
+        "XR_FB_haptic_amplitude_envelope", "XR_FB_haptic_pcm", "XR_META_performance_metrics", "XR_META_recommended_layer_resolution",
+        "XR_FB_composition_layer_secure_content", "XR_META_automatic_layer_filter", "XR_FB_keyboard_tracking",
+        "XR_META_passthrough_preferences", "XR_META_passthrough_layer_resumed_event", "XR_FB_spatial_entity_storage_batch",
+        "XR_OCULUS_android_session_state_enable",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */

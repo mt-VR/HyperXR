@@ -673,7 +673,8 @@ void passthroughWanted() {
     if (HxCameraShared* c = cameraFrames()) __atomic_store_n(&c->readerWantsNs, nowNs(), __ATOMIC_RELAXED);
 }
 
-bool readHands(HxHandShared* out, bool wantsHands) {
+/** The hands file, mapped on first use (retried at most every 2 s). */
+HxHandShared* handsMap() {
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
     static HxHandShared* map = nullptr;
     static int64_t lastTryNs = 0;
@@ -684,6 +685,20 @@ bool readHands(HxHandShared* out, bool wantsHands) {
     }
     HxHandShared* m = map;
     pthread_mutex_unlock(&lock);
+    return m;
+}
+
+void haptic(int hand, float amplitude, int64_t durationNs) {
+    HxHandShared* m = handsMap();
+    if (!m) return;
+    m->hapticHand = static_cast<uint32_t>(hand);
+    m->hapticAmplitude = amplitude;
+    m->hapticDurationMs = static_cast<int32_t>(durationNs / 1000000);
+    __atomic_fetch_add(&m->hapticSeq, 1u, __ATOMIC_RELEASE);
+}
+
+bool readHands(HxHandShared* out, bool wantsHands) {
+    HxHandShared* m = handsMap();
     if (!m) return false;
     int64_t now = nowNs();
     __atomic_store_n(&m->readerAliveNs, now, __ATOMIC_RELAXED);

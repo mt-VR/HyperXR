@@ -39,6 +39,9 @@ import com.hyperxr.handtracking.TrackingState
  * publishes the hands ~90 times a second in [HandBridge]'s shared file. When the game shows
  * passthrough (XR_FB_passthrough / ALPHA_BLEND), it also publishes small colour frames (~30 fps).
  *
+ * It also plays the game's vibrations on the controller of that hand (Joy-Con L / R or a gamepad):
+ * the runtime inside the game may not vibrate anything itself.
+ *
  * It stops by itself when no OpenXR runtime has been alive for a while (the game closed), and when
  * HyperMagic comes back to the front (it needs the camera itself).
  */
@@ -55,6 +58,8 @@ class HandBridgeService : Service() {
     private val frameConverter = com.hyperxr.handtracking.YuvToBitmap()
     private var frameBuffer: java.nio.ByteBuffer? = null
     private var lastFrameNs = 0L
+    private val hapticOut = FloatArray(3)
+    private var hapticSeq = -1
     private var device: CameraDevice? = null
     private var reader: ImageReader? = null
     private var opening = false
@@ -108,14 +113,16 @@ class HandBridgeService : Service() {
             // the game is gone: no runtime for a while (after the first one appeared, or never)
             val lastSign = maxOf(alive, startedNs)
             if (now - lastSign > IDLE_STOP_NS) { stopSelf(); return }
-            handsWanted = wants != 0L && now - wants < CAMERA_IDLE_NS
+            handsWanted = wants != 0L && now - wants < CAMERA_IDLE_NS && HyperXRApp.instance.settings.current.handTracking.openxrHands
+            playHaptics()
             val pt = HandBridge.nativeCameraWanted(cameraMap)
             passthroughWanted = pt != 0L && now - pt < PASSTHROUGH_IDLE_NS
             val wanted = handsWanted || passthroughWanted
             if (wanted && device == null && !opening && now - lastOpenTryNs > 2_000_000_000L) openCamera()
             if (!wanted && device != null) closeCamera()
             if (device != null && handsWanted) publish(now)
-            handler.postDelayed(this, if (device != null) PUBLISH_MS else 250L)
+            // quick ticks while a game runs (vibrations must not wait), slow ones otherwise
+            handler.postDelayed(this, if (device != null) PUBLISH_MS else if (now - alive < 3_000_000_000L) 15L else 250L)
         }
     }
 
@@ -204,6 +211,37 @@ class HandBridgeService : Service() {
         HandBridge.nativeCameraWrite(cameraMap, captured, buf, bmp.width, bmp.height, intr.fx * s, intr.fy * s, cx, cy)
     }
 
+    /** Plays the game's newest vibration request on the controller of that hand. */
+    private fun playHaptics() {
+        val seq = HandBridge.nativeHaptic(map, hapticOut)
+        if (hapticSeq == -1) { hapticSeq = seq; return }  // requests from before this service started are old
+        if (seq == hapticSeq) return
+        hapticSeq = seq
+        val hand = hapticOut[0].toInt()
+        val amplitude = hapticOut[1].coerceIn(0f, 1f)
+        val ms = hapticOut[2].toLong().coerceIn(0L, 2000L)
+        runCatching { vibrateController(hand, amplitude, ms) }
+    }
+
+    /** Joy-Con (L)/(R) by name; with one gamepad it plays both hands; nothing when none can vibrate. */
+    @Suppress("DEPRECATION")
+    private fun vibrateController(hand: Int, amplitude: Float, ms: Long) {
+        val pads = ArrayList<android.view.InputDevice>()
+        for (id in android.view.InputDevice.getDeviceIds()) {
+            val d = android.view.InputDevice.getDevice(id) ?: continue
+            val src = d.sources
+            if ((src and android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD ||
+                (src and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK) pads += d
+        }
+        val byName = pads.firstOrNull { (if (hand == 0) "(L)" else "(R)") in it.name }
+        val pad = byName ?: (if (pads.size >= 2) pads.getOrNull(hand) else pads.firstOrNull()) ?: return
+        val vib: android.os.Vibrator = if (Build.VERSION.SDK_INT >= 31) pad.vibratorManager.defaultVibrator else pad.vibrator
+        if (!vib.hasVibrator()) return
+        if (amplitude <= 0f || ms <= 0L) { vib.cancel(); return }
+        val a = if (vib.hasAmplitudeControl()) (amplitude * 255).toInt().coerceIn(1, 255) else android.os.VibrationEffect.DEFAULT_AMPLITUDE
+        vib.vibrate(android.os.VibrationEffect.createOneShot(ms, a))
+    }
+
     private fun closeCamera() {
         runCatching { device?.close() }
         device = null
@@ -238,7 +276,7 @@ class HandBridgeService : Service() {
 
         /** Called while HyperMagic is still in front, just before an OpenXR game is started. */
         fun start(ctx: Context) {
-            if (!HyperXRApp.instance.settings.current.handTracking.openxrHands) return
+            // a camera foreground service needs the camera permission (HyperMagic asks for it on first run)
             if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
             HandBridge.ensure(ctx)
             HandBridge.ensureCamera(ctx)

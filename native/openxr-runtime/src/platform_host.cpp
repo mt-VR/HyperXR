@@ -14,6 +14,9 @@ bool gHandsSet = false;
 
 extern "C" void hxTestSetHands(const HxHandShared* h) { if (h) { gHands = *h; gHandsSet = true; } else gHandsSet = false; }
 extern "C" int64_t hxTestHandsWanted() { return gHands.readerWantsHandsNs; }
+extern "C" void hxTestLastHaptic(uint32_t* seq, int* hand, float* amplitude, int* ms) {
+    *seq = gHands.hapticSeq; *hand = static_cast<int>(gHands.hapticHand); *amplitude = gHands.hapticAmplitude; *ms = gHands.hapticDurationMs;
+}
 int64_t gPassthroughWantedNs = 0;
 extern "C" int64_t hxTestPassthroughWanted() { return gPassthroughWantedNs; }
 HxSavedAnchor gSaved[64];
@@ -60,6 +63,10 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
 void recenter() {}
 void readInput(HxInput* out) { *out = gInput; }
 void passthroughWanted() { gPassthroughWantedNs = nowNs(); }
+void haptic(int hand, float amplitude, int64_t durationNs) {
+    gHands.hapticSeq++; gHands.hapticHand = static_cast<uint32_t>(hand); gHands.hapticAmplitude = amplitude;
+    gHands.hapticDurationMs = static_cast<int32_t>(durationNs / 1000000);
+}
 int loadAnchors(HxSavedAnchor* out, int capacity) {
     int n = gSavedCount < capacity ? gSavedCount : capacity;
     memcpy(out, gSaved, sizeof(HxSavedAnchor) * n);

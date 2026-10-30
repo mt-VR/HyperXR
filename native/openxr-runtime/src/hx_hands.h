@@ -27,6 +27,11 @@ struct HxHandShared {
     // written by the runtime (the reader): the app runs the camera only while a game wants hands
     int64_t readerAliveNs;        // a runtime instance exists (CLOCK_MONOTONIC)
     int64_t readerWantsHandsNs;   // the game has a hand tracker
+    // haptics from the game (written by the runtime): HyperMagic rumbles the controller of that hand
+    uint32_t hapticSeq;           // bumped for every request
+    uint32_t hapticHand;          // 0 left, 1 right
+    float hapticAmplitude;        // 0..1 (0 stops)
+    int32_t hapticDurationMs;
 };
 
 #ifdef __cplusplus

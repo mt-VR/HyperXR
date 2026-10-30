@@ -18,6 +18,7 @@ extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInf
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
 extern "C" void hxTestSetHands(const HxHandShared* h);
 extern "C" int64_t hxTestHandsWanted();
+extern "C" void hxTestLastHaptic(uint32_t* seq, int* hand, float* amplitude, int* ms);
 extern "C" int64_t hxTestPassthroughWanted();
 extern "C" int hxTestSavedAnchors();
 extern "C" void hxTestSetRoom(const float* x, const float* z, int n, float height);
@@ -72,7 +73,8 @@ static void testExtensionsAndInstance() {
     uint32_t n = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 0, &n, nullptr), XR_SUCCESS);
     CHECK(n >= 3);
-    XrExtensionProperties props[32];
+    XrExtensionProperties props[64];
+    CHECK(n <= 64);
     for (auto& p : props) { p = {XR_TYPE_EXTENSION_PROPERTIES}; }
     uint32_t small = 0;
     CHECK_RESULT(xrEnumerateInstanceExtensionProperties(nullptr, 1, &small, props), n > 1 ? XR_ERROR_SIZE_INSUFFICIENT : XR_SUCCESS);
@@ -1421,6 +1423,213 @@ static void testRenderModel() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** Hands as controllers (XR_EXT_hand_interaction) next to a Touch profile, haptics, and the smaller Meta extensions. */
+static void testHandInteractionAndMetaExtras() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_EXT_HAND_INTERACTION_EXTENSION_NAME, XR_FB_HAPTIC_PCM_EXTENSION_NAME,
+                          XR_FB_HAPTIC_AMPLITUDE_ENVELOPE_EXTENSION_NAME, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME,
+                          XR_META_RECOMMENDED_LAYER_RESOLUTION_EXTENSION_NAME, XR_FB_KEYBOARD_TRACKING_EXTENSION_NAME,
+                          XR_META_PASSTHROUGH_PREFERENCES_EXTENSION_NAME, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME,
+                          XR_FB_TOUCH_CONTROLLER_PROXIMITY_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 10, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance); LOAD(inst, xrBeginSession); LOAD(inst, xrWaitFrame); LOAD(inst, xrBeginFrame); LOAD(inst, xrEndFrame);
+    LOAD(inst, xrCreateActionSet); LOAD(inst, xrCreateAction); LOAD(inst, xrStringToPath); LOAD(inst, xrSuggestInteractionProfileBindings);
+    LOAD(inst, xrAttachSessionActionSets); LOAD(inst, xrSyncActions); LOAD(inst, xrGetActionStateFloat); LOAD(inst, xrGetActionStateBoolean);
+    LOAD(inst, xrCreateActionSpace); LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrLocateSpace); LOAD(inst, xrApplyHapticFeedback);
+    LOAD(inst, xrStopHapticFeedback); LOAD(inst, xrGetDeviceSampleRateFB); LOAD(inst, xrEnumeratePerformanceMetricsCounterPathsMETA);
+    LOAD(inst, xrSetPerformanceMetricsStateMETA); LOAD(inst, xrQueryPerformanceMetricsCounterMETA);
+    LOAD(inst, xrGetRecommendedLayerResolutionMETA); LOAD(inst, xrQuerySystemTrackedKeyboardFB); LOAD(inst, xrGetPassthroughPreferencesMETA);
+    LOAD(inst, xrResumeSimultaneousHandsAndControllersTrackingMETA);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemSimultaneousHandsAndControllersPropertiesMETA shc{XR_TYPE_SYSTEM_SIMULTANEOUS_HANDS_AND_CONTROLLERS_PROPERTIES_META};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &shc;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(shc.supportsSimultaneousHandsAndControllers == XR_TRUE);
+
+    XrActionSetCreateInfo sci{XR_TYPE_ACTION_SET_CREATE_INFO};
+    strcpy(sci.actionSetName, "hands"); strcpy(sci.localizedActionSetName, "Hands");
+    XrActionSet set;
+    CHECK_RESULT(xrCreateActionSet(inst, &sci, &set), XR_SUCCESS);
+    XrPath handPaths[2];
+    xrStringToPath(inst, "/user/hand/left", &handPaths[0]);
+    xrStringToPath(inst, "/user/hand/right", &handPaths[1]);
+    auto make = [&](const char* name, XrActionType t) {
+        XrActionCreateInfo aci{XR_TYPE_ACTION_CREATE_INFO};
+        strcpy(aci.actionName, name); strcpy(aci.localizedActionName, name);
+        aci.actionType = t; aci.countSubactionPaths = 2; aci.subactionPaths = handPaths;
+        XrAction a = XR_NULL_HANDLE;
+        CHECK_RESULT(xrCreateAction(set, &aci, &a), XR_SUCCESS);
+        return a;
+    };
+    XrAction select = make("select", XR_ACTION_TYPE_FLOAT_INPUT);
+    XrAction ready = make("ready", XR_ACTION_TYPE_BOOLEAN_INPUT);
+    XrAction grasp = make("grasp", XR_ACTION_TYPE_FLOAT_INPUT);
+    XrAction poke = make("poke", XR_ACTION_TYPE_POSE_INPUT);
+    XrAction near = make("near", XR_ACTION_TYPE_BOOLEAN_INPUT);
+    XrAction buzz = make("buzz", XR_ACTION_TYPE_VIBRATION_OUTPUT);
+    auto path = [&](const char* p) { XrPath x; xrStringToPath(inst, p, &x); return x; };
+    XrActionSuggestedBinding hb[] = {
+        {select, path("/user/hand/right/input/pinch_ext/value")}, {ready, path("/user/hand/right/input/pinch_ext/ready_ext")},
+        {grasp, path("/user/hand/right/input/grasp_ext/value")}, {poke, path("/user/hand/right/input/poke_ext/pose")},
+    };
+    XrInteractionProfileSuggestedBinding ipsb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    ipsb.interactionProfile = path("/interaction_profiles/ext/hand_interaction_ext"); ipsb.countSuggestedBindings = 4; ipsb.suggestedBindings = hb;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+    XrActionSuggestedBinding tb[] = {
+        {select, path("/user/hand/right/input/trigger/value")}, {near, path("/user/hand/right/input/thumb_fb/proximity_fb")},
+        {buzz, path("/user/hand/right/output/haptic")}, {buzz, path("/user/hand/left/output/haptic")},
+    };
+    ipsb.interactionProfile = path("/interaction_profiles/oculus/touch_controller"); ipsb.countSuggestedBindings = 4; ipsb.suggestedBindings = tb;
+    CHECK_RESULT(xrSuggestInteractionProfileBindings(inst, &ipsb), XR_SUCCESS);
+
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    ai.countActionSets = 1; ai.actionSets = &set;
+    CHECK_RESULT(xrAttachSessionActionSets(s, &ai), XR_SUCCESS);
+    XrSimultaneousHandsAndControllersTrackingResumeInfoMETA resume{XR_TYPE_SIMULTANEOUS_HANDS_AND_CONTROLLERS_TRACKING_RESUME_INFO_META};
+    CHECK_RESULT(xrResumeSimultaneousHandsAndControllersTrackingMETA(s, &resume), XR_SUCCESS);
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
+    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    CHECK_RESULT(xrBeginSession(s, &bi), XR_SUCCESS);
+    XrFrameState fs{XR_TYPE_FRAME_STATE};
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
+    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    for (int i = 0; i < 3; i++) { xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr); ei.displayTime = fs.predictedDisplayTime; xrEndFrame(s, &ei); }
+    XrActiveActionSet active{set, XR_NULL_PATH};
+    XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};
+    si.countActiveActionSets = 1; si.activeActionSets = &active;
+    XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+    XrActionStateFloat f{XR_TYPE_ACTION_STATE_FLOAT};
+    XrActionStateBoolean b{XR_TYPE_ACTION_STATE_BOOLEAN};
+
+    // a tracked right hand pinching 0.7 with the fingers curled into a fist
+    hxTestSetHead(0, 0, 0, 1, 1);
+    hxTestSetInput(0, 0, 0, 0, 0, 0, 0, 0);
+    HxHandShared h{};
+    h.magic = HX_HANDS_MAGIC;
+    rightHandPalmDown(h.joints[1]);
+    static const int curled[3] = {12, 16, 20};
+    for (int tip : curled) for (int k = 0; k < 3; k++) h.joints[1][tip][k] = h.joints[1][9][k] * 0.5f + h.joints[1][0][k] * 0.5f;
+    h.tracked[1] = 1; h.pinch[1] = 0.7f; h.timeNs[1] = monoNs();
+    hxTestSetHands(&h);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    gi.action = select;
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(f.isActive && NEAR(f.currentState, 0.7, 1e-5));  // the pinch beats the idle trigger
+    gi.action = ready;
+    CHECK_RESULT(xrGetActionStateBoolean(s, &gi, &b), XR_SUCCESS);
+    CHECK(b.isActive && b.currentState == XR_TRUE);
+    gi.action = grasp;
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(f.currentState > 0.9f);
+    // the poke pose is the index tip: 8 cm camera offset, 1.6 m eyes, tip 18 cm past the wrist
+    XrActionSpaceCreateInfo asci{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    asci.action = poke; asci.subactionPath = handPaths[1]; asci.poseInActionSpace.orientation.w = 1;
+    XrSpace pokeSpace, stage;
+    CHECK_RESULT(xrCreateActionSpace(s, &asci, &pokeSpace), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    CHECK_RESULT(xrLocateSpace(pokeSpace, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK((loc.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) && NEAR(loc.pose.position.z, -0.38 - 0.18, 1e-4));
+    // the hand lost: not ready, no pinch; the Touch trigger takes over
+    h.tracked[1] = 0;
+    hxTestSetHands(&h);
+    hxTestSetInput(0, 0, 0, 0, 0, 0, 0.4f, 0);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    gi.action = select;
+    CHECK_RESULT(xrGetActionStateFloat(s, &gi, &f), XR_SUCCESS);
+    CHECK(NEAR(f.currentState, 0.4, 1e-5));
+    gi.action = ready;
+    CHECK_RESULT(xrGetActionStateBoolean(s, &gi, &b), XR_SUCCESS);
+    CHECK(b.currentState == XR_FALSE);
+    // Touch proximity: the thumb on the stick
+    hxTestSetInput(0, 0, 0, 0.5f, 0, 0, 0, 0);
+    CHECK_RESULT(xrSyncActions(s, &si), XR_SUCCESS);
+    gi.action = near;
+    CHECK_RESULT(xrGetActionStateBoolean(s, &gi, &b), XR_SUCCESS);
+    CHECK(b.isActive && b.currentState == XR_TRUE);
+
+    // haptics: a pulse, an envelope and PCM all reach HyperMagic for the right controller
+    XrHapticActionInfo hai{XR_TYPE_HAPTIC_ACTION_INFO};
+    hai.action = buzz; hai.subactionPath = handPaths[1];
+    XrHapticVibration vib{XR_TYPE_HAPTIC_VIBRATION};
+    vib.amplitude = 0.6f; vib.duration = 50000000; vib.frequency = XR_FREQUENCY_UNSPECIFIED;
+    uint32_t seq0, seq; int hand, ms; float amp;
+    hxTestLastHaptic(&seq0, &hand, &amp, &ms);
+    CHECK_RESULT(xrApplyHapticFeedback(s, &hai, reinterpret_cast<XrHapticBaseHeader*>(&vib)), XR_SUCCESS);
+    hxTestLastHaptic(&seq, &hand, &amp, &ms);
+    CHECK(seq == seq0 + 1 && hand == 1 && NEAR(amp, 0.6, 1e-6) && ms == 50);
+    float env[4] = {0.2f, 0.4f, 0.6f, 0.8f};
+    XrHapticAmplitudeEnvelopeVibrationFB ev{XR_TYPE_HAPTIC_AMPLITUDE_ENVELOPE_VIBRATION_FB};
+    ev.duration = 100000000; ev.amplitudeCount = 4; ev.amplitudes = env;
+    CHECK_RESULT(xrApplyHapticFeedback(s, &hai, reinterpret_cast<XrHapticBaseHeader*>(&ev)), XR_SUCCESS);
+    hxTestLastHaptic(&seq, &hand, &amp, &ms);
+    CHECK(NEAR(amp, 0.5, 1e-6) && ms == 100);
+    float pcm[200];
+    for (int i = 0; i < 200; i++) pcm[i] = (i % 2) ? 0.3f : -0.3f;
+    uint32_t consumed = 0;
+    XrHapticPcmVibrationFB pv{XR_TYPE_HAPTIC_PCM_VIBRATION_FB};
+    pv.bufferSize = 200; pv.buffer = pcm; pv.sampleRate = 2000; pv.samplesConsumed = &consumed;
+    CHECK_RESULT(xrApplyHapticFeedback(s, &hai, reinterpret_cast<XrHapticBaseHeader*>(&pv)), XR_SUCCESS);
+    hxTestLastHaptic(&seq, &hand, &amp, &ms);
+    CHECK(consumed == 200 && NEAR(amp, 0.3, 1e-5) && ms == 100);
+    CHECK_RESULT(xrStopHapticFeedback(s, &hai), XR_SUCCESS);
+    hxTestLastHaptic(&seq, &hand, &amp, &ms);
+    CHECK(amp == 0);
+    XrDevicePcmSampleRateGetInfoFB rate{XR_TYPE_DEVICE_PCM_SAMPLE_RATE_STATE_FB};
+    CHECK_RESULT(xrGetDeviceSampleRateFB(s, &hai, &rate), XR_SUCCESS);
+    CHECK(rate.sampleRate > 0);
+
+    // performance metrics: off until the app turns them on; the app's CPU time is measured
+    uint32_t n = 0;
+    CHECK_RESULT(xrEnumeratePerformanceMetricsCounterPathsMETA(inst, 0, &n, nullptr), XR_SUCCESS);
+    CHECK(n >= 5);
+    XrPerformanceMetricsCounterMETA counter{XR_TYPE_PERFORMANCE_METRICS_COUNTER_META};
+    CHECK_RESULT(xrQueryPerformanceMetricsCounterMETA(s, path("/perfmetrics_meta/app/cpu_frametime"), &counter), XR_ERROR_VALIDATION_FAILURE);
+    XrPerformanceMetricsStateMETA pms{XR_TYPE_PERFORMANCE_METRICS_STATE_META};
+    pms.enabled = XR_TRUE;
+    CHECK_RESULT(xrSetPerformanceMetricsStateMETA(s, &pms), XR_SUCCESS);
+    xrWaitFrame(s, nullptr, &fs); xrBeginFrame(s, nullptr); ei.displayTime = fs.predictedDisplayTime; xrEndFrame(s, &ei);
+    CHECK_RESULT(xrQueryPerformanceMetricsCounterMETA(s, path("/perfmetrics_meta/app/cpu_frametime"), &counter), XR_SUCCESS);
+    CHECK((counter.counterFlags & XR_PERFORMANCE_METRICS_COUNTER_FLOAT_VALUE_VALID_BIT_META) && counter.floatValue >= 0 &&
+          counter.counterUnit == XR_PERFORMANCE_METRICS_COUNTER_UNIT_MILLISECONDS_META);
+    CHECK_RESULT(xrQueryPerformanceMetricsCounterMETA(s, path("/perfmetrics_meta/device/gpu_utilization"), &counter), XR_SUCCESS);
+    CHECK(counter.counterFlags == 0);
+    CHECK_RESULT(xrQueryPerformanceMetricsCounterMETA(s, path("/perfmetrics_meta/nope"), &counter), XR_ERROR_PATH_UNSUPPORTED);
+
+    // recommended size of a projection layer: one eye of the screen
+    XrCompositionLayerProjection proj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    XrRecommendedLayerResolutionGetInfoMETA rgi{XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_GET_INFO_META};
+    rgi.layer = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&proj); rgi.predictedDisplayTime = fs.predictedDisplayTime;
+    XrRecommendedLayerResolutionMETA res{XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_META};
+    CHECK_RESULT(xrGetRecommendedLayerResolutionMETA(s, &rgi, &res), XR_SUCCESS);
+    CHECK(res.isValid == XR_TRUE && res.recommendedImageDimensions.width > 0);
+    // no tracked keyboard; passthrough not preferred at start
+    XrKeyboardTrackingQueryFB kq{XR_TYPE_KEYBOARD_TRACKING_QUERY_FB};
+    kq.flags = XR_KEYBOARD_TRACKING_QUERY_LOCAL_BIT_FB;
+    XrKeyboardTrackingDescriptionFB kd{};
+    CHECK_RESULT(xrQuerySystemTrackedKeyboardFB(s, &kq, &kd), XR_SUCCESS);
+    CHECK(!(kd.flags & XR_KEYBOARD_TRACKING_EXISTS_BIT_FB));
+    XrPassthroughPreferencesMETA pp{XR_TYPE_PASSTHROUGH_PREFERENCES_META};
+    CHECK_RESULT(xrGetPassthroughPreferencesMETA(s, &pp), XR_SUCCESS);
+    hxTestSetHands(nullptr);
+    hxTestSetInput(0, 0, 0, 0, 0, 0, 0, 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1451,6 +1660,7 @@ int main() {
     testHandMeshAndCapsules();
     testSpatialEntitiesAndScene();
     testRenderModel();
+    testHandInteractionAndMetaExtras();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

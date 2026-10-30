@@ -70,6 +70,16 @@ JNIEXPORT jlong JNICALL Java_com_hyperxr_openxr_HandBridge_nativeReaderWantsHand
     return map ? __atomic_load_n(&asMap(map)->readerWantsHandsNs, __ATOMIC_RELAXED) : 0;
 }
 
+/** The last haptic request of the game: returns its sequence number, [out] = hand, amplitude, milliseconds. */
+JNIEXPORT jint JNICALL Java_com_hyperxr_openxr_HandBridge_nativeHaptic(JNIEnv* env, jclass, jlong map, jfloatArray out) {
+    HxHandShared* h = asMap(map);
+    if (!h) return 0;
+    uint32_t seq = __atomic_load_n(&h->hapticSeq, __ATOMIC_ACQUIRE);
+    float v[3] = {static_cast<float>(h->hapticHand), h->hapticAmplitude, static_cast<float>(h->hapticDurationMs)};
+    env->SetFloatArrayRegion(out, 0, 3, v);
+    return static_cast<jint>(seq);
+}
+
 // ------------------------------------------------------------------ camera frames (passthrough)
 
 JNIEXPORT jlong JNICALL Java_com_hyperxr_openxr_HandBridge_nativeCameraOpen(JNIEnv* env, jclass, jstring path) {

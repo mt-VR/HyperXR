@@ -172,6 +172,8 @@ void readInput(HxInput* out);
  * camera on (it turns it off a few seconds after the last call that wanted hands).
  */
 bool readHands(HxHandShared* out, bool wantsHands);
+/** A vibration for the controller of [hand] (amplitude 0 stops it), played by HyperMagic. */
+void haptic(int hand, float amplitude, int64_t durationNs);
 /** The app shows passthrough this frame: HyperMagic keeps the camera frames coming. */
 void passthroughWanted();
 /** Spatial anchors the app saved (XR_FB_spatial_entity_storage), kept in the app's own files. */

@@ -53,6 +53,9 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch |
 | Âncoras e sala | `XR_FB_spatial_entity` (+ `_query`, `_storage`, `_container`), `XR_FB_scene` e `XR_FB_scene_capture`: âncoras com pose fixa, gravadas nos arquivos do próprio jogo; a sala (chão, teto, paredes, layout) a partir da área do HyperGuardian |
 | Modelos e camadas Meta | `XR_FB_render_model` (modelo de controle do próprio HyperMagic, glTF 2.0 gerado pelo runtime), `XR_FB_composition_layer_alpha_blend` (fatores de mistura por camada), `XR_META_local_dimming` (aceito, sem efeito num celular) e `XR_META_headset_id` (zero: não é um óculos da Meta) |
+| Mãos como controle | `XR_EXT_hand_interaction` (pinça, ativar mira, agarrar, e as poses mira/empunhadura/pinça/toque das mãos rastreadas) junto com o perfil de controle (`XR_META_simultaneous_hands_and_controllers`) |
+| Entrada e vibração Meta | `XR_FB_touch_controller_proximity` (dedo perto do gatilho / dos botões), `XR_FB_haptic_amplitude_envelope` e `XR_FB_haptic_pcm`: as vibrações do jogo vão ao HyperMagic, que vibra o Joy-Con / gamepad daquela mão |
+| Extras Meta | `XR_META_performance_metrics` (tempo de CPU do app, do compositor, quadros atrasados), `XR_META_recommended_layer_resolution`, `XR_FB_composition_layer_secure_content`, `XR_META_automatic_layer_filter`, `XR_FB_keyboard_tracking` (nenhum teclado rastreado), `XR_META_passthrough_preferences`, `XR_META_passthrough_layer_resumed_event`, `XR_FB_spatial_entity_storage_batch`, `XR_OCULUS_android_session_state_enable` |
 | Passthrough | `XR_FB_passthrough` (camada de reconstrução, iniciar/pausar, opacidade) e o modo `ALPHA_BLEND`: a câmera do celular atrás do jogo, com a projeção misturada pelo alfa |
 | Mãos | `XR_EXT_hand_tracking` (26 juntas, com raio) `XR_FB_hand_tracking_aim` (mira e pinça da Meta), `XR_FB_hand_tracking_mesh` (malha da mão para o SDK da Meta desenhar), `XR_FB_hand_tracking_capsules` (19 cápsulas para física) e a escala da mão (`XrHandTrackingScaleFB`), com as mãos que o HyperMagic rastreia pela câmera (veja abaixo) |
 | Sistema | HMD, estéreo primário, blend OPAQUE e ALPHA_BLEND, orientação rastreada (3DoF), posição por modelo de pescoço |
@@ -60,7 +63,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Swapchains | `GL_SRGB8_ALPHA8`, `GL_RGBA8`, profundidade 16/24/24+8/32F, texturas array, imagem estática |
 | Camadas | projeção (com timewarp), quad, cilindro (`XR_KHR_composition_layer_cylinder`) e equirect (`XR_KHR_composition_layer_equirect2`, 180/360, raio finito ou infinito); `eyeVisibility` por olho; até 16 camadas |
 | Ciclo de quadros | wait/begin/end com ritmo da tela, `XR_FRAME_DISCARDED`, estados da sessão completos |
-| Ações | perfis Touch (Oculus/Meta), Pico 4/Neo 3/G3 e simple; gatilho, aperto, analógicos, A/B/X/Y, menu; poses de mira/empunhadura; fontes ligadas; háptico (sem efeito) |
+| Ações | perfis Touch (Oculus/Meta), Pico 4/Neo 3/G3, simple e mãos (`hand_interaction_ext`); gatilho, aperto, analógicos, A/B/X/Y, menu; poses de mira/empunhadura; fontes ligadas; vibração no controle daquela mão |
 
 ## Limitações (reais)
 
@@ -102,11 +105,11 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 647 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 740 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
-  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) e modelo do controle (arquivo .glb válido, faces para fora).
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações) modelo do controle (arquivo .glb válido, faces para fora) e mãos como controle, vibração, proximidade e métricas.
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

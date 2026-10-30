@@ -52,4 +52,6 @@ object HandBridge {
     @JvmStatic external fun nativeWrite(map: Long, timeNs: Long, state: FloatArray, joints: FloatArray)
     @JvmStatic external fun nativeReaderAlive(map: Long): Long
     @JvmStatic external fun nativeReaderWantsHands(map: Long): Long
+    /** The game's last vibration request: returns its sequence number; [out] = hand (0 left), amplitude, ms. */
+    @JvmStatic external fun nativeHaptic(map: Long, out: FloatArray): Int
 }
