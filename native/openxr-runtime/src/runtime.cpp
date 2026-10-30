@@ -6,6 +6,7 @@
 // through the Touch or simple controller profile; controller poses follow the head (no 6DoF).
 #include "hx_runtime.h"
 #include "hx_handmesh.h"
+#include "hx_scene.h"
 
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_reflection.h>
@@ -46,7 +47,8 @@ struct Instance {
     pthread_mutex_t lock;
     XrVersion apiVersion;
     bool extGles, extTimespec, extHeadless, extLocalFloor;
-    uint32_t extMeta;  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
+    uint64_t extMeta;  // Meta / Pico / EXT extensions enabled by the app (bit per kExtensions entry)
+    XrAsyncRequestIdFB nextRequest;  // XR_FB_spatial_entity and friends: async request ids
     bool gfxRequirementsQueried;
     bool systemQueried;
     char appName[XR_MAX_APPLICATION_NAME_SIZE];
@@ -107,6 +109,14 @@ struct Session {
     int liveSwapchains;
     int liveSpaces;
     int handTrackers;        // live XR_EXT_hand_tracking trackers (HyperMagic keeps the camera on)
+    // XR_FB_spatial_entity / XR_FB_scene: anchors and the room (see SceneEntity)
+    struct SceneEntity* entities;
+    int entityCount;
+    bool sceneBuilt, anchorsLoaded;
+    hxscene::Room room;
+    XrVector2f floorOutline[hxscene::MAX_POLY], ceilingOutline[hxscene::MAX_POLY];
+    struct SpaceQuery { XrAsyncRequestIdFB id; int count; int16_t entity[256]; } queries[8];
+    int nextQuery;
     XrPath profile;          // interaction profile driving both hands (XR_NULL_PATH: none)
     HxInput input;           // snapshot taken by xrSyncActions
 };
@@ -121,6 +131,18 @@ struct PassthroughLayer { uint32_t magic; Session* session; Passthrough* passthr
 /** XR_EXT_hand_tracking tracker: one hand, joints from HyperMagic's camera hand tracking. */
 struct HandTracker { uint32_t magic; Session* session; XrHandEXT hand; };
 
+/** A spatial entity: an anchor the app made, or part of the room (XR_FB_spatial_entity). */
+struct SceneEntity {
+    XrUuidEXT uuid;
+    int kind;                // hxscene::Kind
+    XrPosef pose;            // stage space
+    float minX, minY, maxX, maxY;  // planes: 2D bounding box
+    uint32_t enabled;        // bit per XrSpaceComponentTypeFB
+    bool stored;             // saved by the app (anchors)
+};
+constexpr int MAX_ENTITIES = 256;
+constexpr int DEAD = -1;     // kind of an entity of a replaced room (its spaces stop locating)
+
 struct Space {
     uint32_t magic;
     Session* session;
@@ -128,6 +150,7 @@ struct Space {
     Action* action;
     XrPath subaction;
     XrPosef offset;             // pose in the reference / action space
+    int entity;                 // spatial entity + 1 (0: a reference or action space)
 };
 
 struct Swapchain {
@@ -480,6 +503,12 @@ bool controllerPose(Session* s, int hand, XrTime time, XrPosef* out) {
 bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
     Instance* inst = sp->session->instance;
     *tracked = true;
+    if (sp->entity > 0) {
+        const SceneEntity& e = sp->session->entities[sp->entity - 1];
+        if (!(e.enabled & (1u << XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB))) { *tracked = false; return false; }
+        *out = hx::compose(e.pose, sp->offset);
+        return true;
+    }
     switch (sp->type) {
         case XR_REFERENCE_SPACE_TYPE_STAGE:
         case XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR:
@@ -561,6 +590,14 @@ const ExtDesc kExtensions[] = {
     {XR_EXT_HAND_TRACKING_EXTENSION_NAME, XR_EXT_hand_tracking_SPEC_VERSION},
     // mixed reality: the phone's camera behind the app (HyperMagic sends the frames, hx_camera.h)
     {XR_FB_PASSTHROUGH_EXTENSION_NAME, XR_FB_passthrough_SPEC_VERSION},
+    // anchors and the room: anchors keep a fixed pose (a phone has no position tracking to correct
+    // them); the room is HyperGuardian's area, or a 4 x 4 m one (hx_scene.h)
+    {XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, XR_FB_spatial_entity_SPEC_VERSION},
+    {XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME, XR_FB_spatial_entity_query_SPEC_VERSION},
+    {XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME, XR_FB_spatial_entity_storage_SPEC_VERSION},
+    {XR_FB_SPATIAL_ENTITY_CONTAINER_EXTENSION_NAME, XR_FB_spatial_entity_container_SPEC_VERSION},
+    {XR_FB_SCENE_EXTENSION_NAME, XR_FB_scene_SPEC_VERSION},
+    {XR_FB_SCENE_CAPTURE_EXTENSION_NAME, XR_FB_scene_capture_SPEC_VERSION},
     // menus and video players of Quest apps: curved panels and 360/180 images
     {XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME, XR_KHR_composition_layer_cylinder_SPEC_VERSION},
     {XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME, XR_KHR_composition_layer_equirect2_SPEC_VERSION},
@@ -573,7 +610,7 @@ const ExtDesc kExtensions[] = {
 #endif
 };
 constexpr uint32_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);
-static_assert(kExtensionCount <= 32, "Instance::extMeta has one bit per extension");
+static_assert(kExtensionCount <= 64, "Instance::extMeta has one bit per extension");
 
 XRAPI_ATTR XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(const char* layerName, uint32_t capacity, uint32_t* count, XrExtensionProperties* props) {
     if (layerName && layerName[0]) return XR_ERROR_API_LAYER_NOT_PRESENT;
@@ -605,11 +642,11 @@ XRAPI_ATTR XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* ci, Xr
     if (ci->applicationInfo.applicationName[0] == 0) return XR_ERROR_NAME_INVALID;
     if (ci->enabledApiLayerCount > 0) return XR_ERROR_API_LAYER_NOT_PRESENT;
     bool gles = false, timespec = false, headless = false, localFloor = false;
-    uint32_t extBits = 0;
+    uint64_t extBits = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++) {
         const char* e = ci->enabledExtensionNames[i];
         bool known = false;
-        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) { known = true; extBits |= 1u << k; }
+        for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(e, kExtensions[k].name) == 0) { known = true; extBits |= 1ull << k; }
         if (!known) return XR_ERROR_EXTENSION_NOT_PRESENT;
         if (strcmp(e, "XR_KHR_opengl_es_enable") == 0) gles = true;
         if (strcmp(e, XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME) == 0) timespec = true;
@@ -889,6 +926,8 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PT_LAYER)) { static_cast<PassthroughLayer*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) { static_cast<Passthrough*>(c)->magic = 0; free(c); }
+    free(s->entities);
+    s->entities = nullptr;
     if (s->gfx) hxp::gfxDestroySession(s->gfx);
     pthread_mutex_destroy(&s->frameLock);
     pthread_cond_destroy(&s->frameCond);
@@ -1967,6 +2006,418 @@ XRAPI_ATTR XrResult XRAPI_CALL LocateHandJointsEXT(XrHandTrackerEXT h, const XrH
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ spatial entities and the room
+constexpr uint32_t bit(XrSpaceComponentTypeFB c) { return 1u << c; }
+
+/** Components each kind of entity has (all of them enabled from the start). */
+uint32_t componentsOf(int kind) {
+    switch (kind) {
+        case DEAD: return 0;
+        case hxscene::ANCHOR: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB);
+        case hxscene::ROOM: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB) |
+                                   bit(XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB);
+        default: return bit(XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) | bit(XR_SPACE_COMPONENT_TYPE_BOUNDED_2D_FB) |
+                        bit(XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB);
+    }
+}
+
+XrAsyncRequestIdFB newRequest(Instance* inst) {
+    pthread_mutex_lock(&inst->lock);
+    XrAsyncRequestIdFB id = ++inst->nextRequest;
+    pthread_mutex_unlock(&inst->lock);
+    return id;
+}
+
+SceneEntity* addEntity(Session* s, int kind, XrUuidEXT uuid, const XrPosef& pose) {
+    if (!s->entities) s->entities = static_cast<SceneEntity*>(calloc(MAX_ENTITIES, sizeof(SceneEntity)));
+    if (!s->entities || s->entityCount >= MAX_ENTITIES) return nullptr;
+    SceneEntity& e = s->entities[s->entityCount++];
+    memset(&e, 0, sizeof(e));
+    e.uuid = uuid; e.kind = kind; e.pose = pose;
+    e.enabled = componentsOf(kind);
+    return &e;
+}
+
+int findEntity(Session* s, const XrUuidEXT& u) {
+    for (int i = 0; i < s->entityCount; i++) if (memcmp(s->entities[i].uuid.data, u.data, 16) == 0) return i;
+    return -1;
+}
+
+/** The room from HyperMagic (or the default one) as entities: room, floor, ceiling, walls. */
+void buildScene(Session* s) {
+    hxscene::Room r;
+    memset(&r, 0, sizeof(r));
+    if (!hxp::loadRoom(r.x, r.z, hxscene::MAX_POLY, &r.count, &r.height) || !hxscene::valid(r)) { memset(&r, 0, sizeof(r)); hxscene::defaultRoom(&r); }
+    if (s->sceneBuilt && memcmp(&r, &s->room, sizeof(r)) == 0) return;  // the same room: same entities
+    // the previous room's entities stay in place (spaces point at them by index) but go dead
+    for (int i = 0; i < s->entityCount; i++)
+        if (s->entities[i].kind != hxscene::ANCHOR) { s->entities[i].kind = DEAD; s->entities[i].enabled = 0; }
+    s->room = r;
+    hxscene::Plane planes[hxscene::MAX_PLANES];
+    int n = hxscene::build(r, planes, s->floorOutline, s->ceilingOutline);
+    addEntity(s, hxscene::ROOM, hxscene::sceneUuid(r, hxscene::ROOM, 0), XrPosef{{0, 0, 0, 1}, planes[0].pose.position});
+    for (int i = 0; i < n; i++) {
+        SceneEntity* e = addEntity(s, planes[i].kind, hxscene::sceneUuid(r, planes[i].kind, i), planes[i].pose);
+        if (!e) break;
+        e->minX = planes[i].minX; e->minY = planes[i].minY; e->maxX = planes[i].maxX; e->maxY = planes[i].maxY;
+    }
+    s->sceneBuilt = true;
+}
+
+void ensureScene(Session* s) {
+    if (!s->anchorsLoaded) {
+        s->anchorsLoaded = true;
+        HxSavedAnchor saved[MAX_ENTITIES];
+        int n = hxp::loadAnchors(saved, MAX_ENTITIES / 2);
+        for (int i = 0; i < n; i++) {
+            XrUuidEXT u;
+            memcpy(u.data, saved[i].uuid, 16);
+            if (findEntity(s, u) >= 0) continue;
+            if (SceneEntity* e = addEntity(s, hxscene::ANCHOR, u, saved[i].pose)) e->stored = true;
+        }
+    }
+    if (!s->sceneBuilt) buildScene(s);
+}
+
+void persistAnchors(Session* s) {
+    HxSavedAnchor out[MAX_ENTITIES];
+    int n = 0;
+    for (int i = 0; i < s->entityCount; i++) {
+        const SceneEntity& e = s->entities[i];
+        if (e.kind != hxscene::ANCHOR || !e.stored) continue;
+        memcpy(out[n].uuid, e.uuid.data, 16);
+        out[n].pose = e.pose;
+        n++;
+    }
+    hxp::saveAnchors(out, n);
+}
+
+/** A new XrSpace handle for entity [index] of [s]. */
+XrSpace entitySpace(Session* s, int index) {
+    Space* sp = alloc<Space>(MAGIC_SPACE, s);
+    if (!sp) return XR_NULL_HANDLE;
+    sp->session = s;
+    sp->offset = hx::identity();
+    sp->entity = index + 1;
+    s->liveSpaces++;
+    return reinterpret_cast<XrSpace>(sp);
+}
+
+SceneEntity* entityOf(Space* sp) { return sp && sp->entity > 0 ? &sp->session->entities[sp->entity - 1] : nullptr; }
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateSpatialAnchorFB(XrSession h, const XrSpatialAnchorCreateInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPATIAL_ANCHOR_CREATE_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    Space* base = asSpace(info->space);
+    if (!base || base->session != s) return XR_ERROR_HANDLE_INVALID;
+    if (!hx::poseValid(info->poseInSpace)) return XR_ERROR_POSE_INVALID;
+    if (info->time <= 0) return XR_ERROR_TIME_INVALID;
+    ensureScene(s);
+    XrEventDataSpatialAnchorCreateCompleteFB ev{XR_TYPE_EVENT_DATA_SPATIAL_ANCHOR_CREATE_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(s->instance);
+    XrPosef basePose; bool tracked;
+    if (!spaceInStage(base, info->time, &basePose, &tracked)) {
+        ev.result = XR_ERROR_SPACE_COMPONENT_NOT_ENABLED_FB;  // the base space cannot be located now
+    } else {
+        XrUuidEXT u;
+        hxp::randomBytes(u.data, 16);
+        u.data[6] = static_cast<uint8_t>((u.data[6] & 0x0f) | 0x40);  // version 4 (random)
+        u.data[8] = static_cast<uint8_t>((u.data[8] & 0x3f) | 0x80);
+        SceneEntity* e = addEntity(s, hxscene::ANCHOR, u, hx::compose(basePose, info->poseInSpace));
+        if (!e) ev.result = XR_ERROR_LIMIT_REACHED;
+        else {
+            ev.result = XR_SUCCESS;
+            ev.space = entitySpace(s, static_cast<int>(e - s->entities));
+            ev.uuid = u;
+        }
+    }
+    pushEvent(s->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceUuidFB(XrSpace h, XrUuidEXT* uuid) {
+    Space* sp = asSpace(h);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!uuid) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = entityOf(sp);
+    if (!e) return XR_ERROR_VALIDATION_FAILURE;  // reference and action spaces have no UUID
+    *uuid = e->uuid;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL EnumerateSpaceSupportedComponentsFB(XrSpace h, uint32_t capacity, uint32_t* count, XrSpaceComponentTypeFB* types) {
+    Space* sp = asSpace(h);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = entityOf(sp);
+    uint32_t mask = e ? componentsOf(e->kind) : 0, n = 0;
+    for (uint32_t c = 0; c < 8; c++) if (mask & (1u << c)) n++;
+    *count = n;
+    if (capacity == 0) return XR_SUCCESS;
+    if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!types) return XR_ERROR_VALIDATION_FAILURE;
+    n = 0;
+    for (uint32_t c = 0; c < 8; c++) if (mask & (1u << c)) types[n++] = static_cast<XrSpaceComponentTypeFB>(c);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SetSpaceComponentStatusFB(XrSpace h, const XrSpaceComponentStatusSetInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Space* sp = asSpace(h);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_COMPONENT_STATUS_SET_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = entityOf(sp);
+    if (!e || info->componentType > XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB || !(componentsOf(e->kind) & bit(info->componentType)))
+        return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    if (info->enabled) e->enabled |= bit(info->componentType); else e->enabled &= ~bit(info->componentType);
+    // asking for the state it is already in also completes (apps wait for the event either way)
+    XrEventDataSpaceSetStatusCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(sp->session->instance);
+    ev.result = XR_SUCCESS;
+    ev.space = h;
+    ev.uuid = e->uuid;
+    ev.componentType = info->componentType;
+    ev.enabled = info->enabled ? XR_TRUE : XR_FALSE;
+    pushEvent(sp->session->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceComponentStatusFB(XrSpace h, XrSpaceComponentTypeFB type, XrSpaceComponentStatusFB* status) {
+    Space* sp = asSpace(h);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!status || status->type != XR_TYPE_SPACE_COMPONENT_STATUS_FB) return XR_ERROR_VALIDATION_FAILURE;
+    SceneEntity* e = entityOf(sp);
+    if (!e || type > XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB || !(componentsOf(e->kind) & bit(type))) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    status->enabled = (e->enabled & bit(type)) ? XR_TRUE : XR_FALSE;
+    status->changePending = XR_FALSE;
+    return XR_SUCCESS;
+}
+
+/** Whether entity [e] passes a query filter (null: everything the app can load). */
+bool passes(const SceneEntity& e, const XrSpaceFilterInfoBaseHeaderFB* f) {
+    if (e.kind == DEAD) return false;
+    if (!f) return e.kind != hxscene::ANCHOR || e.stored;
+    if (f->type == XR_TYPE_SPACE_UUID_FILTER_INFO_FB) {
+        auto* u = reinterpret_cast<const XrSpaceUuidFilterInfoFB*>(f);
+        for (uint32_t i = 0; i < u->uuidCount; i++) if (memcmp(u->uuids[i].data, e.uuid.data, 16) == 0) return true;
+        return false;
+    }
+    if (f->type == XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB) {
+        auto* c = reinterpret_cast<const XrSpaceComponentFilterInfoFB*>(f);
+        return c->componentType <= XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB && (componentsOf(e.kind) & bit(c->componentType)) &&
+               (e.kind != hxscene::ANCHOR || e.stored);
+    }
+    return false;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL QuerySpacesFB(XrSession h, const XrSpaceQueryInfoBaseHeaderFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_QUERY_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    auto* q = reinterpret_cast<const XrSpaceQueryInfoFB*>(info);
+    if (q->queryAction != XR_SPACE_QUERY_ACTION_LOAD_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (q->filter && q->filter->type != XR_TYPE_SPACE_UUID_FILTER_INFO_FB && q->filter->type != XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB)
+        return XR_ERROR_VALIDATION_FAILURE;
+    ensureScene(s);
+    Session::SpaceQuery& rq = s->queries[s->nextQuery];
+    s->nextQuery = (s->nextQuery + 1) % 8;
+    rq.id = *requestId = newRequest(s->instance);
+    rq.count = 0;
+    uint32_t limit = q->maxResultCount ? q->maxResultCount : MAX_ENTITIES;
+    for (int i = 0; i < s->entityCount && static_cast<uint32_t>(rq.count) < limit; i++) {
+        const SceneEntity& e = s->entities[i];
+        if (!passes(e, q->filter)) continue;
+        if (q->excludeFilter && passes(e, q->excludeFilter)) continue;
+        rq.entity[rq.count++] = static_cast<int16_t>(i);
+    }
+    if (rq.count > 0) {
+        XrEventDataSpaceQueryResultsAvailableFB av{XR_TYPE_EVENT_DATA_SPACE_QUERY_RESULTS_AVAILABLE_FB};
+        av.requestId = rq.id;
+        pushEvent(s->instance, &av, sizeof(av));
+    }
+    XrEventDataSpaceQueryCompleteFB done{XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB};
+    done.requestId = rq.id;
+    done.result = XR_SUCCESS;
+    pushEvent(s->instance, &done, sizeof(done));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL RetrieveSpaceQueryResultsFB(XrSession h, XrAsyncRequestIdFB requestId, XrSpaceQueryResultsFB* results) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!results || results->type != XR_TYPE_SPACE_QUERY_RESULTS_FB) return XR_ERROR_VALIDATION_FAILURE;
+    Session::SpaceQuery* rq = nullptr;
+    for (auto& q : s->queries) if (q.id == requestId && requestId != 0) rq = &q;
+    if (!rq) return XR_ERROR_VALIDATION_FAILURE;
+    results->resultCountOutput = static_cast<uint32_t>(rq->count);
+    if (results->resultCapacityInput == 0) return XR_SUCCESS;
+    if (results->resultCapacityInput < static_cast<uint32_t>(rq->count)) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!results->results) return XR_ERROR_VALIDATION_FAILURE;
+    for (int i = 0; i < rq->count; i++) {
+        results->results[i].space = entitySpace(s, rq->entity[i]);
+        results->results[i].uuid = s->entities[rq->entity[i]].uuid;
+    }
+    rq->id = 0;  // results are handed out once
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SaveSpaceFB(XrSession h, const XrSpaceSaveInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_SAVE_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    Space* sp = asSpace(info->space);
+    if (!sp || sp->session != s) return XR_ERROR_HANDLE_INVALID;
+    SceneEntity* e = entityOf(sp);
+    if (!e || !(componentsOf(e->kind) & bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB))) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    if (!(e->enabled & bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB))) return XR_ERROR_SPACE_COMPONENT_NOT_ENABLED_FB;
+    if (info->location != XR_SPACE_STORAGE_LOCATION_LOCAL_FB) return XR_ERROR_VALIDATION_FAILURE;  // no cloud
+    e->stored = true;
+    persistAnchors(s);
+    XrEventDataSpaceSaveCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_SAVE_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(s->instance);
+    ev.result = XR_SUCCESS; ev.space = info->space; ev.uuid = e->uuid; ev.location = info->location;
+    pushEvent(s->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL EraseSpaceFB(XrSession h, const XrSpaceEraseInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SPACE_ERASE_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    Space* sp = asSpace(info->space);
+    if (!sp || sp->session != s) return XR_ERROR_HANDLE_INVALID;
+    SceneEntity* e = entityOf(sp);
+    if (!e || !(componentsOf(e->kind) & bit(XR_SPACE_COMPONENT_TYPE_STORABLE_FB))) return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;
+    if (info->location != XR_SPACE_STORAGE_LOCATION_LOCAL_FB) return XR_ERROR_VALIDATION_FAILURE;
+    e->stored = false;
+    persistAnchors(s);
+    XrEventDataSpaceEraseCompleteFB ev{XR_TYPE_EVENT_DATA_SPACE_ERASE_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(s->instance);
+    ev.result = XR_SUCCESS; ev.space = info->space; ev.uuid = e->uuid; ev.location = info->location;
+    pushEvent(s->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
+/** The entity behind [h] if it belongs to [s] and has component [c] enabled; [err] says why not. */
+SceneEntity* withComponent(Session* s, XrSpace h, XrSpaceComponentTypeFB c, XrResult* err) {
+    Space* sp = asSpace(h);
+    if (!sp || sp->session != s) { *err = XR_ERROR_HANDLE_INVALID; return nullptr; }
+    SceneEntity* e = entityOf(sp);
+    if (!e || !(componentsOf(e->kind) & bit(c))) { *err = XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB; return nullptr; }
+    if (!(e->enabled & bit(c))) { *err = XR_ERROR_SPACE_COMPONENT_NOT_ENABLED_FB; return nullptr; }
+    return e;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceContainerFB(XrSession h, XrSpace space, XrSpaceContainerFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!out || out->type != XR_TYPE_SPACE_CONTAINER_FB) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    if (!withComponent(s, space, XR_SPACE_COMPONENT_TYPE_SPACE_CONTAINER_FB, &err)) return err;
+    uint32_t n = 0;
+    for (int i = 0; i < s->entityCount; i++) if (s->entities[i].kind >= hxscene::FLOOR) n++;
+    out->uuidCountOutput = n;
+    if (out->uuidCapacityInput == 0) return XR_SUCCESS;
+    if (out->uuidCapacityInput < n) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!out->uuids) return XR_ERROR_VALIDATION_FAILURE;
+    n = 0;
+    for (int i = 0; i < s->entityCount; i++) if (s->entities[i].kind >= hxscene::FLOOR) out->uuids[n++] = s->entities[i].uuid;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceBoundingBox2DFB(XrSession h, XrSpace space, XrRect2Df* box) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!box) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    SceneEntity* e = withComponent(s, space, XR_SPACE_COMPONENT_TYPE_BOUNDED_2D_FB, &err);
+    if (!e) return err;
+    box->offset = {e->minX, e->minY};
+    box->extent = {e->maxX - e->minX, e->maxY - e->minY};
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceBoundingBox3DFB(XrSession h, XrSpace space, XrRect3DfFB* box) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!box) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    if (!withComponent(s, space, XR_SPACE_COMPONENT_TYPE_BOUNDED_3D_FB, &err)) return err;
+    return XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB;  // no furniture volumes: nothing has this component
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceSemanticLabelsFB(XrSession h, XrSpace space, XrSemanticLabelsFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!out || out->type != XR_TYPE_SEMANTIC_LABELS_FB) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    SceneEntity* e = withComponent(s, space, XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB, &err);
+    if (!e) return err;
+    const char* label = e->kind == hxscene::FLOOR ? "FLOOR" : e->kind == hxscene::CEILING ? "CEILING" : "WALL_FACE";
+    uint32_t need = static_cast<uint32_t>(strlen(label)) + 1;
+    out->bufferCountOutput = need;
+    if (out->bufferCapacityInput == 0) return XR_SUCCESS;
+    if (out->bufferCapacityInput < need) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!out->buffer) return XR_ERROR_VALIDATION_FAILURE;
+    memcpy(out->buffer, label, need);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceBoundary2DFB(XrSession h, XrSpace space, XrBoundary2DFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!out || out->type != XR_TYPE_BOUNDARY_2D_FB) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    SceneEntity* e = withComponent(s, space, XR_SPACE_COMPONENT_TYPE_BOUNDED_2D_FB, &err);
+    if (!e) return err;
+    // floor and ceiling: the room outline; walls: their rectangle
+    XrVector2f rect[4] = {{e->minX, e->minY}, {e->maxX, e->minY}, {e->maxX, e->maxY}, {e->minX, e->maxY}};
+    const XrVector2f* v = e->kind == hxscene::FLOOR ? s->floorOutline : e->kind == hxscene::CEILING ? s->ceilingOutline : rect;
+    uint32_t n = e->kind == hxscene::WALL ? 4u : static_cast<uint32_t>(s->room.count);
+    out->vertexCountOutput = n;
+    if (out->vertexCapacityInput == 0) return XR_SUCCESS;
+    if (out->vertexCapacityInput < n) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!out->vertices) return XR_ERROR_VALIDATION_FAILURE;
+    memcpy(out->vertices, v, sizeof(XrVector2f) * n);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetSpaceRoomLayoutFB(XrSession h, XrSpace space, XrRoomLayoutFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!out || out->type != XR_TYPE_ROOM_LAYOUT_FB) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult err;
+    if (!withComponent(s, space, XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB, &err)) return err;
+    uint32_t walls = 0;
+    for (int i = 0; i < s->entityCount; i++) {
+        const SceneEntity& e = s->entities[i];
+        if (e.kind == hxscene::FLOOR) out->floorUuid = e.uuid;
+        if (e.kind == hxscene::CEILING) out->ceilingUuid = e.uuid;
+        if (e.kind == hxscene::WALL) walls++;
+    }
+    out->wallUuidCountOutput = walls;
+    if (out->wallUuidCapacityInput == 0) return XR_SUCCESS;
+    if (out->wallUuidCapacityInput < walls) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (!out->wallUuids) return XR_ERROR_VALIDATION_FAILURE;
+    walls = 0;
+    for (int i = 0; i < s->entityCount; i++) if (s->entities[i].kind == hxscene::WALL) out->wallUuids[walls++] = s->entities[i].uuid;
+    return XR_SUCCESS;
+}
+
+/** "Scan the room": there is no scanner, so the room is read again from HyperMagic. */
+XRAPI_ATTR XrResult XRAPI_CALL RequestSceneCaptureFB(XrSession h, const XrSceneCaptureRequestInfoFB* info, XrAsyncRequestIdFB* requestId) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_SCENE_CAPTURE_REQUEST_INFO_FB || !requestId) return XR_ERROR_VALIDATION_FAILURE;
+    ensureScene(s);
+    buildScene(s);
+    XrEventDataSceneCaptureCompleteFB ev{XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB};
+    ev.requestId = *requestId = newRequest(s->instance);
+    ev.result = XR_SUCCESS;
+    pushEvent(s->instance, &ev, sizeof(ev));
+    return XR_SUCCESS;
+}
+
 // ------------------------------------------------------------------ passthrough (XR_FB_passthrough)
 XRAPI_ATTR XrResult XRAPI_CALL CreatePassthroughFB(XrSession h, const XrPassthroughCreateInfoFB* ci, XrPassthroughFB* out) {
     Session* s = asSession(h);
@@ -2161,6 +2612,22 @@ const Entry kEntries[] = {
     HX_EXT(CreateFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(DestroyFoveationProfileFB, XR_FB_FOVEATION_EXTENSION_NAME),
     HX_EXT(PerfSettingsSetPerformanceLevelEXT, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME),
+    HX_EXT(CreateSpatialAnchorFB, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME),
+    HX_EXT(GetSpaceUuidFB, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME),
+    HX_EXT(EnumerateSpaceSupportedComponentsFB, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME),
+    HX_EXT(SetSpaceComponentStatusFB, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME),
+    HX_EXT(GetSpaceComponentStatusFB, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME),
+    HX_EXT(QuerySpacesFB, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME),
+    HX_EXT(RetrieveSpaceQueryResultsFB, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME),
+    HX_EXT(SaveSpaceFB, XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME),
+    HX_EXT(EraseSpaceFB, XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME),
+    HX_EXT(GetSpaceContainerFB, XR_FB_SPATIAL_ENTITY_CONTAINER_EXTENSION_NAME),
+    HX_EXT(GetSpaceBoundingBox2DFB, XR_FB_SCENE_EXTENSION_NAME),
+    HX_EXT(GetSpaceBoundingBox3DFB, XR_FB_SCENE_EXTENSION_NAME),
+    HX_EXT(GetSpaceSemanticLabelsFB, XR_FB_SCENE_EXTENSION_NAME),
+    HX_EXT(GetSpaceBoundary2DFB, XR_FB_SCENE_EXTENSION_NAME),
+    HX_EXT(GetSpaceRoomLayoutFB, XR_FB_SCENE_EXTENSION_NAME),
+    HX_EXT(RequestSceneCaptureFB, XR_FB_SCENE_CAPTURE_EXTENSION_NAME),
     HX_EXT(CreatePassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
     HX_EXT(PassthroughStartFB, XR_FB_PASSTHROUGH_EXTENSION_NAME),
@@ -2183,7 +2650,7 @@ const Entry kEntries[] = {
 
 /** Whether the app enabled the extension [name] (functions of extensions it did not enable are unsupported). */
 bool extEnabled(const Instance* inst, const char* name) {
-    for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(kExtensions[k].name, name) == 0) return (inst->extMeta >> k) & 1u;
+    for (uint32_t k = 0; k < kExtensionCount; k++) if (strcmp(kExtensions[k].name, name) == 0) return (inst->extMeta >> k) & 1ull;
     return false;
 }
 

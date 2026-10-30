@@ -596,6 +596,79 @@ void recenter() { pthread_mutex_lock(&gTrackLock); gRecenter = true; pthread_mut
  * Hands from HyperMagic: the app's shared file, opened through its provider (any thread; the
  * mapping is made once and kept for the life of the process).
  */
+void randomBytes(void* out, size_t size) { arc4random_buf(out, size); }
+
+/** <app files dir>/hypermagic_anchors.bin: where this game's saved anchors live. */
+bool anchorFile(char* out, size_t cap) {
+    static char path[512];
+    static bool known = false;
+    if (!known) {
+        JNIEnv* e = env();
+        if (!e || !gContext) return false;
+        jobject dir = e->CallObjectMethod(gContext, e->GetMethodID(e->GetObjectClass(gContext), "getFilesDir", "()Ljava/io/File;"));
+        if (clearException(e) || !dir) return false;
+        jstring abs = static_cast<jstring>(e->CallObjectMethod(dir, e->GetMethodID(e->GetObjectClass(dir), "getAbsolutePath", "()Ljava/lang/String;")));
+        if (clearException(e) || !abs) return false;
+        const char* c = e->GetStringUTFChars(abs, nullptr);
+        snprintf(path, sizeof(path), "%s/hypermagic_anchors.bin", c);
+        e->ReleaseStringUTFChars(abs, c);
+        known = true;
+    }
+    snprintf(out, cap, "%s", path);
+    return true;
+}
+
+int loadAnchors(HxSavedAnchor* out, int capacity) {
+    char path[512];
+    if (!anchorFile(path, sizeof(path))) return 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    int n = static_cast<int>(fread(out, sizeof(HxSavedAnchor), static_cast<size_t>(capacity), f));
+    fclose(f);
+    return n;
+}
+
+void saveAnchors(const HxSavedAnchor* anchors, int count) {
+    char path[512], tmp[520];
+    if (!anchorFile(path, sizeof(path))) return;
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE* f = fopen(tmp, "wb");
+    if (!f) return;
+    size_t w = fwrite(anchors, sizeof(HxSavedAnchor), static_cast<size_t>(count), f);
+    fclose(f);
+    if (w == static_cast<size_t>(count)) rename(tmp, path); else unlink(tmp);
+}
+
+bool loadRoom(float* x, float* z, int capacity, int* count, float* height) {
+    JNIEnv* e = env();
+    if (!e || !gContext) return false;
+    jobject cr = e->CallObjectMethod(gContext, e->GetMethodID(e->GetObjectClass(gContext), "getContentResolver", "()Landroid/content/ContentResolver;"));
+    if (clearException(e) || !cr) return false;
+    jclass uriCls = e->FindClass("android/net/Uri");
+    jobject uri = e->CallStaticObjectMethod(uriCls, e->GetStaticMethodID(uriCls, "parse", "(Ljava/lang/String;)Landroid/net/Uri;"),
+                                            e->NewStringUTF("content://com.hypermagic.runtime/room"));
+    jobject cur = e->CallObjectMethod(cr, e->GetMethodID(e->GetObjectClass(cr), "query",
+        "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;"),
+        uri, nullptr, nullptr, nullptr, nullptr);
+    if (clearException(e) || !cur) return false;
+    jclass curCls = e->GetObjectClass(cur);
+    jmethodID next = e->GetMethodID(curCls, "moveToNext", "()Z");
+    jmethodID getFloat = e->GetMethodID(curCls, "getFloat", "(I)F");
+    int n = 0;
+    float h = 0;
+    while (n < capacity && e->CallBooleanMethod(cur, next)) {
+        x[n] = e->CallFloatMethod(cur, getFloat, 0);
+        z[n] = e->CallFloatMethod(cur, getFloat, 1);
+        h = e->CallFloatMethod(cur, getFloat, 2);
+        n++;
+    }
+    e->CallVoidMethod(cur, e->GetMethodID(curCls, "close", "()V"));
+    if (clearException(e) || n < 3) return false;
+    *count = n; *height = h;
+    LOGI("room from HyperMagic: %d corners, %.1f m high", n, h);
+    return true;
+}
+
 void passthroughWanted() {
     if (HxCameraShared* c = cameraFrames()) __atomic_store_n(&c->readerWantsNs, nowNs(), __ATOMIC_RELAXED);
 }

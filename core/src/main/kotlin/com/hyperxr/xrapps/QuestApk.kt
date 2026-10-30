@@ -68,6 +68,9 @@ object QuestApk {
         "XR_KHR_composition_layer_cylinder", "XR_KHR_composition_layer_equirect2",
         // mixed reality: the phone's camera behind the game
         "XR_FB_passthrough",
+        // anchors and the room (Meta scene model)
+        "XR_FB_spatial_entity", "XR_FB_spatial_entity_query", "XR_FB_spatial_entity_storage", "XR_FB_spatial_entity_container",
+        "XR_FB_scene", "XR_FB_scene_capture",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */
@@ -196,6 +199,7 @@ object QuestApk {
         if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
         if (ddController) reasons += "Usa o controle Daydream: instale o HyperMagic Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
         if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
+        if ("XR_FB_scene" in exts || "XR_FB_spatial_entity" in exts) reasons += "Usa âncoras / modelo da sala da Meta: a sala vem da área desenhada no HyperGuardian (ou uma de 4 x 4 m); âncoras ficam paradas onde foram criadas"
         if ("XR_FB_passthrough" in exts) reasons += "Usa passthrough (realidade mista): a câmera do celular aparece atrás do jogo, em baixa resolução e sem profundidade"
         if ("XR_EXT_hand_tracking" in exts) reasons += "Usa hand tracking: o HyperMagic rastreia suas mãos pela câmera enquanto o jogo roda (juntas, pinça e mira da Meta)"
         if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && picoLibs.isEmpty() && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS

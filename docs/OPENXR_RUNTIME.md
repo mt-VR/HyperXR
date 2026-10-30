@@ -51,6 +51,7 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 | Extensões | `XR_KHR_android_create_instance`, `XR_KHR_opengl_es_enable`, `XR_KHR_convert_timespec_time`, `XR_MND_headless`, `XR_EXT_local_floor`, `XR_KHR_android_thread_settings`, `XR_EXT_performance_settings` |
 | Meta (Quest) | `XR_FB_display_refresh_rate` (a taxa da tela), `XR_FB_color_space` (Rec.709), `XR_FB_swapchain_update_state` (+ `_opengl_es`), `XR_FB_foveation` e `_configuration` (aceitas; a imagem inteira é sempre usada), `XR_FB_composition_layer_settings` e `_image_layout`, `XR_FB_touch_controller_pro`, `XR_META_touch_controller_plus` |
 | Pico | `XR_BD_controller_interaction`: perfis Pico 4, Neo 3 e G3, atendidos como os Touch |
+| Âncoras e sala | `XR_FB_spatial_entity` (+ `_query`, `_storage`, `_container`), `XR_FB_scene` e `XR_FB_scene_capture`: âncoras com pose fixa, gravadas nos arquivos do próprio jogo; a sala (chão, teto, paredes, layout) a partir da área do HyperGuardian |
 | Passthrough | `XR_FB_passthrough` (camada de reconstrução, iniciar/pausar, opacidade) e o modo `ALPHA_BLEND`: a câmera do celular atrás do jogo, com a projeção misturada pelo alfa |
 | Mãos | `XR_EXT_hand_tracking` (26 juntas, com raio) `XR_FB_hand_tracking_aim` (mira e pinça da Meta), `XR_FB_hand_tracking_mesh` (malha da mão para o SDK da Meta desenhar), `XR_FB_hand_tracking_capsules` (19 cápsulas para física) e a escala da mão (`XrHandTrackingScaleFB`), com as mãos que o HyperMagic rastreia pela câmera (veja abaixo) |
 | Sistema | HMD, estéreo primário, blend OPAQUE e ALPHA_BLEND, orientação rastreada (3DoF), posição por modelo de pescoço |
@@ -80,8 +81,13 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
   dois olhos, fica sempre atrás de todas as camadas e tem bordas pretas onde a câmera não alcança o
   campo de visão. Camadas projetadas em malhas (`XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB`,
   geometry instances), mapas de cor e bordas não existem.
-- **Extensões Meta e Pico**: as listadas acima existem; as outras (malha das mãos, âncoras
-  espaciais, `XR_PICO_*`) não. Jogos que as exigem, que usam a VrApi ou só Vulkan não rodam; o loader da
+- **Âncoras e sala**: o celular não rastreia posição, então uma âncora fica onde foi criada no espaço do
+  jogo (não "gruda" num objeto real se você andar). A sala é a área desenhada no HyperGuardian
+  (centralizada onde você está ao abrir o jogo; o giro dela em relação ao jogo não é conhecido) ou, sem
+  área, uma sala de 4 x 4 m e 2,6 m de altura; o mesmo contorno dá sempre os mesmos UUIDs. Não há móveis
+  (caixas 3D), malha da sala, compartilhamento nem nuvem. "Escanear a sala" (`xrRequestSceneCaptureFB`)
+  só relê a área do HyperMagic.
+- **Extensões Meta e Pico**: as listadas acima existem; as outras (modelos de controle, sombras de pele, `XR_PICO_*` e mais) não. Jogos que as exigem, que usam a VrApi ou só Vulkan não rodam; o loader da
   Meta ou da Pico é trocado pelo da Khronos ao corrigir o APK, e o importador em Arquivos diz o que o
   jogo usa antes de instalar. O SDK nativo da Pico (`libpxr_api.so`) e as lojas Meta/Pico (verificação
   de compra) dependem de serviços do óculos que não existem num celular.
@@ -95,11 +101,11 @@ App OpenXR ──► loader Khronos ──► broker (Khronos, se instalado; sen
 ## Testes
 
 - `native/openxr-runtime/tests/run_host_tests.sh`: compila o runtime para Linux (camada de
-  plataforma headless) e executa 507 verificações com AddressSanitizer e UBSan. Os testes passam
+  plataforma headless) e executa 613 verificações com AddressSanitizer e UBSan. Os testes passam
   pela mesma negociação que o loader usa e cobrem instância, extensões, caminhos, sistema, estados
   da sessão, ordem do ciclo de quadros, espaços, visões (IPD), perda de rastreamento, ações e entrada (gamepad/toque chegando às ações, mudanças entre syncs,
   pose de mira), extensões Meta/Pico e mãos (juntas no espaço certo, eixos do OpenXR, mira e
-  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala).
+  pinça da Meta, mãos velhas descartadas, mão esquerda espelhada) camadas (geometria do cilindro e do equirect, validação) passthrough (objetos, estados, ALPHA_BLEND) e malha da mão (faces para fora, índices, pele, cápsulas, escala) e âncoras/sala (criar, localizar, ligar e desligar componentes, gravar e apagar entre sessões, consultas por UUID e por componente, chão/paredes/teto e suas orientações).
 - Teste no aparelho: Configurações > Runtime > *Testar o runtime HyperXR no visor*. Ele carrega o
   runtime como o loader faz, abre uma sessão GLES real por 15 s e mostra um relatório com os estados
   da sessão, o número de quadros e o intervalo médio entre eles. Durante o teste aparecem marcadores

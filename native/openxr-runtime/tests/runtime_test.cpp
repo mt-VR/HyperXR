@@ -18,6 +18,8 @@ extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracke
 extern "C" void hxTestSetHands(const HxHandShared* h);
 extern "C" int64_t hxTestHandsWanted();
 extern "C" int64_t hxTestPassthroughWanted();
+extern "C" int hxTestSavedAnchors();
+extern "C" void hxTestSetRoom(const float* x, const float* z, int n, float height);
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch);
 
 static int gFailures = 0;
@@ -1149,6 +1151,198 @@ static void testHandMeshAndCapsules() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** Polls events until one of [type] arrives (copied into [out]); false when the queue runs dry. */
+static bool waitEvent(XrInstance inst, XrStructureType type, XrEventDataBuffer* out) {
+    auto poll = fn<PFN_xrPollEvent>(inst, "xrPollEvent");
+    for (int i = 0; i < 64; i++) {
+        XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
+        if (poll(inst, &ev) != XR_SUCCESS) return false;
+        if (ev.type == type) { *out = ev; return true; }
+    }
+    return false;
+}
+
+static void testSpatialEntitiesAndScene() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME,
+                          XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_CONTAINER_EXTENSION_NAME, XR_FB_SCENE_EXTENSION_NAME,
+                          XR_FB_SCENE_CAPTURE_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 7, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrLocateSpace);
+    LOAD(inst, xrCreateSpatialAnchorFB); LOAD(inst, xrGetSpaceUuidFB); LOAD(inst, xrEnumerateSpaceSupportedComponentsFB);
+    LOAD(inst, xrSetSpaceComponentStatusFB); LOAD(inst, xrGetSpaceComponentStatusFB); LOAD(inst, xrQuerySpacesFB);
+    LOAD(inst, xrRetrieveSpaceQueryResultsFB); LOAD(inst, xrSaveSpaceFB); LOAD(inst, xrEraseSpaceFB); LOAD(inst, xrGetSpaceContainerFB);
+    LOAD(inst, xrGetSpaceBoundingBox2DFB); LOAD(inst, xrGetSpaceSemanticLabelsFB); LOAD(inst, xrGetSpaceBoundary2DFB);
+    LOAD(inst, xrGetSpaceRoomLayoutFB); LOAD(inst, xrRequestSceneCaptureFB);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s = XR_NULL_HANDLE;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+    rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    XrEventDataBuffer ev;
+
+    // an anchor 1 m ahead, half a metre up
+    XrSpatialAnchorCreateInfoFB aci{XR_TYPE_SPATIAL_ANCHOR_CREATE_INFO_FB};
+    aci.space = stage;
+    aci.poseInSpace.orientation.w = 1;
+    aci.poseInSpace.position = {0, 0.5f, -1};
+    aci.time = monoNs();
+    XrAsyncRequestIdFB req = 0;
+    CHECK_RESULT(xrCreateSpatialAnchorFB(s, &aci, &req), XR_SUCCESS);
+    CHECK(req != 0);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPATIAL_ANCHOR_CREATE_COMPLETE_FB, &ev));
+    auto* created = reinterpret_cast<XrEventDataSpatialAnchorCreateCompleteFB*>(&ev);
+    CHECK(created->requestId == req && created->result == XR_SUCCESS && created->space != XR_NULL_HANDLE);
+    XrSpace anchor = created->space;
+    XrUuidEXT anchorUuid = created->uuid, got;
+    CHECK_RESULT(xrGetSpaceUuidFB(anchor, &got), XR_SUCCESS);
+    CHECK(memcmp(got.data, anchorUuid.data, 16) == 0);
+    CHECK_RESULT(xrGetSpaceUuidFB(stage, &got), XR_ERROR_VALIDATION_FAILURE);
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    CHECK_RESULT(xrLocateSpace(anchor, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK((loc.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) && NEAR(loc.pose.position.y, 0.5, 1e-5) && NEAR(loc.pose.position.z, -1, 1e-5));
+    uint32_t n = 0;
+    XrSpaceComponentTypeFB comps[8];
+    CHECK_RESULT(xrEnumerateSpaceSupportedComponentsFB(anchor, 8, &n, comps), XR_SUCCESS);
+    CHECK(n == 2 && comps[0] == XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB && comps[1] == XR_SPACE_COMPONENT_TYPE_STORABLE_FB);
+    // turning LOCATABLE off stops locating, on brings it back (each with its completion event)
+    XrSpaceComponentStatusSetInfoFB set{XR_TYPE_SPACE_COMPONENT_STATUS_SET_INFO_FB};
+    set.componentType = XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB;
+    set.enabled = XR_FALSE;
+    CHECK_RESULT(xrSetSpaceComponentStatusFB(anchor, &set, &req), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB, &ev));
+    CHECK_RESULT(xrLocateSpace(anchor, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK(loc.locationFlags == 0);
+    set.enabled = XR_TRUE;
+    CHECK_RESULT(xrSetSpaceComponentStatusFB(anchor, &set, &req), XR_SUCCESS);
+    XrSpaceComponentStatusFB st{XR_TYPE_SPACE_COMPONENT_STATUS_FB};
+    CHECK_RESULT(xrGetSpaceComponentStatusFB(anchor, XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB, &st), XR_SUCCESS);
+    CHECK(st.enabled == XR_TRUE);
+    set.componentType = XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB;
+    CHECK_RESULT(xrSetSpaceComponentStatusFB(anchor, &set, &req), XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB);
+
+    // save: kept in the app's storage, found again by a UUID query
+    XrSpaceSaveInfoFB save{XR_TYPE_SPACE_SAVE_INFO_FB};
+    save.space = anchor;
+    save.location = XR_SPACE_STORAGE_LOCATION_LOCAL_FB;
+    save.persistenceMode = XR_SPACE_PERSISTENCE_MODE_INDEFINITE_FB;
+    CHECK_RESULT(xrSaveSpaceFB(s, &save, &req), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPACE_SAVE_COMPLETE_FB, &ev));
+    CHECK(hxTestSavedAnchors() == 1);
+
+    // the room: HyperGuardian's area, an L-free 3 x 5 m rectangle around the player, 2.5 m high
+    const float rx[4] = {-1.5f, 1.5f, 1.5f, -1.5f}, rz[4] = {2.5f, 2.5f, -2.5f, -2.5f};
+    hxTestSetRoom(rx, rz, 4, 2.5f);
+    XrSceneCaptureRequestInfoFB cap{XR_TYPE_SCENE_CAPTURE_REQUEST_INFO_FB};
+    CHECK_RESULT(xrRequestSceneCaptureFB(s, &cap, &req), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB, &ev));
+    XrSpaceComponentFilterInfoFB roomFilter{XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB};
+    roomFilter.componentType = XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB;
+    XrSpaceQueryInfoFB q{XR_TYPE_SPACE_QUERY_INFO_FB};
+    q.queryAction = XR_SPACE_QUERY_ACTION_LOAD_FB;
+    q.filter = reinterpret_cast<const XrSpaceFilterInfoBaseHeaderFB*>(&roomFilter);
+    CHECK_RESULT(xrQuerySpacesFB(s, reinterpret_cast<const XrSpaceQueryInfoBaseHeaderFB*>(&q), &req), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPACE_QUERY_RESULTS_AVAILABLE_FB, &ev));
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB, &ev));
+    XrSpaceQueryResultFB res[16];
+    XrSpaceQueryResultsFB results{XR_TYPE_SPACE_QUERY_RESULTS_FB};
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_SUCCESS);
+    CHECK(results.resultCountOutput == 1);
+    results.resultCapacityInput = 16; results.results = res;
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_SUCCESS);
+    XrSpace room = res[0].space;
+    XrUuidEXT walls[8];
+    XrRoomLayoutFB layout{XR_TYPE_ROOM_LAYOUT_FB};
+    CHECK_RESULT(xrGetSpaceRoomLayoutFB(s, room, &layout), XR_SUCCESS);
+    CHECK(layout.wallUuidCountOutput == 4);
+    layout.wallUuidCapacityInput = 8; layout.wallUuids = walls;
+    CHECK_RESULT(xrGetSpaceRoomLayoutFB(s, room, &layout), XR_SUCCESS);
+    XrSpaceContainerFB cont{XR_TYPE_SPACE_CONTAINER_FB};
+    CHECK_RESULT(xrGetSpaceContainerFB(s, room, &cont), XR_SUCCESS);
+    CHECK(cont.uuidCountOutput == 6);  // floor, ceiling, 4 walls
+    // load the floor and the walls by UUID
+    XrUuidEXT want[5] = {layout.floorUuid, walls[0], walls[1], walls[2], walls[3]};
+    XrSpaceUuidFilterInfoFB uf{XR_TYPE_SPACE_UUID_FILTER_INFO_FB};
+    uf.uuidCount = 5; uf.uuids = want;
+    q.filter = reinterpret_cast<const XrSpaceFilterInfoBaseHeaderFB*>(&uf);
+    CHECK_RESULT(xrQuerySpacesFB(s, reinterpret_cast<const XrSpaceQueryInfoBaseHeaderFB*>(&q), &req), XR_SUCCESS);
+    results.resultCapacityInput = 16;
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_SUCCESS);
+    CHECK(results.resultCountOutput == 5);
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_ERROR_VALIDATION_FAILURE);  // handed out once
+    int floors = 0, wallsSeen = 0, wallsFacingIn = 0;
+    for (uint32_t i = 0; i < results.resultCountOutput; i++) {
+        char label[32];
+        XrSemanticLabelsFB lab{XR_TYPE_SEMANTIC_LABELS_FB};
+        lab.bufferCapacityInput = sizeof(label); lab.buffer = label;
+        CHECK_RESULT(xrGetSpaceSemanticLabelsFB(s, res[i].space, &lab), XR_SUCCESS);
+        CHECK_RESULT(xrLocateSpace(res[i].space, stage, monoNs(), &loc), XR_SUCCESS);
+        XrRect2Df box;
+        CHECK_RESULT(xrGetSpaceBoundingBox2DFB(s, res[i].space, &box), XR_SUCCESS);
+        // the plane's +Z (its normal) in the stage
+        XrQuaternionf o = loc.pose.orientation;
+        float nx = 2 * (o.x * o.z + o.w * o.y), ny = 2 * (o.y * o.z - o.w * o.x), nz = 1 - 2 * (o.x * o.x + o.y * o.y);
+        if (strcmp(label, "FLOOR") == 0) {
+            floors++;
+            CHECK(NEAR(loc.pose.position.y, 0, 1e-5) && ny > 0.99f);
+            CHECK(NEAR(box.extent.width, 3, 1e-4) && NEAR(box.extent.height, 5, 1e-4));
+            XrVector2f outline[8];
+            XrBoundary2DFB b{XR_TYPE_BOUNDARY_2D_FB};
+            b.vertexCapacityInput = 8; b.vertices = outline;
+            CHECK_RESULT(xrGetSpaceBoundary2DFB(s, res[i].space, &b), XR_SUCCESS);
+            CHECK(b.vertexCountOutput == 4 && NEAR(outline[0].x, -1.5, 1e-5) && NEAR(outline[0].y, -2.5, 1e-5));  // world z 2.5 -> plane y -2.5
+        } else if (strcmp(label, "WALL_FACE") == 0) {
+            wallsSeen++;
+            CHECK(NEAR(loc.pose.position.y, 1.25, 1e-5) && NEAR(box.extent.height, 2.5, 1e-4));
+            // the normal points back to the middle of the room
+            if (nx * -loc.pose.position.x + nz * -loc.pose.position.z > 0 && fabs(ny) < 1e-4) wallsFacingIn++;
+        }
+    }
+    CHECK(floors == 1 && wallsSeen == 4 && wallsFacingIn == 4);
+    // a wall has no room layout; the room has no 2D bounds
+    XrRect2Df box;
+    CHECK_RESULT(xrGetSpaceBoundingBox2DFB(s, room, &box), XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB);
+    CHECK_RESULT(xrGetSpaceRoomLayoutFB(s, res[1].space, &layout), XR_ERROR_SPACE_COMPONENT_NOT_SUPPORTED_FB);
+    // the same room asked again keeps its UUIDs (apps may remember them)
+    CHECK_RESULT(xrRequestSceneCaptureFB(s, &cap, &req), XR_SUCCESS);
+    XrRoomLayoutFB layout2{XR_TYPE_ROOM_LAYOUT_FB};
+    CHECK_RESULT(xrGetSpaceRoomLayoutFB(s, room, &layout2), XR_SUCCESS);
+    CHECK(memcmp(layout2.floorUuid.data, layout.floorUuid.data, 16) == 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+
+    // a new session finds the saved anchor (no filter: saved anchors and the room)
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    XrUuidEXT only[1] = {anchorUuid};
+    uf.uuidCount = 1; uf.uuids = only;
+    CHECK_RESULT(xrQuerySpacesFB(s, reinterpret_cast<const XrSpaceQueryInfoBaseHeaderFB*>(&q), &req), XR_SUCCESS);
+    results.resultCapacityInput = 16;
+    CHECK_RESULT(xrRetrieveSpaceQueryResultsFB(s, req, &results), XR_SUCCESS);
+    CHECK(results.resultCountOutput == 1 && memcmp(res[0].uuid.data, anchorUuid.data, 16) == 0);
+    CHECK_RESULT(xrLocateSpace(res[0].space, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK(NEAR(loc.pose.position.z, -1, 1e-5));
+    XrSpaceEraseInfoFB erase{XR_TYPE_SPACE_ERASE_INFO_FB};
+    erase.space = res[0].space;
+    erase.location = XR_SPACE_STORAGE_LOCATION_LOCAL_FB;
+    CHECK_RESULT(xrEraseSpaceFB(s, &erase, &req), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_SPACE_ERASE_COMPLETE_FB, &ev));
+    CHECK(hxTestSavedAnchors() == 0);
+    hxTestSetRoom(nullptr, nullptr, 0, 0);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1177,6 +1371,7 @@ int main() {
     testPassthrough();
     testHandMeshGeometry();
     testHandMeshAndCapsules();
+    testSpatialEntitiesAndScene();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

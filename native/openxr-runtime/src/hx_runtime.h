@@ -106,6 +106,12 @@ struct HxInput {
     int touch;            // screen touched
 };
 
+/** A saved spatial anchor: its UUID and where it is (stage space). */
+struct HxSavedAnchor {
+    uint8_t uuid[16];
+    XrPosef pose;
+};
+
 struct HxSwapchainGfx;  // platform swapchain data
 struct HxSessionGfx;    // platform compositor data
 
@@ -166,6 +172,12 @@ void readInput(HxInput* out);
 bool readHands(HxHandShared* out, bool wantsHands);
 /** The app shows passthrough this frame: HyperMagic keeps the camera frames coming. */
 void passthroughWanted();
+/** Spatial anchors the app saved (XR_FB_spatial_entity_storage), kept in the app's own files. */
+int loadAnchors(HxSavedAnchor* out, int capacity);
+void saveAnchors(const HxSavedAnchor* anchors, int count);
+/** The room outline HyperMagic knows (HyperGuardian's area, floor x/z in metres); false: none. */
+bool loadRoom(float* x, float* z, int capacity, int* count, float* height);
+void randomBytes(void* out, size_t size);
 
 // Graphics. All return XrResult; the host build only supports headless sessions.
 XrResult gfxCreateSession(const void* binding, HxSessionGfx** out);
