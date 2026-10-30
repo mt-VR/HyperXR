@@ -13,6 +13,7 @@
 #include "../src/hx_layers.h"
 #include "../src/hx_handmesh.h"
 #include "../src/hx_rendermodel.h"
+#include "../src/hx_body.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
@@ -1834,6 +1835,128 @@ static void testPicoSpatialSensing() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+static XrQuaternionf hxbodyTurn() { float a = 3.14159265f / 4; return {0, sinf(a), 0, cosf(a)}; }  // 90 deg left about +Y
+
+static double dist3(XrVector3f a, XrVector3f b) { return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }
+
+/** The inferred body: proportions, the arm reaching a seen hand, sitting, and a skeleton without loops. */
+static void testBodySolver() {
+    using namespace hxbody;
+    Input in{};
+    in.head = XrPosef{{0, 0, 0, 1}, {0, 1.6f, 0}};
+    in.standingEyeHeight = 1.6f;
+    Output o;
+    solve(in, &o);
+    CHECK(o.tracked[HEAD] && !o.tracked[HIPS] && !o.tracked[L_HAND + 1]);
+    CHECK(o.pose[HIPS].position.y > 0.8f && o.pose[HIPS].position.y < 1.05f);
+    CHECK(o.pose[L_BALL].position.y < 0.05f && o.pose[R_ANKLE].position.y < 0.12f);
+    CHECK(o.pose[L_ARM_UPPER].position.x < -0.1f && o.pose[R_ARM_UPPER].position.x > 0.1f);  // left is left
+    CHECK(o.pose[L_ARM_LOWER].position.y < o.pose[L_ARM_UPPER].position.y);
+    // bones keep their length
+    CHECK(NEAR(dist3(o.pose[L_ARM_UPPER].position, o.pose[L_ARM_LOWER].position), 0.28, 1e-3));
+    CHECK(NEAR(dist3(o.pose[R_UPPER_LEG].position, o.pose[R_LOWER_LEG].position), 0.44, 1e-3));
+    // a right hand seen 45 cm ahead at chest height: the arm reaches it exactly
+    in.handTracked[1] = true;
+    for (int j = 0; j < 26; j++) in.hand[1][j] = XrPosef{{0, 0, 0, 1}, {0.2f, 1.3f, -0.45f - 0.01f * j}};
+    solve(in, &o);
+    CHECK(o.tracked[R_HAND + XR_HAND_JOINT_WRIST_EXT] && !o.tracked[L_HAND + XR_HAND_JOINT_WRIST_EXT]);
+    CHECK(NEAR(o.pose[R_HAND + XR_HAND_JOINT_WRIST_EXT].position.z, in.hand[1][XR_HAND_JOINT_WRIST_EXT].position.z, 1e-6));
+    CHECK(NEAR(dist3(o.pose[R_ARM_UPPER].position, o.pose[R_ARM_LOWER].position), 0.28, 1e-3));
+    CHECK(NEAR(dist3(o.pose[R_ARM_LOWER].position, in.hand[1][XR_HAND_JOINT_WRIST_EXT].position), 0.27, 1e-3));
+    // sitting: the head 50 cm lower brings the thighs forward
+    in.handTracked[1] = false;
+    in.head.position.y = 1.1f;
+    solve(in, &o);
+    CHECK(o.pose[L_LOWER_LEG].position.z < o.pose[L_UPPER_LEG].position.z - 0.3f);
+    // turning the head turns the body
+    in.head = XrPosef{hxbodyTurn(), {0, 1.6f, 0}};
+    solve(in, &o);
+    CHECK(o.pose[L_ARM_UPPER].position.z > 0.1f);  // turned 90 degrees left, the left shoulder is behind
+    // every joint reaches the root through its parents
+    int loops = 0;
+    for (int j = 0; j < kMetaJoints; j++) {
+        int k = j, steps = 0;
+        while (k != -1 && steps < 100) { k = parentMeta(k); steps++; }
+        if (steps >= 100) loops++;
+        int p = parentMeta(j);
+        if (p >= kMetaJoints || (j != ROOT && p < 0)) loops++;
+    }
+    CHECK(loops == 0);
+    XrPosef bd[kBdJoints]; bool bt[kBdJoints];
+    toBD(o, bd, bt);
+    CHECK(bd[15].position.y > bd[12].position.y && bd[12].position.y > bd[0].position.y);  // head above neck above pelvis
+}
+
+static void testBodyTracking() {
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_FB_BODY_TRACKING_EXTENSION_NAME, XR_META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME, XR_BD_BODY_TRACKING_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 4, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession); LOAD(inst, xrDestroyInstance);
+    LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrCreateBodyTrackerFB); LOAD(inst, xrLocateBodyJointsFB); LOAD(inst, xrGetBodySkeletonFB);
+    LOAD(inst, xrDestroyBodyTrackerFB); LOAD(inst, xrCreateBodyTrackerBD); LOAD(inst, xrLocateBodyJointsBD); LOAD(inst, xrDestroyBodyTrackerBD);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    hxTestSetHead(0, 0, 0, 1, 1);
+    hxTestSetHands(nullptr);
+    XrBodyTrackerCreateInfoFB bci{XR_TYPE_BODY_TRACKER_CREATE_INFO_FB};
+    bci.bodyJointSet = XR_BODY_JOINT_SET_FULL_BODY_META;
+    XrBodyTrackerFB full;
+    CHECK_RESULT(xrCreateBodyTrackerFB(s, &bci, &full), XR_SUCCESS);
+    static XrBodyJointLocationFB jl[84];
+    XrBodyJointLocationsFB locs{XR_TYPE_BODY_JOINT_LOCATIONS_FB};
+    locs.jointCount = 70; locs.jointLocations = jl;
+    XrBodyJointsLocateInfoFB li{XR_TYPE_BODY_JOINTS_LOCATE_INFO_FB};
+    li.baseSpace = stage; li.time = monoNs();
+    CHECK_RESULT(xrLocateBodyJointsFB(full, &li, &locs), XR_ERROR_VALIDATION_FAILURE);  // full body has 84 joints
+    locs.jointCount = 84;
+    CHECK_RESULT(xrLocateBodyJointsFB(full, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_TRUE && (jl[XR_FULL_BODY_JOINT_HEAD_META].locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT));
+    CHECK(!(jl[XR_FULL_BODY_JOINT_HIPS_META].locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) &&
+          (jl[XR_FULL_BODY_JOINT_HIPS_META].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT));
+    CHECK(jl[XR_FULL_BODY_JOINT_LEFT_FOOT_BALL_META].pose.position.y < 0.1f);
+    static XrBodySkeletonJointFB sk[84];
+    XrBodySkeletonFB skel{XR_TYPE_BODY_SKELETON_FB};
+    skel.jointCount = 84; skel.joints = sk;
+    CHECK_RESULT(xrGetBodySkeletonFB(full, &skel), XR_SUCCESS);
+    CHECK(sk[XR_FULL_BODY_JOINT_ROOT_META].parentJoint == -1 && sk[XR_FULL_BODY_JOINT_LEFT_HAND_WRIST_META].parentJoint == XR_FULL_BODY_JOINT_LEFT_ARM_LOWER_META);
+    CHECK_RESULT(xrDestroyBodyTrackerFB(full), XR_SUCCESS);
+    bci.bodyJointSet = XR_BODY_JOINT_SET_DEFAULT_FB;
+    XrBodyTrackerFB upper;
+    CHECK_RESULT(xrCreateBodyTrackerFB(s, &bci, &upper), XR_SUCCESS);
+    locs.jointCount = 70;
+    CHECK_RESULT(xrLocateBodyJointsFB(upper, &li, &locs), XR_SUCCESS);
+    CHECK(locs.isActive == XR_TRUE);
+    // Pico: 24 joints, or 16 without the arms
+    XrBodyTrackerCreateInfoBD pci{XR_TYPE_BODY_TRACKER_CREATE_INFO_BD};
+    pci.jointSet = XR_BODY_JOINT_SET_FULL_BODY_JOINTS_BD;
+    XrBodyTrackerBD pico;
+    CHECK_RESULT(xrCreateBodyTrackerBD(s, &pci, &pico), XR_SUCCESS);
+    XrBodyJointLocationBD pj[24];
+    XrBodyJointLocationsBD pl{XR_TYPE_BODY_JOINT_LOCATIONS_BD};
+    pl.jointLocationCount = 24; pl.jointLocations = pj;
+    XrBodyJointsLocateInfoBD pli{XR_TYPE_BODY_JOINTS_LOCATE_INFO_BD};
+    pli.baseSpace = stage; pli.time = monoNs();
+    CHECK_RESULT(xrLocateBodyJointsBD(pico, &pli, &pl), XR_SUCCESS);
+    CHECK(pj[XR_BODY_JOINT_HEAD_BD].pose.position.y > 1.4f && pj[XR_BODY_JOINT_LEFT_FOOT_BD].pose.position.y < 0.1f);
+    CHECK(pl.allJointPosesTracked == XR_FALSE);
+    CHECK_RESULT(xrDestroyBodyTrackerFB(reinterpret_cast<XrBodyTrackerFB>(pico)), XR_ERROR_HANDLE_INVALID);  // not a Meta tracker
+    CHECK_RESULT(xrDestroyBodyTrackerBD(pico), XR_SUCCESS);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);  // frees the Meta upper-body tracker
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -1866,6 +1989,8 @@ int main() {
     testRenderModel();
     testHandInteractionAndMetaExtras();
     testPicoSpatialSensing();
+    testBodySolver();
+    testBodyTracking();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

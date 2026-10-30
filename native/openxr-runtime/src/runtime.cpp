@@ -8,6 +8,7 @@
 #include "hx_handmesh.h"
 #include "hx_scene.h"
 #include "hx_rendermodel.h"
+#include "hx_body.h"
 
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_reflection.h>
@@ -29,7 +30,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -768,6 +769,10 @@ const ExtDesc kExtensions[] = {
     {XR_BD_SPATIAL_SCENE_EXTENSION_NAME, XR_BD_spatial_scene_SPEC_VERSION},
     {XR_BD_SPATIAL_MESH_EXTENSION_NAME, XR_BD_spatial_mesh_SPEC_VERSION},
     {XR_BD_SPATIAL_PLANE_EXTENSION_NAME, XR_BD_spatial_plane_SPEC_VERSION},
+    // bodies (Meta upper body and full body, Pico): head and hands seen, the rest inferred (hx_body.h)
+    {XR_FB_BODY_TRACKING_EXTENSION_NAME, XR_FB_body_tracking_SPEC_VERSION},
+    {XR_META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME, XR_META_body_tracking_full_body_SPEC_VERSION},
+    {XR_BD_BODY_TRACKING_EXTENSION_NAME, XR_BD_body_tracking_SPEC_VERSION},
     {XR_FB_COMPOSITION_LAYER_ALPHA_BLEND_EXTENSION_NAME, XR_FB_composition_layer_alpha_blend_SPEC_VERSION},
     {XR_META_LOCAL_DIMMING_EXTENSION_NAME, XR_META_local_dimming_SPEC_VERSION},
     {XR_META_HEADSET_ID_EXTENSION_NAME, XR_META_headset_id_SPEC_VERSION},
@@ -973,6 +978,10 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemSimultaneousHandsAndControllersPropertiesMETA*>(n)->supportsSimultaneousHandsAndControllers = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_KEYBOARD_TRACKING_PROPERTIES_FB)
             reinterpret_cast<XrSystemKeyboardTrackingPropertiesFB*>(n)->supportsKeyboardTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemBodyTrackingPropertiesFB*>(n)->supportsBodyTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_PROPERTIES_BODY_TRACKING_FULL_BODY_META)
+            reinterpret_cast<XrSystemPropertiesBodyTrackingFullBodyMETA*>(n)->supportsFullBodyTracking = XR_TRUE;
+        if (n->type == XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_BD) reinterpret_cast<XrSystemBodyTrackingPropertiesBD*>(n)->supportsBodyTracking = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_SPATIAL_SENSING_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialSensingPropertiesBD*>(n)->supportsSpatialSensing = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_SPATIAL_ANCHOR_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialAnchorPropertiesBD*>(n)->supportsSpatialAnchor = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_SPATIAL_SCENE_PROPERTIES_BD) reinterpret_cast<XrSystemSpatialScenePropertiesBD*>(n)->supportsSpatialScene = XR_TRUE;
@@ -1127,6 +1136,7 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
     while (void* c = takeChild(s, MAGIC_HAND)) { static_cast<HandTracker*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PT_LAYER)) { static_cast<PassthroughLayer*>(c)->magic = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_PASSTHROUGH)) { static_cast<Passthrough*>(c)->magic = 0; free(c); }
+    while (void* c = takeChild(s, MAGIC_BODY)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_SNAP)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_ANCHOR_BD)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_SDP)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
@@ -3272,6 +3282,144 @@ XRAPI_ATTR XrResult XRAPI_CALL CaptureSceneAsyncBD(XrSenseDataProviderBD h, cons
 
 XRAPI_ATTR XrResult XRAPI_CALL CaptureSceneCompleteBD(XrSenseDataProviderBD h, XrFutureEXT future, XrFutureCompletionEXT* c) { return completeSimple(h, future, FUT_CAPTURE, c); }
 
+// ------------------------------------------------------------------ bodies (Meta and Pico)
+/** A body tracker: [joints] is how many joints the app asked for (70 / 84 Meta, 16 / 24 Pico). */
+struct BodyTracker { uint32_t magic; Session* session; int joints; bool pico; };
+
+BodyTracker* asBody(uint64_t h) { return asObj<BodyTracker>(h, MAGIC_BODY); }
+
+/** The inferred body at [time], in stage space (hands from HyperMagic when the camera sees them). */
+bool bodyAt(Session* s, XrTime time, hxbody::Output* out) {
+    hxbody::Input in{};
+    if (!hxp::headPose(time, s->instance->cfg, &in.head)) return false;
+    in.standingEyeHeight = s->instance->cfg.eyeHeightM;
+    HxHandShared hands;
+    bool haveHands = hxp::readHands(&hands, true);
+    for (int side = 0; side < 2; side++) {
+        hxhands::Joint j[XR_HAND_JOINT_COUNT_EXT];
+        XrPosef camera;
+        in.handTracked[side] = haveHands && handInStage(s->instance->cfg, hands, side, j, &camera);
+        if (in.handTracked[side]) for (int k = 0; k < XR_HAND_JOINT_COUNT_EXT; k++) in.hand[side][k] = jointPose(camera, j[k]);
+    }
+    hxbody::solve(in, out);
+    return true;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateBodyTrackerFB(XrSession h, const XrBodyTrackerCreateInfoFB* ci, XrBodyTrackerFB* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_BODY_TRACKER_CREATE_INFO_FB || !out) return XR_ERROR_VALIDATION_FAILURE;
+    int joints;
+    if (ci->bodyJointSet == XR_BODY_JOINT_SET_DEFAULT_FB) joints = hxbody::kFbJoints;
+    else if (ci->bodyJointSet == XR_BODY_JOINT_SET_FULL_BODY_META && extEnabled(s->instance, XR_META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME)) joints = hxbody::kMetaJoints;
+    else return XR_ERROR_VALIDATION_FAILURE;
+    BodyTracker* b = alloc<BodyTracker>(MAGIC_BODY, s);
+    if (!b) return XR_ERROR_OUT_OF_MEMORY;
+    b->session = s; b->joints = joints; b->pico = false;
+    *out = reinterpret_cast<XrBodyTrackerFB>(b);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyBodyTrackerFB(XrBodyTrackerFB h) {
+    BodyTracker* b = asBody(reinterpret_cast<uint64_t>(h));
+    if (!b || b->pico) return XR_ERROR_HANDLE_INVALID;
+    release(b);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL LocateBodyJointsFB(XrBodyTrackerFB h, const XrBodyJointsLocateInfoFB* info, XrBodyJointLocationsFB* locs) {
+    BodyTracker* b = asBody(reinterpret_cast<uint64_t>(h));
+    if (!b || b->pico) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_BODY_JOINTS_LOCATE_INFO_FB || !locs || locs->type != XR_TYPE_BODY_JOINT_LOCATIONS_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (info->time <= 0) return XR_ERROR_TIME_INVALID;
+    if (locs->jointCount != static_cast<uint32_t>(b->joints) || !locs->jointLocations) return XR_ERROR_VALIDATION_FAILURE;
+    Space* base = asSpace(info->baseSpace);
+    if (!base) return XR_ERROR_HANDLE_INVALID;
+    locs->isActive = XR_FALSE;
+    locs->confidence = 0;
+    locs->skeletonChangedCount = 0;
+    locs->time = info->time;
+    for (uint32_t i = 0; i < locs->jointCount; i++) { locs->jointLocations[i].locationFlags = 0; locs->jointLocations[i].pose = hx::identity(); }
+    hxbody::Output body;
+    XrPosef basePose; bool bt;
+    if (!bodyAt(b->session, info->time, &body) || !spaceInStage(base, info->time, &basePose, &bt)) return XR_SUCCESS;
+    XrPosef inv = hx::inverse(basePose);
+    for (int i = 0; i < b->joints; i++) {
+        locs->jointLocations[i].pose = hx::compose(inv, body.pose[i]);
+        locs->jointLocations[i].locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+            (body.tracked[i] ? XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT : 0);
+    }
+    locs->isActive = XR_TRUE;
+    locs->confidence = 0.5f;  // half of it is inferred
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetBodySkeletonFB(XrBodyTrackerFB h, XrBodySkeletonFB* skeleton) {
+    BodyTracker* b = asBody(reinterpret_cast<uint64_t>(h));
+    if (!b || b->pico) return XR_ERROR_HANDLE_INVALID;
+    if (!skeleton || skeleton->type != XR_TYPE_BODY_SKELETON_FB) return XR_ERROR_VALIDATION_FAILURE;
+    if (skeleton->jointCount != static_cast<uint32_t>(b->joints) || !skeleton->joints) return XR_ERROR_VALIDATION_FAILURE;
+    // the reference pose: standing straight, arms hanging, at the user's height, facing -Z
+    hxbody::Input in{};
+    in.head = XrPosef{{0, 0, 0, 1}, {0, b->session->instance->cfg.eyeHeightM, 0}};
+    in.standingEyeHeight = b->session->instance->cfg.eyeHeightM;
+    hxbody::Output body;
+    hxbody::solve(in, &body);
+    for (int i = 0; i < b->joints; i++) {
+        skeleton->joints[i].joint = i;
+        skeleton->joints[i].parentJoint = hxbody::parentMeta(i);
+        skeleton->joints[i].pose = body.pose[i];
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateBodyTrackerBD(XrSession h, const XrBodyTrackerCreateInfoBD* ci, XrBodyTrackerBD* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_BODY_TRACKER_CREATE_INFO_BD || !out) return XR_ERROR_VALIDATION_FAILURE;
+    int joints;
+    if (ci->jointSet == XR_BODY_JOINT_SET_BODY_WITHOUT_ARM_BD) joints = 16;
+    else if (ci->jointSet == XR_BODY_JOINT_SET_FULL_BODY_JOINTS_BD) joints = hxbody::kBdJoints;
+    else return XR_ERROR_VALIDATION_FAILURE;
+    BodyTracker* b = alloc<BodyTracker>(MAGIC_BODY, s);
+    if (!b) return XR_ERROR_OUT_OF_MEMORY;
+    b->session = s; b->joints = joints; b->pico = true;
+    *out = reinterpret_cast<XrBodyTrackerBD>(b);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyBodyTrackerBD(XrBodyTrackerBD h) {
+    BodyTracker* b = asBody(reinterpret_cast<uint64_t>(h));
+    if (!b || !b->pico) return XR_ERROR_HANDLE_INVALID;
+    release(b);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL LocateBodyJointsBD(XrBodyTrackerBD h, const XrBodyJointsLocateInfoBD* info, XrBodyJointLocationsBD* locs) {
+    BodyTracker* b = asBody(reinterpret_cast<uint64_t>(h));
+    if (!b || !b->pico) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_BODY_JOINTS_LOCATE_INFO_BD || !locs || locs->type != XR_TYPE_BODY_JOINT_LOCATIONS_BD) return XR_ERROR_VALIDATION_FAILURE;
+    if (info->time <= 0) return XR_ERROR_TIME_INVALID;
+    if (locs->jointLocationCount != static_cast<uint32_t>(b->joints) || !locs->jointLocations) return XR_ERROR_VALIDATION_FAILURE;
+    Space* base = asSpace(info->baseSpace);
+    if (!base) return XR_ERROR_HANDLE_INVALID;
+    locs->allJointPosesTracked = XR_FALSE;
+    for (uint32_t i = 0; i < locs->jointLocationCount; i++) { locs->jointLocations[i].locationFlags = 0; locs->jointLocations[i].pose = hx::identity(); }
+    hxbody::Output body;
+    XrPosef basePose; bool bt;
+    if (!bodyAt(b->session, info->time, &body) || !spaceInStage(base, info->time, &basePose, &bt)) return XR_SUCCESS;
+    XrPosef joints[hxbody::kBdJoints];
+    bool tracked[hxbody::kBdJoints];
+    hxbody::toBD(body, joints, tracked);
+    XrPosef inv = hx::inverse(basePose);
+    for (int i = 0; i < b->joints; i++) {
+        locs->jointLocations[i].pose = hx::compose(inv, joints[i]);
+        locs->jointLocations[i].locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+            (tracked[i] ? XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT : 0);
+    }
+    return XR_SUCCESS;
+}
+
 // ------------------------------------------------------------------ smaller Meta extensions
 /** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
 const char* const kPerfCounters[] = {
@@ -3657,6 +3805,13 @@ const Entry kEntries[] = {
     HX_EXT(SaveSpaceListFB, XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME),
     HX_EXT(ResumeSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
     HX_EXT(PauseSimultaneousHandsAndControllersTrackingMETA, XR_META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME),
+    HX_EXT(CreateBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(DestroyBodyTrackerFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(LocateBodyJointsFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(GetBodySkeletonFB, XR_FB_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(CreateBodyTrackerBD, XR_BD_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(DestroyBodyTrackerBD, XR_BD_BODY_TRACKING_EXTENSION_NAME),
+    HX_EXT(LocateBodyJointsBD, XR_BD_BODY_TRACKING_EXTENSION_NAME),
     HX_EXT(PollFutureEXT, XR_EXT_FUTURE_EXTENSION_NAME),
     HX_EXT(CancelFutureEXT, XR_EXT_FUTURE_EXTENSION_NAME),
     HX_EXT(CreateSenseDataProviderBD, XR_BD_SPATIAL_SENSING_EXTENSION_NAME),

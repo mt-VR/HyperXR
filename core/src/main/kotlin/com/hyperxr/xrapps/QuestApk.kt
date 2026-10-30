@@ -82,6 +82,8 @@ object QuestApk {
         // Pico spatial sensing: anchors, the room, its planes and mesh (and the futures they use)
         "XR_EXT_future", "XR_BD_future_progress", "XR_BD_spatial_sensing", "XR_BD_spatial_anchor", "XR_BD_spatial_scene",
         "XR_BD_spatial_mesh", "XR_BD_spatial_plane",
+        // bodies inferred from the head and the hands (Meta upper / full body, Pico)
+        "XR_FB_body_tracking", "XR_META_body_tracking_full_body", "XR_BD_body_tracking",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */
