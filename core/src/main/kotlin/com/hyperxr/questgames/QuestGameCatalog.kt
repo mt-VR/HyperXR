@@ -33,6 +33,8 @@ object QuestGameCatalog {
             "Feche a mão numa agarra (ou aperte o gatilho do controle) e puxe para subir um penhasco de 27 m; soltando tudo, você cai até a última plataforma"),
         Info("pipeclimb", "Escalada de Cano", "jogos de escalar com uma ferramenta (Getting Over It)", false, "plumbing",
             "Você só tem um cano na mão e não anda: engate nas barras e puxe, apoie a ponta no chão e empurre, salte os vãos. Nas paredes de vidro o cano escorrega"),
+        Info("encontro", "Encontro", "salas sociais em VR", false, "group",
+            "Escolha uma sala (20 mapas ou um glTF seu) e um avatar (30, de domínio público) e encontre quem está online na mesma sala. Ande com o analógico ou aponte para o chão, faça a pinça e solte"),
         Info("macacada", "Macacada", "Gorilla Tag", false, "pets",
             "Pega-pega de gorilas: ande e pule só com os braços (empurre o chão, escale árvores) e pegue todos; online com outros jogadores do HyperMagic"),
         Info("babuino", "Babuíno da Meia-Noite", "jogos de terror de gorila (Scary Baboon)", false, "pets",
@@ -104,5 +106,5 @@ object QuestGameCatalog {
     val ids = games.map { it.id }.toSet()
 
     /** Games that also play with a controller (the trigger grabs, shoots or touches). */
-    val controllerToo = setOf("climb", "pipeclimb", "macacada", "babuino", "expediente", "slowtime", "neonrail", "drumboat", "domeracket", "slingshot", "basketball", "bowling", "darts", "dodgeball", "zombieyard", "saber", "skeet", "paintball", "zerog", "bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon", "sketch", "kayak", "wingsuit", "tableracing", "jewelthief")
+    val controllerToo = setOf("encontro", "climb", "pipeclimb", "macacada", "babuino", "expediente", "slowtime", "neonrail", "drumboat", "domeracket", "slingshot", "basketball", "bowling", "darts", "dodgeball", "zombieyard", "saber", "skeet", "paintball", "zerog", "bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon", "sketch", "kayak", "wingsuit", "tableracing", "jewelthief")
 }

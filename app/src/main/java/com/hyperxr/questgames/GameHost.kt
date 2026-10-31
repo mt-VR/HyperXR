@@ -36,6 +36,8 @@ abstract class QuestGame(val host: GameHost) {
     open val shadowZ = -1.2f
     /** The game draws the player's hands itself (or something in their place): the system's are hidden. */
     open val hidesHands = false
+    /** A game's own panel (menus, lists), shown and clickable next to the HUD. */
+    open val menu: com.hyperxr.spatialui.XrPanel? = null
     abstract fun start()
     abstract fun update(dt: Float)
     abstract fun draw()
@@ -138,7 +140,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
 
     fun newGame() {
         game?.release()
-        game = QuestGames.create(id, this)?.also { it.start() }
+        game = QuestGames.create(id, this)?.also { it.start(); it.menu?.let { m -> placeMenu(m) } }
         hud.dirty = true
     }
 
@@ -212,6 +214,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
             g.status = "Conecte um controle: Joy-Con, o celular controle (HyperConnect) ou um gamepad Bluetooth"
         } else if (!g.over) g.update(dt)
         hud.update(dt)
+        game?.menu?.let { if (it.visible) it.update(dt) }
     }
 
     private val lv = Vec3(); private val lw = Vec3()
@@ -249,6 +252,7 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
         g.draw()
         particles.draw()
         hud.submit(sc)
+        g.menu?.let { if (it.visible) it.submit(sc) }
     }
 
     fun dirToWorld(g: Vec3, out: Vec3): Vec3 = origin.orientation.rotate(g, out)
@@ -284,6 +288,25 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
         bmp.recycle()
         textures[name] = t
         return t
+    }
+
+    /** Draws a model the game loaded itself (not from the assets) at game position, turned by [yaw], scaled. */
+    fun drawGpuModel(m: GpuModel, x: Float, y: Float, z: Float, yaw: Float = 0f, scale: Float = 1f, shadow: Boolean = true, tint: FloatArray? = null) {
+        val d = ctx.scene.addDraw()
+        d.model = m
+        d.castShadow = shadow
+        (tint ?: WHITE).copyInto(d.color)
+        toWorld(x, y, z, pos)
+        Quat.fromAxisAngle(0f, 1f, 0f, yaw, rot)
+        origin.orientation.mul(rot, rot)
+        Mat4.compose(pos, rot, scale, scale, scale, d.matrix)
+    }
+
+    /** Puts a game's [QuestGame.menu] to the right of where the player looked at the start. */
+    fun placeMenu(p: com.hyperxr.spatialui.XrPanel) {
+        toWorld(1.0f, 1.45f, -1.15f, p.pose.position)
+        val q = Quat.fromAxisAngle(0f, 1f, 0f, -0.65f)
+        origin.orientation.mul(q, p.pose.orientation)
     }
 
     /** Draws a model at game position, turned by [yaw] (and [pitch], [roll]), scaled, tinted. */

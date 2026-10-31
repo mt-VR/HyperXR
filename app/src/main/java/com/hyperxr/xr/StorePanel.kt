@@ -264,7 +264,7 @@ class StorePanel(
     companion object {
         /** Which shelf each HyperMagic game is on. */
         private val GENRES: Map<String, String> = buildMap {
-            for (g in listOf("slowtime", "drones", "zombieyard", "saber", "spells", "skeet", "paintball", "zerog", "boxing", "macacada")) put(g, "action")
+            for (g in listOf("slowtime", "drones", "zombieyard", "saber", "spells", "skeet", "paintball", "zerog", "boxing", "macacada", "encontro")) put(g, "action")
             for (g in listOf("golf", "pingpong", "archery", "slingshot", "basketball", "bowling", "darts", "dodgeball", "fishing", "kayak", "wingsuit", "tableracing")) put(g, "sports")
             for (g in listOf("rhythm", "fruit", "neonrail", "orbs", "shapewall", "drumboat", "fittargets", "domeracket")) put(g, "rhythm")
             for (g in listOf("bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon")) put(g, "puzzle")

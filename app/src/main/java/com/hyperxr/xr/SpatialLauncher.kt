@@ -248,7 +248,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         }
         lab?.let { surfaces += it.panel }
         ocean?.let { surfaces += it.panel }
-        game?.let { surfaces += it.hud }
+        game?.let { surfaces += it.hud; it.game?.menu?.let { m -> if (m.visible) surfaces += m } }
         if (tutorial == null && !app.settings.current.onboarding.xrTutorialDone)
             tutorial = XrTutorialPanel(ctx) { app.settings.update { it.copy(onboarding = it.onboarding.copy(xrTutorialDone = true)) } }
         tutorial?.let { t -> if (t.visible) surfaces += t else { t.release(); tutorial = null } }
