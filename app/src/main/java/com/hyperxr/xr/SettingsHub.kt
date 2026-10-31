@@ -75,10 +75,6 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
             Item.Action("Capturar sua sala em 360°", "Gire no lugar e sua sala vira um ambiente") { open("roomcapture") },
             Item.Action("Desenho no ar", "Faça a pinça e desenhe linhas de luz no espaço") { open("airdraw") },
             Item.Toggle("Ambiente pela hora do dia", "Troca sozinho de manhã, à tarde e à noite", { it.launcher.autoEnvironmentByTime }) { s, v -> s.copy(launcher = s.launcher.copy(autoEnvironmentByTime = v)) },
-            Item.Action("Tema", "Cores e cantos dos painéis: toque para trocar") {
-                settings.update { it.copy(launcher = it.launcher.copy(theme = com.hyperxr.settings.XrThemeStyle.entries[(it.launcher.theme.ordinal + 1) % com.hyperxr.settings.XrThemeStyle.entries.size])) }
-            },
-            Item.Info("Tema atual") { settings.current.launcher.theme.label + ": " + settings.current.launcher.theme.description },
             Item.Toggle("Reabrir janelas", "As janelas da última vez voltam ao abrir", { it.launcher.restoreWindows }) { s, v -> s.copy(launcher = s.launcher.copy(restoreWindows = v)) },
         )),
         Category("storage", "storage", "Armazenamento", storageText(), listOf(

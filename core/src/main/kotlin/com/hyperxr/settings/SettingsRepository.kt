@@ -25,7 +25,8 @@ class FileSettingsStorage(private val file: File) : SettingsStorage {
 }
 
 class SettingsRepository(private val storage: SettingsStorage) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
+    // coerceInputValues: a value this version no longer knows (a removed option) falls back to its default
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true; coerceInputValues = true }
     private val listeners = CopyOnWriteArrayList<(HyperSettings) -> Unit>()
 
     @Volatile

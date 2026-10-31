@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
@@ -73,14 +76,11 @@ fun HomeSection(a: MainActivity) {
 fun LauncherSection(a: MainActivity) {
     val s = a.settingsState.launcher
     val model = remember { LauncherModel { BuiltinApps.all } }
+    ThemeCard(a, s.theme)
     SectionCard("Interface", "A mesma escolha pode ser trocada dentro do XR, em Ajustes, ou dizendo \"modo meta\" ou \"modo hyper\".") {
         Segmented(listOf("HYPER" to "Hyper", "META" to "Meta"), s.mode.name) { k -> a.app.settings.setLauncherMode(LauncherMode.valueOf(k)) }
         Note(if (s.mode == LauncherMode.HYPER) "Hyper: a interface do HyperMagic. Janelas lado a lado sobre a dock (relógio, Missões, Loja, Pessoas, apps fixados, Ajustes rápidos, Biblioteca); a Biblioteca abre pela dock."
         else "Meta: como o Meta Horizon OS. A Biblioteca fica à sua frente, com a lista à esquerda, a grade de ícones e o filtro e a ordem à direita; embaixo, a barra de botões redondos com a hora, o Wi-Fi e a bateria. Sem dock: segure um app para fixá-lo no topo da Biblioteca.")
-        ChoiceRow("Tema dos painéis no XR", com.hyperxr.settings.XrThemeStyle.entries, s.theme, { it.label }) { v ->
-            a.update { it.copy(launcher = it.launcher.copy(theme = v)) }
-        }
-        Note(s.theme.description + ". Temas próprios do HyperMagic; alguns lembram o clima de outros sistemas de VR, sem copiar logos nem telas.")
         ToggleRow("HyperBot", s.hyperBot, "O mascote do HyperMagic: um robozinho azul que fica na sua mesa (com ARCore ele acha o tampo), te acompanha com o olhar, anda, acena, dança com música e fala de vez em quando. Toque nele com a pinça; segure a pinça para mudar de lugar") { v ->
             a.update { it.copy(launcher = it.launcher.copy(hyperBot = v)) }
         }
@@ -362,5 +362,43 @@ fun NetworkSection(a: MainActivity) {
         ToggleRow("Baixar apenas em Wi-Fi", s.downloadsOnWifiOnly) { v -> a.update { it.copy(network = it.network.copy(downloadsOnWifiOnly = v)) } }
         ToggleRow("Apps web em modo desktop", s.webAppsDesktopMode, "Igual ao \"site para computador\" dos navegadores") { v -> a.update { it.copy(network = it.network.copy(webAppsDesktopMode = v)) } }
         Note("Pacotes .hyperx só acessam a rede com a permissão 'network' e apenas hosts HTTPS declarados no manifesto.")
+    }
+}
+
+/** Theme of the XR panels: one card per style with its colours, tap to choose. */
+@Composable
+private fun ThemeCard(a: MainActivity, current: com.hyperxr.settings.XrThemeStyle) {
+    SectionCard("Tema", "Cores e cantos dos painéis no XR. Temas próprios do HyperMagic; alguns lembram o clima de outros sistemas de VR, sem copiar logos nem telas.") {
+        for (t in com.hyperxr.settings.XrThemeStyle.entries) {
+            val p = t.palette
+            val sel = t == current
+            androidx.compose.foundation.layout.Row(
+                androidx.compose.ui.Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                    .background(if (sel) HxColors.accent.copy(alpha = 0.22f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickableNoRipple { a.update { it.copy(launcher = it.launcher.copy(theme = t)) } }
+                    .padding(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                // a little panel in the theme's colours: background, a button, the accent
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier.size(96.dp, 56.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape((p.panelRadiusM * 250).dp))
+                        .background(androidx.compose.ui.graphics.Color(p.panelBottom))
+                        .padding(8.dp),
+                ) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(46.dp, 16.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape((16 * p.controlRounding).dp))
+                        .background(androidx.compose.ui.graphics.Color(p.accent)))
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(top = 22.dp).size(70.dp, 16.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape((16 * p.controlRounding).dp))
+                        .background(androidx.compose.ui.graphics.Color(p.button)))
+                }
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 14.dp).weight(1f)) {
+                    Text(t.label + if (sel) "  ✓" else "", color = HxColors.text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                    Note(t.description)
+                }
+            }
+        }
     }
 }
