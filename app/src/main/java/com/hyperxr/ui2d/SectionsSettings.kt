@@ -242,14 +242,10 @@ fun HandsSection(a: MainActivity) {
         ToggleRow("Pinça leve", h.lightPinch, "Clica quando o polegar chega na metade do caminho até o indicador, sem precisar apertar um dedo no outro") { v ->
             a.update { it.copy(handTracking = it.handTracking.copy(lightPinch = v)) }
         }
-        ChoiceRow("Clique das mãos", com.hyperxr.settings.ClickGesture.entries, h.clickGesture, {
-            when (it) {
-                com.hyperxr.settings.ClickGesture.SHORT_RAY -> "Raio curto + pinça"
-                com.hyperxr.settings.ClickGesture.POINT_PUSH -> "Apontar e empurrar"
-                com.hyperxr.settings.ClickGesture.PINCH -> "Bolinha da pinça"
-            }
-        }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(clickGesture = v)) } }
-        Note("Raio curto: um raio curto sai do indicador e mira; feche o polegar no indicador para clicar, segure para arrastar.")
+        ToggleRow("Clicar apontando e empurrando", h.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH,
+            "Ligado: aponte com o indicador e empurre o dedo para clicar (segure empurrado para arrastar). Desligado: pinça") { v ->
+            a.update { it.copy(handTracking = it.handTracking.copy(clickGesture = if (v) com.hyperxr.settings.ClickGesture.POINT_PUSH else com.hyperxr.settings.ClickGesture.PINCH)) }
+        }
         ChoiceRow("Visual das mãos", listOf(com.hyperxr.settings.HandVisual.AURA, com.hyperxr.settings.HandVisual.NONE), h.handVisual, {
             if (it == com.hyperxr.settings.HandVisual.NONE) "Ocultas" else "Contorno"
         }) { v -> a.update { it.copy(handTracking = it.handTracking.copy(handVisual = v)) } }

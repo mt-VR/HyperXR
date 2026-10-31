@@ -347,12 +347,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val pinchPoint = Vec3()
     private val pinchBall = arrayOf(Vec3(), Vec3())
     private val ballPointers = arrayOf(com.hyperxr.input.BallPointer(), com.hyperxr.input.BallPointer())
-    private val shortRays = arrayOf(com.hyperxr.input.ShortRayPointer(), com.hyperxr.input.ShortRayPointer())
-    private val shortRayVisible = BooleanArray(2)
-    private val shortRayLine = Array(2) { com.hyperxr.math.Ray() }
-    private val shortRayMid = Vec3()
-    private val shortRayRot = com.hyperxr.math.Quat()
-    private val yAxis = Vec3(0f, 1f, 0f)
     private val pinchBallVisible = BooleanArray(2)
     private val identityQ = Quat()
     private val MICRO_SCROLL_SCREENS = 1.5f
@@ -424,9 +418,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         for (i in 0..1) {
             val h = if (input.holding[i]) notPointing[i] else input.hands[i]
             // pinch-and-hold away from any target opens the radial menu around this hand
-            // the short ray clicks with a plain pinch (thresholds, no latch); the other modes keep the gesture's pinch
-            val pinching = if (app.settings.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.SHORT_RAY) h.isUsable && shortRays[i].pinch(h.pinchRatio)
-                else h.gesture == com.hyperxr.handtracking.Gesture.PINCH
+            val pinching = h.gesture == com.hyperxr.handtracking.Gesture.PINCH
             val overTarget = handRays[i].hovered != null || handRays[i].captured != null || touches[i].hovered != null || touchRays[i].hovered != null || linkDrag.active ||
                 lab?.handBusy?.get(i) == true
             if (h.isUsable) {
@@ -448,7 +440,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             // Point and push (default): the index fingertip aims, a short push towards the target
             // clicks, holding the push drags. Pinch mode keeps the older pinch ball.
             val pointMode = app.settings.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.POINT_PUSH
-            val shortMode = app.settings.current.handTracking.clickGesture == com.hyperxr.settings.ClickGesture.SHORT_RAY
             val pushed = pointMode && pointPush[i].update(if (h.isUsable && !menuOpen && !labBusy) h.joints else null, input.head.position,
                 h.depthSource == DepthSource.HAND_SIZE_PRIOR, now)
             if (h.isUsable) {
@@ -456,15 +447,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 else pinchBall[i].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
             }
             val raw = when {
-                menuOpen || labBusy || !h.isUsable -> { ballPointers[i].reset(); shortRays[i].reset(); null }
-                shortMode -> shortRays[i].update(h, input.head, rightHand = i == 1, now = now, out = ray)
+                menuOpen || labBusy || !h.isUsable -> { ballPointers[i].reset(); null }
                 pointMode -> if (pointPush[i].pointing) ballPointers[i].update(pinchBall[i], pushed, input.head.position, now, ray) else { ballPointers[i].reset(); null }
                 app.settings.current.handTracking.ballPointer -> ballPointers[i].update(pinchBall[i], pinching, input.head.position, now, ray)
                 else -> com.hyperxr.input.HandRay.compute(h, input.head, rightHand = i == 1, ray)
             }
-            pinchBallVisible[i] = h.isUsable && !labBusy && !shortMode && (!pointMode || pointPush[i].pointing)
-            shortRayVisible[i] = shortMode && raw != null
-            if (raw != null && shortMode) { shortRayLine[i].origin.set(raw.origin); shortRayLine[i].direction.set(raw.direction) }
+            pinchBallVisible[i] = h.isUsable && !labBusy && (!pointMode || pointPush[i].pointing)
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
             // a fist (no finger extended) grabs: it moves windows, pushing/pulling them in depth
             val fist = h.isUsable && (h.gesture == com.hyperxr.handtracking.Gesture.FIST || h.gesture == com.hyperxr.handtracking.Gesture.GRAB)
@@ -472,12 +460,11 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             // the click (push or pinch) is read from the held state so a lost frame does not release it
             val pinch = if (handRays[i].grabbing) fist || (raw == null && handRays[i].captured != null && handRay != null)
                 else if (pointMode) pushed || (raw == null && handRays[i].captured != null && handRay != null && pointPush[i].pressed)
-                else if (shortMode) shortRays[i].pressed
                 else h.gesture == com.hyperxr.handtracking.Gesture.PINCH || (raw == null && handRays[i].captured != null && handRay != null)
             handRays[i].update(handRay, pinch, surfaces, now)
             if (handRay != null) recordPointer(5 + i, handRay, pinch) else pointerRays.remove(5 + i)
             handRayVisible[i] = handRay != null
-            pinchStrength[i] = if (!h.isUsable) 0f else if (pointMode) pointPush[i].progress else if (shortMode) shortRays[i].strength else h.pinchStrength
+            pinchStrength[i] = if (!h.isUsable) 0f else if (pointMode) pointPush[i].progress else h.pinchStrength
             pushPressed[i] = pointMode && pointPush[i].pressed
             if (handRay != null) { trackHit(handRays[i], handRay); dragWindows(handRays[i], handRay, pinch, if (h.isUsable && handRays[i].grabbing) pinchBall[i] else null) }
             // microgestures: thumb sliding along the index scrolls, a thumb double tap goes back
@@ -727,24 +714,6 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             faceTowards(p.pose, ctx.input.head.position)
             p.width = 0.018f; p.height = 0.018f; p.radius = 0f
             p.overlay = true
-        }
-        // short ray: a thin beam of [ShortRayPointer.length] from the index knuckle; white, filling
-        // with blue as the thumb closes, pink while the pinch (the click) is held
-        for (i in 0..1) {
-            if (!shortRayVisible[i]) continue
-            val sr = shortRays[i]
-            val line = shortRayLine[i]
-            val beam = ctx.scene.addDraw()
-            beam.mesh = ctx.renderer.cylinder
-            beam.unlit = true
-            beam.late = true
-            val k = sr.strength
-            if (sr.pressed || handRays[i].captured != null) { beam.color[0] = 0.94f; beam.color[1] = 0.36f; beam.color[2] = 0.75f }
-            else { beam.color[0] = 1f - 0.45f * k; beam.color[1] = 1f - 0.3f * k; beam.color[2] = 1f }
-            beam.color[3] = 0.9f
-            shortRayMid.set(line.origin).addScaled(line.direction, sr.length / 2)
-            com.hyperxr.math.Quat.fromTo(yAxis, line.direction, shortRayRot)
-            com.hyperxr.math.Mat4.compose(shortRayMid, shortRayRot, 0.006f, sr.length, 0.006f, beam.matrix)
         }
         // pinch ball: a small sphere between thumb and index, no beam. It fills with colour as the
         // fingers close and turns pink when the pinch (the click) is held.

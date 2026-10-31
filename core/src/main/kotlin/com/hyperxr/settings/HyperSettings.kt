@@ -105,7 +105,7 @@ data class HandTrackingSettings(
     val kalmanProcessNoise: Float = 3f,
     val directTouch: Boolean = true,
     /** How a hand clicks from a distance: pinch (default), or point with the index finger and push. */
-    val clickGesture: ClickGesture = ClickGesture.SHORT_RAY,
+    val clickGesture: ClickGesture = ClickGesture.PINCH,
     /** Light pinch: clicks when the thumb closes halfway towards the index, no squeezing. */
     val lightPinch: Boolean = true,
     /** OpenXR games (Meta / Pico) get the hands: HyperMagic tracks them with the camera while the game runs. */
@@ -131,8 +131,7 @@ data class HandTrackingSettings(
 
 @Serializable
 /** The hands are drawn as the lilac aura or not at all (SKELETON and BOTH are read from old settings files and become AURA). */
-/** How a tracked hand clicks: a short ray clicked with a plain pinch (default), point and push, or the pinch ball. */
-enum class ClickGesture { SHORT_RAY, POINT_PUSH, PINCH }
+enum class ClickGesture { POINT_PUSH, PINCH }
 
 enum class HandVisual { AURA, NONE, SKELETON, BOTH }
 
@@ -251,7 +250,7 @@ data class HyperSettings(
     val onboarding: OnboardingSettings = OnboardingSettings(),
 ) {
     companion object {
-        const val CURRENT_VERSION = 6
+        const val CURRENT_VERSION = 5
 
         /** Settings saved by an older version, brought to the current defaults where they changed. */
         fun migrate(s: HyperSettings): HyperSettings {
@@ -265,8 +264,6 @@ data class HyperSettings(
             if (m.version < 3) m = m.copy(controllers = m.controllers.copy(dwellClick = false))
             // v5: back to the pinch click (point-and-push stays available as an option)
             if (m.version < 5) m = m.copy(handTracking = m.handTracking.copy(clickGesture = ClickGesture.PINCH))
-            // v6: the short ray with a plain pinch (no latch) is the hand's click
-            if (m.version < 6) m = m.copy(handTracking = m.handTracking.copy(clickGesture = ClickGesture.SHORT_RAY))
             return if (m.version < CURRENT_VERSION) m.copy(version = CURRENT_VERSION) else m
         }
     }
