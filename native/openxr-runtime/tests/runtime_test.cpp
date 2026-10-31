@@ -14,6 +14,7 @@
 #include "../src/hx_handmesh.h"
 #include "../src/hx_rendermodel.h"
 #include "../src/hx_body.h"
+#include "../src/hx_keyboard.h"
 
 extern "C" XrResult xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 extern "C" void hxTestSetHead(float qx, float qy, float qz, float qw, int tracked);
@@ -2398,6 +2399,190 @@ static void testTriangleMeshProjection() {
     CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
 }
 
+/** Meta's virtual keyboard: placement, its model, and typing on it with rays and fingertips. */
+static void testVirtualKeyboard() {
+    // the layout: every key inside the plate, none overlapping
+    hxkeyboard::Key keys[48];
+    int nk = hxkeyboard::layout(keys);
+    CHECK(nk > 40 && nk <= 48);
+    int overlaps = 0, outside = 0;
+    for (int i = 0; i < nk; i++) {
+        if (keys[i].x0 < -hxkeyboard::kWidth / 2 || keys[i].x1 > hxkeyboard::kWidth / 2 ||
+            keys[i].y0 < -hxkeyboard::kHeight / 2 || keys[i].y1 > hxkeyboard::kHeight / 2) outside++;
+        for (int j = i + 1; j < nk; j++)
+            if (keys[i].x0 < keys[j].x1 && keys[j].x0 < keys[i].x1 && keys[i].y0 < keys[j].y1 && keys[j].y0 < keys[i].y1) overlaps++;
+    }
+    CHECK(overlaps == 0 && outside == 0);
+    auto centre = [&](int kind, char ch, float* x, float* y) {
+        for (int i = 0; i < nk; i++)
+            if (keys[i].kind == kind && keys[i].ch == ch) { *x = (keys[i].x0 + keys[i].x1) / 2; *y = (keys[i].y0 + keys[i].y1) / 2; return; }
+        *x = *y = 99;
+    };
+    const char* exts[] = {XR_MND_HEADLESS_EXTENSION_NAME, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME, XR_FB_RENDER_MODEL_EXTENSION_NAME};
+    XrResult r;
+    XrInstance inst = createInstance(XR_MAKE_VERSION(1, 0, 0), exts, 3, &r);
+    CHECK(r == XR_SUCCESS);
+    if (r != XR_SUCCESS) return;
+    LOAD(inst, xrGetSystem); LOAD(inst, xrGetSystemProperties); LOAD(inst, xrCreateSession); LOAD(inst, xrDestroySession);
+    LOAD(inst, xrDestroyInstance); LOAD(inst, xrCreateReferenceSpace); LOAD(inst, xrLocateSpace); LOAD(inst, xrStringToPath);
+    LOAD(inst, xrCreateVirtualKeyboardMETA); LOAD(inst, xrDestroyVirtualKeyboardMETA); LOAD(inst, xrCreateVirtualKeyboardSpaceMETA);
+    LOAD(inst, xrSuggestVirtualKeyboardLocationMETA); LOAD(inst, xrGetVirtualKeyboardScaleMETA);
+    LOAD(inst, xrSetVirtualKeyboardModelVisibilityMETA); LOAD(inst, xrSendVirtualKeyboardInputMETA);
+    LOAD(inst, xrGetVirtualKeyboardDirtyTexturesMETA); LOAD(inst, xrChangeVirtualKeyboardTextContextMETA);
+    LOAD(inst, xrEnumerateRenderModelPathsFB); LOAD(inst, xrGetRenderModelPropertiesFB); LOAD(inst, xrLoadRenderModelFB);
+    XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId sys = 0;
+    xrGetSystem(inst, &sgi, &sys);
+    XrSystemVirtualKeyboardPropertiesMETA vkp{XR_TYPE_SYSTEM_VIRTUAL_KEYBOARD_PROPERTIES_META};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &vkp;
+    CHECK_RESULT(xrGetSystemProperties(inst, sys, &sp), XR_SUCCESS);
+    CHECK(vkp.supportsVirtualKeyboard == XR_TRUE);
+    XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};
+    ci.systemId = sys;
+    XrSession s;
+    CHECK_RESULT(xrCreateSession(inst, &ci, &s), XR_SUCCESS);
+    XrReferenceSpaceCreateInfo rci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; rci.poseInReferenceSpace.orientation.w = 1;
+    XrSpace stage;
+    CHECK_RESULT(xrCreateReferenceSpace(s, &rci, &stage), XR_SUCCESS);
+    XrVirtualKeyboardCreateInfoMETA kci{XR_TYPE_VIRTUAL_KEYBOARD_CREATE_INFO_META};
+    XrVirtualKeyboardMETA kb, second;
+    CHECK_RESULT(xrCreateVirtualKeyboardMETA(s, &kci, &kb), XR_SUCCESS);
+    CHECK_RESULT(xrCreateVirtualKeyboardMETA(s, &kci, &second), XR_ERROR_LIMIT_REACHED);
+    // far: in front of and below the eyes, bigger; direct: within reach
+    XrVirtualKeyboardSpaceCreateInfoMETA ksci{XR_TYPE_VIRTUAL_KEYBOARD_SPACE_CREATE_INFO_META};
+    ksci.locationType = XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_FAR_META; ksci.space = stage; ksci.poseInSpace.orientation.w = 1;
+    XrSpace kspace;
+    CHECK_RESULT(xrCreateVirtualKeyboardSpaceMETA(s, kb, &ksci, &kspace), XR_SUCCESS);
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    CHECK_RESULT(xrLocateSpace(kspace, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK((loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) && loc.pose.position.z < -0.5f && loc.pose.position.y < 1.6f);
+    float scale = 0;
+    CHECK_RESULT(xrGetVirtualKeyboardScaleMETA(kb, &scale), XR_SUCCESS);
+    CHECK(fabsf(scale - 1.5f) < 1e-4f);
+    XrVirtualKeyboardLocationInfoMETA li{XR_TYPE_VIRTUAL_KEYBOARD_LOCATION_INFO_META};
+    li.locationType = XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_DIRECT_META;
+    CHECK_RESULT(xrSuggestVirtualKeyboardLocationMETA(kb, &li), XR_SUCCESS);
+    CHECK_RESULT(xrLocateSpace(kspace, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK(loc.pose.position.z > -0.5f && loc.pose.position.z < -0.2f);
+    CHECK_RESULT(xrGetVirtualKeyboardScaleMETA(kb, &scale), XR_SUCCESS);
+    CHECK(fabsf(scale - 1.0f) < 1e-4f);
+    li.locationType = XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_CUSTOM_META; li.space = stage; li.poseInSpace.orientation.w = 1;
+    li.poseInSpace.position = {0.2f, 1.0f, -0.6f}; li.scale = 2.0f;
+    CHECK_RESULT(xrSuggestVirtualKeyboardLocationMETA(kb, &li), XR_SUCCESS);
+    CHECK_RESULT(xrLocateSpace(kspace, stage, monoNs(), &loc), XR_SUCCESS);
+    CHECK(fabsf(loc.pose.position.x - 0.2f) < 1e-4f && fabsf(loc.pose.position.y - 1.0f) < 1e-4f && fabsf(loc.pose.position.z + 0.6f) < 1e-4f);
+    CHECK_RESULT(xrGetVirtualKeyboardScaleMETA(kb, &scale), XR_SUCCESS);
+    CHECK(fabsf(scale - 2.0f) < 1e-4f);
+    li.space = XR_NULL_HANDLE;
+    CHECK_RESULT(xrSuggestVirtualKeyboardLocationMETA(kb, &li), XR_ERROR_HANDLE_INVALID);
+    // the keyboard's model, through XR_FB_render_model
+    uint32_t n = 0;
+    CHECK_RESULT(xrEnumerateRenderModelPathsFB(s, 0, &n, nullptr), XR_SUCCESS);
+    CHECK(n == 3);
+    XrPath kpath;
+    xrStringToPath(inst, "/model_meta/keyboard/virtual", &kpath);
+    XrRenderModelPropertiesFB props{XR_TYPE_RENDER_MODEL_PROPERTIES_FB};
+    CHECK_RESULT(xrGetRenderModelPropertiesFB(s, kpath, &props), XR_SUCCESS);
+    XrRenderModelLoadInfoFB rli{XR_TYPE_RENDER_MODEL_LOAD_INFO_FB};
+    rli.modelKey = props.modelKey;
+    XrRenderModelBufferFB buf{XR_TYPE_RENDER_MODEL_BUFFER_FB};
+    CHECK_RESULT(xrLoadRenderModelFB(s, &rli, &buf), XR_SUCCESS);
+    static uint8_t glb[4 << 20];
+    CHECK(buf.bufferCountOutput > 1000 && buf.bufferCountOutput <= sizeof(glb));
+    buf.bufferCapacityInput = sizeof(glb); buf.buffer = glb;
+    CHECK_RESULT(xrLoadRenderModelFB(s, &rli, &buf), XR_SUCCESS);
+    uint32_t magic, total, jsonLen, binLen, binType;
+    memcpy(&magic, glb, 4); memcpy(&total, glb + 8, 4); memcpy(&jsonLen, glb + 12, 4);
+    memcpy(&binLen, glb + 20 + jsonLen, 4); memcpy(&binType, glb + 24 + jsonLen, 4);
+    CHECK(magic == 0x46546C67u && total == buf.bufferCountOutput && binType == 0x004E4942u && 28 + jsonLen + binLen == total);
+    static char json[8192];
+    memset(json, 0, sizeof(json));
+    memcpy(json, glb + 20, jsonLen < sizeof(json) - 1 ? jsonLen : sizeof(json) - 1);
+    CHECK(strstr(json, "image/png") && strstr(json, "TEXCOORD_0"));
+    static const uint8_t pngSig[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    bool hasPng = false;
+    for (uint32_t i = 28 + jsonLen; i + 8 <= total && !hasPng; i++) hasPng = memcmp(glb + i, pngSig, 8) == 0;
+    CHECK(hasPng);
+    uint32_t dirty = 7;
+    CHECK_RESULT(xrGetVirtualKeyboardDirtyTexturesMETA(kb, 0, &dirty, nullptr), XR_SUCCESS);
+    CHECK(dirty == 0);
+    XrVirtualKeyboardTextContextChangeInfoMETA tci{XR_TYPE_VIRTUAL_KEYBOARD_TEXT_CONTEXT_CHANGE_INFO_META};
+    tci.textContext = "hello";
+    CHECK_RESULT(xrChangeVirtualKeyboardTextContextMETA(kb, &tci), XR_SUCCESS);
+    // shown and hidden
+    XrEventDataBuffer ev;
+    XrVirtualKeyboardModelVisibilitySetInfoMETA vis{XR_TYPE_VIRTUAL_KEYBOARD_MODEL_VISIBILITY_SET_INFO_META};
+    vis.visible = XR_TRUE;
+    CHECK_RESULT(xrSetVirtualKeyboardModelVisibilityMETA(kb, &vis), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_SHOWN_META, &ev));
+    // typing with a ray from 30 cm in front of the keys, in the keyboard's own space (scale 2)
+    XrVirtualKeyboardInputInfoMETA in{XR_TYPE_VIRTUAL_KEYBOARD_INPUT_INFO_META};
+    in.inputSource = XR_VIRTUAL_KEYBOARD_INPUT_SOURCE_CONTROLLER_RAY_RIGHT_META; in.inputSpace = kspace; in.inputPoseInSpace.orientation.w = 1;
+    XrPosef root{{0, 0, 0, 1}, {0, 0, 0}};
+    auto aim = [&](int kind, char ch, bool press) {
+        float x, y;
+        centre(kind, ch, &x, &y);
+        in.inputPoseInSpace.position = {x * scale, y * scale, 0.3f};
+        in.inputState = press ? XR_VIRTUAL_KEYBOARD_INPUT_STATE_PRESSED_BIT_META : 0;
+        return xrSendVirtualKeyboardInputMETA(kb, &in, &root);
+    };
+    auto tap = [&](int kind, char ch) { aim(kind, ch, true); return aim(kind, ch, false); };
+    auto committed = [&](const char* want) {
+        if (!waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META, &ev)) return false;
+        return strcmp(reinterpret_cast<XrEventDataVirtualKeyboardCommitTextMETA&>(ev).text, want) == 0;
+    };
+    CHECK_RESULT(tap(hxkeyboard::KEY_CHAR, 'q'), XR_SUCCESS);
+    CHECK(committed("q"));
+    // held down: one press, not one per frame
+    aim(hxkeyboard::KEY_CHAR, 'a', true); aim(hxkeyboard::KEY_CHAR, 'a', true); aim(hxkeyboard::KEY_CHAR, 'a', false);
+    CHECK(committed("a"));
+    CHECK(!waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META, &ev));
+    tap(hxkeyboard::KEY_SHIFT, 0); tap(hxkeyboard::KEY_CHAR, 'h'); tap(hxkeyboard::KEY_CHAR, 'i');
+    CHECK(committed("H"));
+    CHECK(committed("i"));  // shift lasts one letter
+    tap(hxkeyboard::KEY_SPACE, ' ');
+    CHECK(committed(" "));
+    tap(hxkeyboard::KEY_BACKSPACE, 0);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_BACKSPACE_META, &ev));
+    tap(hxkeyboard::KEY_ENTER, 0);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_ENTER_META, &ev));
+    // a ray pointing away types nothing
+    float x, y;
+    centre(hxkeyboard::KEY_CHAR, 'w', &x, &y);
+    in.inputPoseInSpace = {{0, 1, 0, 0}, {x * scale, y * scale, 0.3f}};  // turned around: -Z points away
+    in.inputState = XR_VIRTUAL_KEYBOARD_INPUT_STATE_PRESSED_BIT_META;
+    CHECK_RESULT(xrSendVirtualKeyboardInputMETA(kb, &in, &root), XR_SUCCESS);
+    CHECK(!waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META, &ev));
+    // a fingertip: hovering does nothing, touching the key presses it
+    in.inputSource = XR_VIRTUAL_KEYBOARD_INPUT_SOURCE_HAND_DIRECT_INDEX_TIP_RIGHT_META; in.inputState = 0;
+    in.inputPoseInSpace = {{0, 0, 0, 1}, {x * scale, y * scale, 0.05f}};
+    CHECK_RESULT(xrSendVirtualKeyboardInputMETA(kb, &in, &root), XR_SUCCESS);
+    CHECK(!waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META, &ev));
+    in.inputPoseInSpace.position.z = 0.0f;
+    CHECK_RESULT(xrSendVirtualKeyboardInputMETA(kb, &in, &root), XR_SUCCESS);
+    CHECK(committed("w"));
+    in.inputSource = static_cast<XrVirtualKeyboardInputSourceMETA>(99);
+    CHECK_RESULT(xrSendVirtualKeyboardInputMETA(kb, &in, &root), XR_ERROR_VALIDATION_FAILURE);
+    // hidden: no typing
+    vis.visible = XR_FALSE;
+    CHECK_RESULT(xrSetVirtualKeyboardModelVisibilityMETA(kb, &vis), XR_SUCCESS);
+    CHECK(waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_HIDDEN_META, &ev));
+    in.inputSource = XR_VIRTUAL_KEYBOARD_INPUT_SOURCE_CONTROLLER_RAY_RIGHT_META; in.inputPoseInSpace.orientation = {0, 0, 0, 1};
+    CHECK_RESULT(tap(hxkeyboard::KEY_CHAR, 'q'), XR_SUCCESS);
+    CHECK(!waitEvent(inst, XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META, &ev));
+    // destroyed: its space stops locating
+    CHECK_RESULT(xrDestroyVirtualKeyboardMETA(kb), XR_SUCCESS);
+    loc = {XR_TYPE_SPACE_LOCATION};
+    xrLocateSpace(kspace, stage, monoNs(), &loc);
+    CHECK(!(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT));
+    CHECK_RESULT(xrGetVirtualKeyboardScaleMETA(kb, &scale), XR_ERROR_HANDLE_INVALID);
+    CHECK_RESULT(xrDestroySession(s), XR_SUCCESS);
+    CHECK_RESULT(xrDestroyInstance(inst), XR_SUCCESS);
+}
+
 int main() {
     testNegotiation();
     if (!gpa) { printf("negotiation failed\n"); return 1; }
@@ -2436,6 +2621,7 @@ int main() {
     testDepthGazeMicrogestures();
     testFaceFromVoice();
     testTriangleMeshProjection();
+    testVirtualKeyboard();
     printf("%d checks, %d failures\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;
 }

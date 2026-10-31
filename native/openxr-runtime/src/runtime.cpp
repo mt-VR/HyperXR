@@ -9,6 +9,7 @@
 #include "hx_scene.h"
 #include "hx_rendermodel.h"
 #include "hx_body.h"
+#include "hx_keyboard.h"
 
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_reflection.h>
@@ -30,7 +31,7 @@ enum Magic : uint32_t {
     MAGIC_INSTANCE = 0x48584931, MAGIC_SESSION = 0x48585331, MAGIC_SPACE = 0x48585031,
     MAGIC_SWAPCHAIN = 0x48585731, MAGIC_ACTIONSET = 0x48584131, MAGIC_ACTION = 0x48584331,
     MAGIC_FOVEATION = 0x48584631, MAGIC_HAND = 0x48584831, MAGIC_PASSTHROUGH = 0x48585431,
-    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_FACE = 0x48584731, MAGIC_MESH = 0x48585231, MAGIC_GEOM = 0x48584B31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
+    MAGIC_PT_LAYER = 0x48584C31, MAGIC_SDP = 0x48584431, MAGIC_BODY = 0x48584A31, MAGIC_LUT = 0x48584D31, MAGIC_DEPTH = 0x48585A31, MAGIC_DEPTH_SC = 0x48585931, MAGIC_EYE = 0x48584531, MAGIC_FACE = 0x48584731, MAGIC_MESH = 0x48585231, MAGIC_GEOM = 0x48584B31, MAGIC_KEYBOARD = 0x48584F31, MAGIC_SNAP = 0x48584E31, MAGIC_ANCHOR_BD = 0x48584231,
 };
 
 constexpr XrSystemId SYSTEM_ID = 1;
@@ -178,6 +179,17 @@ struct Space {
     XrPath subaction;
     XrPosef offset;             // pose in the reference / action space
     int entity;                 // spatial entity + 1 (0: a reference or action space)
+    struct VirtualKeyboard* keyboard;  // a virtual keyboard's space (XR_META_virtual_keyboard)
+};
+
+/** XR_META_virtual_keyboard: where the keyboard is, and what each input source last did on it. */
+struct VirtualKeyboard {
+    uint32_t magic; Session* session;
+    XrPosef pose;               // stage space
+    float scale;
+    bool visible, shift;
+    bool pressed[9];            // per XrVirtualKeyboardInputSourceMETA: pressing in the last input
+    int lastKey[9];
 };
 
 struct Swapchain {
@@ -720,6 +732,11 @@ bool spaceInStage(Space* sp, XrTime time, XrPosef* out, bool* tracked) {
     Instance* inst = sp->session->instance;
     *tracked = true;
     tPoseFromHand = false;
+    if (sp->keyboard) {
+        if (!isLive(sp->keyboard, MAGIC_KEYBOARD)) { *tracked = false; return false; }
+        *out = hx::compose(sp->keyboard->pose, sp->offset);
+        return true;
+    }
     if (sp->entity > 0) {
         const SceneEntity& e = sp->session->entities[sp->entity - 1];
         if (!(e.enabled & (1u << XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB))) { *tracked = false; return false; }
@@ -859,6 +876,8 @@ const ExtDesc kExtensions[] = {
     // meshes the passthrough can be projected on; eye-tracked foveation (there is no gaze: never valid)
     {XR_FB_TRIANGLE_MESH_EXTENSION_NAME, XR_FB_triangle_mesh_SPEC_VERSION},
     {XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME, XR_META_foveation_eye_tracked_SPEC_VERSION},
+    // Meta's virtual keyboard, drawn and typed on by the runtime (hx_keyboard.h)
+    {XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME, XR_META_virtual_keyboard_SPEC_VERSION},
     {XR_FB_FACE_TRACKING2_EXTENSION_NAME, XR_FB_face_tracking2_SPEC_VERSION},
     {XR_OCULUS_EXTERNAL_CAMERA_EXTENSION_NAME, XR_OCULUS_external_camera_SPEC_VERSION},
     {XR_META_DETACHED_CONTROLLERS_EXTENSION_NAME, XR_META_detached_controllers_SPEC_VERSION},
@@ -1074,6 +1093,7 @@ XRAPI_ATTR XrResult XRAPI_CALL GetSystemProperties(XrInstance h, XrSystemId sys,
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsEnvironmentDepth = XR_TRUE;
             reinterpret_cast<XrSystemEnvironmentDepthPropertiesMETA*>(n)->supportsHandRemoval = XR_TRUE;  // the room's depth has no hands in it
         }
+        if (n->type == XR_TYPE_SYSTEM_VIRTUAL_KEYBOARD_PROPERTIES_META) reinterpret_cast<XrSystemVirtualKeyboardPropertiesMETA*>(n)->supportsVirtualKeyboard = XR_TRUE;
         if (n->type == XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META)
             reinterpret_cast<XrSystemFoveationEyeTrackedPropertiesMETA*>(n)->supportsFoveationEyeTracked = XR_FALSE;
         if (n->type == XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB) reinterpret_cast<XrSystemFaceTrackingPropertiesFB*>(n)->supportsFaceTracking = XR_TRUE;
@@ -1246,6 +1266,7 @@ XRAPI_ATTR XrResult XRAPI_CALL DestroySession(XrSession h) {
         static_cast<Passthrough*>(c)->magic = 0;
         free(c);
     }
+    while (void* c = takeChild(s, MAGIC_KEYBOARD)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_GEOM)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
     while (void* c = takeChild(s, MAGIC_MESH)) { freeMesh(c); }
     while (void* c = takeChild(s, MAGIC_FACE)) { static_cast<uint32_t*>(c)[0] = 0; free(c); }
@@ -2920,18 +2941,20 @@ XRAPI_ATTR XrResult XRAPI_CALL RequestSceneCaptureFB(XrSession h, const XrSceneC
 }
 
 // ------------------------------------------------------------------ controller models (XR_FB_render_model)
-const char* const kRenderModelPaths[2] = {"/model_fb/controller/left", "/model_fb/controller/right"};
+const char* const kRenderModelPaths[3] = {"/model_fb/controller/left", "/model_fb/controller/right", "/model_meta/keyboard/virtual"};
 constexpr XrRenderModelKeyFB kRenderModelKeyBase = 0x48580001;  // + 0 left, + 1 right
 
 XRAPI_ATTR XrResult XRAPI_CALL EnumerateRenderModelPathsFB(XrSession h, uint32_t capacity, uint32_t* count, XrRenderModelPathInfoFB* paths) {
     Session* s = asSession(h);
     if (!s) return XR_ERROR_HANDLE_INVALID;
     if (!count) return XR_ERROR_VALIDATION_FAILURE;
-    *count = 2;
+    // the keyboard's model only for apps that use the virtual keyboard
+    uint32_t n = extEnabled(s->instance, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME) ? 3 : 2;
+    *count = n;
     if (capacity == 0) return XR_SUCCESS;
-    if (capacity < 2) return XR_ERROR_SIZE_INSUFFICIENT;
+    if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
     if (!paths) return XR_ERROR_VALIDATION_FAILURE;
-    for (int i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         if (paths[i].type != XR_TYPE_RENDER_MODEL_PATH_INFO_FB) return XR_ERROR_VALIDATION_FAILURE;
         XrResult r = stringToPath(s->instance, kRenderModelPaths[i], &paths[i].path);
         if (r != XR_SUCCESS) return r;
@@ -2944,14 +2967,15 @@ XRAPI_ATTR XrResult XRAPI_CALL GetRenderModelPropertiesFB(XrSession h, XrPath pa
     if (!s) return XR_ERROR_HANDLE_INVALID;
     if (!props || props->type != XR_TYPE_RENDER_MODEL_PROPERTIES_FB) return XR_ERROR_VALIDATION_FAILURE;
     int which = -1;
-    for (int i = 0; i < 2; i++) {
+    int known = extEnabled(s->instance, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME) ? 3 : 2;
+    for (int i = 0; i < known; i++) {
         XrPath p = XR_NULL_PATH;
         if (stringToPath(s->instance, kRenderModelPaths[i], &p) == XR_SUCCESS && p == path) which = i;
     }
     if (which < 0) return XR_ERROR_PATH_UNSUPPORTED;
     // the model is plain glTF 2.0 (one mesh, one material): it fits both Meta subsets
     props->vendorId = 0x4858;
-    copyStr(props->modelName, XR_MAX_RENDER_MODEL_NAME_SIZE_FB, which == 0 ? "HyperMagic Controller Left" : "HyperMagic Controller Right");
+    copyStr(props->modelName, XR_MAX_RENDER_MODEL_NAME_SIZE_FB, which == 0 ? "HyperMagic Controller Left" : which == 1 ? "HyperMagic Controller Right" : "HyperMagic Keyboard");
     props->modelKey = kRenderModelKeyBase + static_cast<XrRenderModelKeyFB>(which);
     props->modelVersion = 1;
     props->flags = XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_1_BIT_FB | XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_2_BIT_FB;
@@ -2963,8 +2987,18 @@ XRAPI_ATTR XrResult XRAPI_CALL LoadRenderModelFB(XrSession h, const XrRenderMode
     if (!s) return XR_ERROR_HANDLE_INVALID;
     if (!info || info->type != XR_TYPE_RENDER_MODEL_LOAD_INFO_FB || !buffer || buffer->type != XR_TYPE_RENDER_MODEL_BUFFER_FB)
         return XR_ERROR_VALIDATION_FAILURE;
-    if (info->modelKey != kRenderModelKeyBase && info->modelKey != kRenderModelKeyBase + 1) return XR_ERROR_RENDER_MODEL_KEY_INVALID_FB;
+    bool keyboard = info->modelKey == kRenderModelKeyBase + 2 && extEnabled(s->instance, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME);
+    if (info->modelKey != kRenderModelKeyBase && info->modelKey != kRenderModelKeyBase + 1 && !keyboard) return XR_ERROR_RENDER_MODEL_KEY_INVALID_FB;
     bool left = info->modelKey == kRenderModelKeyBase;
+    if (keyboard) {
+        size_t ks = hxkeyboard::glb(nullptr, 0);
+        if (ks == 0) return XR_ERROR_RUNTIME_FAILURE;
+        buffer->bufferCountOutput = static_cast<uint32_t>(ks);
+        if (buffer->bufferCapacityInput == 0) return XR_SUCCESS;
+        if (buffer->bufferCapacityInput < ks) return XR_ERROR_SIZE_INSUFFICIENT;
+        if (!buffer->buffer) return XR_ERROR_VALIDATION_FAILURE;
+        return hxkeyboard::glb(buffer->buffer, buffer->bufferCapacityInput) == ks ? XR_SUCCESS : XR_ERROR_RUNTIME_FAILURE;
+    }
     size_t size = hxrendermodel::glb(left, nullptr, 0);
     if (size == 0) return XR_ERROR_RUNTIME_FAILURE;
     buffer->bufferCountOutput = static_cast<uint32_t>(size);
@@ -3937,6 +3971,188 @@ XRAPI_ATTR XrResult XRAPI_CALL EnumerateExternalCamerasOCULUS(XrSession h, uint3
     return XR_SUCCESS;
 }
 
+// ------------------------------------------------------------------ virtual keyboard (XR_META_virtual_keyboard)
+VirtualKeyboard* asKeyboard(XrVirtualKeyboardMETA h) { return asObj<VirtualKeyboard>(reinterpret_cast<uint64_t>(h), MAGIC_KEYBOARD); }
+
+/** Places the keyboard: far (a desk in front, for rays), direct (within reach, for fingertips) or where the app says. */
+XrResult placeKeyboard(VirtualKeyboard* k, XrVirtualKeyboardLocationTypeMETA type, XrSpace spaceH, const XrPosef& poseInSpace, float scale) {
+    Session* s = k->session;
+    XrTime now = hxp::nowNs();
+    if (type == XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_CUSTOM_META) {
+        Space* sp = asSpace(spaceH);
+        if (!sp) return XR_ERROR_HANDLE_INVALID;
+        if (!hx::poseValid(poseInSpace)) return XR_ERROR_POSE_INVALID;
+        XrPosef base; bool bt;
+        if (!spaceInStage(sp, now, &base, &bt)) return XR_ERROR_VALIDATION_FAILURE;
+        k->pose = hx::compose(base, poseInSpace);
+        if (scale > 0) k->scale = scale;
+        return XR_SUCCESS;
+    }
+    if (type != XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_FAR_META && type != XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_DIRECT_META) return XR_ERROR_VALIDATION_FAILURE;
+    XrPosef head;
+    if (!hxp::headPose(now, s->instance->cfg, &head)) head = XrPosef{{0, 0, 0, 1}, {0, s->instance->cfg.eyeHeightM, 0}};
+    XrQuaternionf yaw = hx::yawOnly(head.orientation);
+    bool far = type == XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_FAR_META;
+    XrVector3f at = hx::vadd(head.position, hx::qrot(yaw, far ? XrVector3f{0, -0.35f, -0.9f} : XrVector3f{0, -0.40f, -0.40f}));
+    // tilted back so it faces the eyes (a keyboard on a desk, seen from above)
+    XrQuaternionf tilt = hx::qaxis(1, 0, 0, far ? -0.5f : -0.8f);
+    k->pose = XrPosef{hx::qnorm(hx::qmul(yaw, tilt)), at};
+    k->scale = far ? 1.5f : 1.0f;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateVirtualKeyboardMETA(XrSession h, const XrVirtualKeyboardCreateInfoMETA* ci, XrVirtualKeyboardMETA* out) {
+    Session* s = asSession(h);
+    if (!s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_VIRTUAL_KEYBOARD_CREATE_INFO_META || !out) return XR_ERROR_VALIDATION_FAILURE;
+    bool exists = false;
+    forEachChild(s, MAGIC_KEYBOARD, [&](void*) { exists = true; });
+    if (exists) return XR_ERROR_LIMIT_REACHED;  // one keyboard per session
+    VirtualKeyboard* k = alloc<VirtualKeyboard>(MAGIC_KEYBOARD, s);
+    if (!k) return XR_ERROR_OUT_OF_MEMORY;
+    k->session = s;
+    for (int& i : k->lastKey) i = -1;
+    placeKeyboard(k, XR_VIRTUAL_KEYBOARD_LOCATION_TYPE_FAR_META, XR_NULL_HANDLE, hx::identity(), 0);
+    *out = reinterpret_cast<XrVirtualKeyboardMETA>(k);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL DestroyVirtualKeyboardMETA(XrVirtualKeyboardMETA h) {
+    VirtualKeyboard* k = asKeyboard(h);
+    if (!k) return XR_ERROR_HANDLE_INVALID;
+    release(k);  // its spaces stop locating
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL CreateVirtualKeyboardSpaceMETA(XrSession h, XrVirtualKeyboardMETA kh, const XrVirtualKeyboardSpaceCreateInfoMETA* ci, XrSpace* out) {
+    Session* s = asSession(h);
+    VirtualKeyboard* k = asKeyboard(kh);
+    if (!s || !k || k->session != s) return XR_ERROR_HANDLE_INVALID;
+    if (!ci || ci->type != XR_TYPE_VIRTUAL_KEYBOARD_SPACE_CREATE_INFO_META || !out) return XR_ERROR_VALIDATION_FAILURE;
+    XrResult r = placeKeyboard(k, ci->locationType, ci->space, ci->poseInSpace, 0);
+    if (r != XR_SUCCESS) return r;
+    Space* sp = alloc<Space>(MAGIC_SPACE, s);
+    if (!sp) return XR_ERROR_OUT_OF_MEMORY;
+    sp->session = s; sp->offset = hx::identity(); sp->keyboard = k;
+    s->liveSpaces++;
+    *out = reinterpret_cast<XrSpace>(sp);
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SuggestVirtualKeyboardLocationMETA(XrVirtualKeyboardMETA h, const XrVirtualKeyboardLocationInfoMETA* info) {
+    VirtualKeyboard* k = asKeyboard(h);
+    if (!k) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_VIRTUAL_KEYBOARD_LOCATION_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    return placeKeyboard(k, info->locationType, info->space, info->poseInSpace, info->scale);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetVirtualKeyboardScaleMETA(XrVirtualKeyboardMETA h, float* scale) {
+    VirtualKeyboard* k = asKeyboard(h);
+    if (!k) return XR_ERROR_HANDLE_INVALID;
+    if (!scale) return XR_ERROR_VALIDATION_FAILURE;
+    *scale = k->scale;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SetVirtualKeyboardModelVisibilityMETA(XrVirtualKeyboardMETA h, const XrVirtualKeyboardModelVisibilitySetInfoMETA* info) {
+    VirtualKeyboard* k = asKeyboard(h);
+    if (!k) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_VIRTUAL_KEYBOARD_MODEL_VISIBILITY_SET_INFO_META) return XR_ERROR_VALIDATION_FAILURE;
+    bool v = info->visible == XR_TRUE;
+    if (v != k->visible) {
+        k->visible = v;
+        if (v) { XrEventDataVirtualKeyboardShownMETA ev{XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_SHOWN_META}; ev.keyboard = h; pushEvent(k->session->instance, &ev, sizeof(ev)); }
+        else { XrEventDataVirtualKeyboardHiddenMETA ev{XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_HIDDEN_META}; ev.keyboard = h; pushEvent(k->session->instance, &ev, sizeof(ev)); }
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetVirtualKeyboardModelAnimationStatesMETA(XrVirtualKeyboardMETA h, XrVirtualKeyboardModelAnimationStatesMETA* states) {
+    if (!asKeyboard(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!states || states->type != XR_TYPE_VIRTUAL_KEYBOARD_MODEL_ANIMATION_STATES_META) return XR_ERROR_VALIDATION_FAILURE;
+    states->stateCountOutput = 0;  // the model has no animations
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetVirtualKeyboardDirtyTexturesMETA(XrVirtualKeyboardMETA h, uint32_t capacity, uint32_t* count, uint64_t* ids) {
+    if (!asKeyboard(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!count) return XR_ERROR_VALIDATION_FAILURE;
+    *count = 0;  // the keyboard's picture never changes
+    (void)capacity; (void)ids;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL GetVirtualKeyboardTextureDataMETA(XrVirtualKeyboardMETA h, uint64_t, XrVirtualKeyboardTextureDataMETA* data) {
+    if (!asKeyboard(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!data || data->type != XR_TYPE_VIRTUAL_KEYBOARD_TEXTURE_DATA_META) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_ERROR_VALIDATION_FAILURE;  // no texture is ever reported dirty, so no id is valid here
+}
+
+/** Types what key [i] means: text, backspace, enter, or the shift toggle. */
+void pressKey(VirtualKeyboard* k, const hxkeyboard::Key& key) {
+    Instance* inst = k->session->instance;
+    XrVirtualKeyboardMETA h = reinterpret_cast<XrVirtualKeyboardMETA>(k);
+    switch (key.kind) {
+        case hxkeyboard::KEY_SHIFT: k->shift = !k->shift; return;
+        case hxkeyboard::KEY_BACKSPACE: { XrEventDataVirtualKeyboardBackspaceMETA ev{XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_BACKSPACE_META}; ev.keyboard = h; pushEvent(inst, &ev, sizeof(ev)); return; }
+        case hxkeyboard::KEY_ENTER: { XrEventDataVirtualKeyboardEnterMETA ev{XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_ENTER_META}; ev.keyboard = h; pushEvent(inst, &ev, sizeof(ev)); return; }
+        default: {
+            XrEventDataVirtualKeyboardCommitTextMETA ev{XR_TYPE_EVENT_DATA_VIRTUAL_KEYBOARD_COMMIT_TEXT_META};
+            ev.keyboard = h;
+            char c = key.ch;
+            if (k->shift && c >= 'a' && c <= 'z') { c = static_cast<char>(c - 'a' + 'A'); k->shift = false; }
+            ev.text[0] = c; ev.text[1] = 0;
+            static_assert(sizeof(XrEventDataVirtualKeyboardCommitTextMETA) <= sizeof(XrEventDataBuffer), "fits an event");
+            pushEvent(inst, &ev, sizeof(ev));
+        }
+    }
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL SendVirtualKeyboardInputMETA(XrVirtualKeyboardMETA h, const XrVirtualKeyboardInputInfoMETA* info, XrPosef* root) {
+    VirtualKeyboard* k = asKeyboard(h);
+    if (!k) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_VIRTUAL_KEYBOARD_INPUT_INFO_META || !root) return XR_ERROR_VALIDATION_FAILURE;
+    int src = static_cast<int>(info->inputSource);
+    if (src < 1 || src > 8) return XR_ERROR_VALIDATION_FAILURE;
+    Space* sp = asSpace(info->inputSpace);
+    if (!sp) return XR_ERROR_HANDLE_INVALID;
+    if (!hx::poseValid(info->inputPoseInSpace)) return XR_ERROR_POSE_INVALID;
+    XrPosef base; bool bt;
+    if (!k->visible || !spaceInStage(sp, hxp::nowNs(), &base, &bt)) { k->pressed[src] = false; return XR_SUCCESS; }
+    XrPosef inStage = hx::compose(base, info->inputPoseInSpace);
+    XrPosef toKb = hx::inverse(k->pose);
+    XrVector3f o = hx::compose(toKb, inStage).position;  // in keyboard space
+    bool ray = src <= XR_VIRTUAL_KEYBOARD_INPUT_SOURCE_HAND_RAY_RIGHT_META;
+    float x, y;
+    bool pressed;
+    if (ray) {
+        // the pointer's -Z, intersected with the keyboard's plane
+        XrVector3f d = hx::qrot(hx::qconj(k->pose.orientation), hx::qrot(inStage.orientation, XrVector3f{0, 0, -1}));
+        if (fabsf(d.z) < 1e-6f) { k->pressed[src] = false; return XR_SUCCESS; }
+        float t = -o.z / d.z;
+        if (t <= 0) { k->pressed[src] = false; return XR_SUCCESS; }
+        x = o.x + d.x * t; y = o.y + d.y * t;
+        pressed = (info->inputState & XR_VIRTUAL_KEYBOARD_INPUT_STATE_PRESSED_BIT_META) != 0;
+    } else {
+        // a fingertip or controller tip: pressing when it reaches the keys
+        x = o.x; y = o.y;
+        pressed = o.z < 0.005f * k->scale && o.z > -0.05f * k->scale;
+    }
+    hxkeyboard::Key keys[48];
+    int n = hxkeyboard::layout(keys);
+    int key = hxkeyboard::keyAt(keys, n, x / k->scale, y / k->scale);
+    if (pressed && !k->pressed[src] && key >= 0) pressKey(k, keys[key]);  // on the press, once
+    k->pressed[src] = pressed;
+    k->lastKey[src] = key;
+    return XR_SUCCESS;  // [root] stays where the app put it
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL ChangeVirtualKeyboardTextContextMETA(XrVirtualKeyboardMETA h, const XrVirtualKeyboardTextContextChangeInfoMETA* info) {
+    if (!asKeyboard(h)) return XR_ERROR_HANDLE_INVALID;
+    if (!info || info->type != XR_TYPE_VIRTUAL_KEYBOARD_TEXT_CONTEXT_CHANGE_INFO_META || !info->textContext) return XR_ERROR_VALIDATION_FAILURE;
+    return XR_SUCCESS;  // no word suggestions here: the context is not needed
+}
+
 // ------------------------------------------------------------------ smaller Meta extensions
 /** XR_META_performance_metrics counters; the ones a phone cannot measure report no valid value. */
 const char* const kPerfCounters[] = {
@@ -4648,6 +4864,17 @@ const Entry kEntries[] = {
     HX_EXT(UpdatePassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
     HX_EXT(DestroyPassthroughColorLutMETA, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME),
     HX_EXT(PassthroughLayerSetKeyboardHandsIntensityFB, XR_FB_PASSTHROUGH_KEYBOARD_HANDS_EXTENSION_NAME),
+    HX_EXT(CreateVirtualKeyboardMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(DestroyVirtualKeyboardMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(CreateVirtualKeyboardSpaceMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(SuggestVirtualKeyboardLocationMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(GetVirtualKeyboardScaleMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(SetVirtualKeyboardModelVisibilityMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(GetVirtualKeyboardModelAnimationStatesMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(GetVirtualKeyboardDirtyTexturesMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(GetVirtualKeyboardTextureDataMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(SendVirtualKeyboardInputMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
+    HX_EXT(ChangeVirtualKeyboardTextContextMETA, XR_META_VIRTUAL_KEYBOARD_EXTENSION_NAME),
     HX_EXT(CreateTriangleMeshFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
     HX_EXT(DestroyTriangleMeshFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),
     HX_EXT(TriangleMeshGetVertexBufferFB, XR_FB_TRIANGLE_MESH_EXTENSION_NAME),

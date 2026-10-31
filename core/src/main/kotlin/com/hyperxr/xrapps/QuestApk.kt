@@ -79,6 +79,7 @@ object QuestApk {
         "XR_FB_composition_layer_secure_content", "XR_META_automatic_layer_filter", "XR_FB_keyboard_tracking",
         "XR_META_passthrough_preferences", "XR_META_passthrough_layer_resumed_event", "XR_FB_spatial_entity_storage_batch",
         "XR_OCULUS_android_session_state_enable",
+        "XR_META_virtual_keyboard",
         // Pico spatial sensing: anchors, the room, its planes and mesh (and the futures they use)
         "XR_EXT_future", "XR_BD_future_progress", "XR_BD_spatial_sensing", "XR_BD_spatial_anchor", "XR_BD_spatial_scene",
         "XR_BD_spatial_mesh", "XR_BD_spatial_plane",
