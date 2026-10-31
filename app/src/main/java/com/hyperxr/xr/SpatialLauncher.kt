@@ -83,7 +83,10 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private lateinit var hyperDock: TaskbarPanel
     private lateinit var metaLibrary: MetaLibraryPanel
     private lateinit var metaDock: MetaDockPanel
-    private val library: XrPanel get() = if (mode() == LauncherMode.META) metaLibrary else hyperLibrary
+    private lateinit var themedLibrary: ThemedHomePanel
+    /** A theme in the spirit of another system brings that system's kind of home (ThemedHome.kt). */
+    private val themedHome: Boolean get() = app.settings.current.launcher.theme.let { it.inspiredBy != null }
+    private val library: XrPanel get() = if (themedHome) themedLibrary else if (mode() == LauncherMode.META) metaLibrary else hyperLibrary
     private val taskbar: XrPanel get() = if (mode() == LauncherMode.META) metaDock else hyperDock
     /** Library opened from the taskbar (Dock mode, or over windows in New mode). */
     private var libraryShown = false
@@ -157,6 +160,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         hyperLibrary = LibraryHomePanel(this, asWindow = false)
         hyperDock = TaskbarPanel(this)
         metaLibrary = MetaLibraryPanel(this)
+        themedLibrary = ThemedHomePanel(this)
         metaDock = MetaDockPanel(this)
         appWorld = com.hyperxr.appworld.AppWorld(ctx, this, this)
         ctx.ui { com.hyperxr.appworld.MediaHub.start(activity) }
@@ -175,7 +179,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     override fun onPause() { ocean?.onPause() }
 
     override fun onGlRelease() {
-        (windows + listOf(hyperLibrary, hyperDock, metaLibrary, metaDock)).forEach { it.release() }
+        (windows + listOf(hyperLibrary, hyperDock, metaLibrary, metaDock, themedLibrary)).forEach { it.release() }
         handToolsOrNull?.release()
         assistantOrNull?.release()
         if (::appWorld.isInitialized) appWorld.release()
@@ -233,7 +237,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         // inside a 360 photo/video only the taskbar and the open panels stay
         val immersiveMedia = ctx.renderer.immersive != null
         // Meta interface: the library is home while no window is open; otherwise it opens from the bar
-        val showLibrary = !immersiveMedia && (libraryShown || (game == null && s.launcher.mode == LauncherMode.META && !windowsShown))
+        val showLibrary = !immersiveMedia && (libraryShown || (game == null && (s.launcher.mode == LauncherMode.META || themedHome) && !windowsShown))
         if (!showLibrary && libraryShown) libraryShown = false
         if (showLibrary) surfaces += library
         surfaces += taskbar
@@ -315,7 +319,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     /** The library as the Meta interface's home: straight ahead of the launcher anchor, a little above the bar. */
     private fun placeLibraryHome(head: Pose) {
         val k = uiFar()
-        for (lib in listOf(hyperLibrary, metaLibrary)) {
+        for (lib in listOf(hyperLibrary, metaLibrary, themedLibrary)) {
             lib.pose.position.set(head.position.x - sin(anchorYaw) * 1.55f * k, head.position.y + 0.06f * k, head.position.z - cos(anchorYaw) * 1.55f * k)
             Quat.fromAxisAngle(0f, 1f, 0f, anchorYaw, lib.pose.orientation)
         }
@@ -1457,7 +1461,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     }
 
     override fun pinnedApps(): List<AppEntry> = model.dockApps(app.settings.current.launcher)
-    override fun libraryOpen(): Boolean = libraryShown || (mode() == LauncherMode.META && (windowsMinimized || appWindows.none { it.visible }))
+    override fun libraryOpen(): Boolean = libraryShown || ((mode() == LauncherMode.META || themedHome) && (windowsMinimized || appWindows.none { it.visible }))
     override fun toggleLibrary() {
         if (libraryOpen()) {
             // in the Meta interface with nothing open the library is home: bring the windows back instead
