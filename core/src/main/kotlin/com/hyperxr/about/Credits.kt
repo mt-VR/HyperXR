@@ -13,6 +13,11 @@ object Credits {
         Entry("PhoneXR", "Samrat Beketov", "trazido ao HyperMagic pelo próprio autor", "inclinação e passos pelo acelerômetro, fotos 3D"),
     )
 
+    /** Systems some XR panel themes are inspired by (Configurações > Launcher > Tema). Inspiration only: no code, logos or artwork. */
+    val inspirations: List<Entry> get() = com.hyperxr.settings.XrThemeStyle.entries.filter { it.inspiredBy != null }.map {
+        Entry("Tema ${it.label}", it.owner!!, "marca de ${it.owner}", "inspiração visual (${it.inspiredBy}); tema não oficial, sem afiliação")
+    }
+
     val thirdParty = listOf(
         Entry("LuaJIT", "Mike Pall", "MIT", "scripts dos pacotes .hyperx"),
         Entry("OpenXR loader e headers", "Khronos Group", "Apache-2.0 / MIT", "runtime OpenXR e jogos OpenXR"),

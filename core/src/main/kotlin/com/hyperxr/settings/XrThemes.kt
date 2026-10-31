@@ -19,17 +19,25 @@ data class ThemePalette(
     val tileRadius: Float,
 )
 
-enum class XrThemeStyle(val label: String, val description: String) {
+/**
+ * The styles. [label] is the name shown: for the ones made in the spirit of another system it is
+ * that system's name, with [inspiredBy] and [owner] in the credit ([credit]); these themes are
+ * HyperMagic's own colours, unofficial and unaffiliated, with none of their logos or screens.
+ */
+enum class XrThemeStyle(val label: String, val description: String, val inspiredBy: String? = null, val owner: String? = null) {
     HYPERMAGIC("HyperMagic", "Vidro verde-azulado, o visual de sempre"),
-    VAPOR("Vapor", "Painel escuro azul-grafite de console de jogos, cantos quase retos, destaque azul elétrico"),
-    BOSQUE("Bosque", "Claro e calmo, papel quente com verde musgo, cantos bem arredondados"),
-    ORBITA("Órbita", "Vidro escuro com destaque ciano, pílulas e cantos grandes"),
-    SALAO("Salão", "Carvão de sala de estar à noite, azul suave, grade de blocos"),
-    MERGULHO("Mergulho", "Índigo profundo com destaque âmbar, blocos grandes"),
-    TONAL("Tonal", "Superfícies tonais roxas, cantos grandes e botões pílula (escuro)"),
-    NEVOA("Névoa", "Vidro claro e fosco, texto escuro, tudo arredondado"),
+    VAPOR("Steam Frame", "Painel escuro azul-grafite de console de jogos, cantos quase retos, destaque azul elétrico", "Steam Frame e o painel do SteamVR", "Valve Corporation"),
+    BOSQUE("Google Daydream", "Claro e calmo, papel quente com verde musgo, cantos bem arredondados", "Daydream Home", "Google LLC"),
+    ORBITA("Pico OS", "Vidro escuro com destaque ciano, pílulas e cantos grandes", "PICO OS", "PICO (ByteDance)"),
+    SALAO("Gear VR", "Carvão de sala de estar à noite, azul suave, grade de blocos", "Samsung Gear VR com Oculus Home", "Samsung Electronics e Meta Platforms (Oculus)"),
+    MERGULHO("Fulldive VR", "Índigo profundo com destaque âmbar, blocos grandes", "Fulldive VR", "Fulldive"),
+    TONAL("Material 3", "Superfícies tonais roxas, cantos grandes e botões pílula (escuro)", "Material Design 3", "Google LLC"),
+    NEVOA("visionOS", "Vidro claro e fosco, texto escuro, tudo arredondado", "visionOS", "Apple Inc."),
     CONTRASTE("Alto contraste", "Preto e branco com amarelo: o mais legível"),
     ;
+
+    /** "Inspirado em ..." with the owner and the no-affiliation note; null for HyperMagic's own styles. */
+    val credit: String? get() = inspiredBy?.let { "Inspirado em $it, de $owner. Tema não oficial do HyperMagic, sem afiliação nem endosso; os nomes são marcas dos seus donos." }
 
     val palette: ThemePalette get() = XrThemes.of(this)
 }

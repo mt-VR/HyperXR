@@ -59,7 +59,7 @@ fun HomeSection(a: MainActivity) {
         Note("HyperMagic é software livre (GPLv3). Créditos completos abaixo e no README do projeto.")
     }
     SectionCard("Créditos e licenças", "Tudo o que o HyperMagic usa e não foi feito aqui: de quem é, a licença e para que serve") {
-        for (e in com.hyperxr.about.Credits.partners + com.hyperxr.about.Credits.thirdParty) KeyValue(e.name, "${e.author} · ${e.license} · ${e.use}")
+        for (e in com.hyperxr.about.Credits.partners + com.hyperxr.about.Credits.thirdParty + com.hyperxr.about.Credits.inspirations) KeyValue(e.name, "${e.author} · ${e.license} · ${e.use}")
     }
     SectionCard("Resumo do aparelho") {
         KeyValue("Aparelho", "${caps.manufacturer} ${caps.model} • Android ${caps.androidRelease} (API ${caps.androidSdk})")
@@ -368,7 +368,7 @@ fun NetworkSection(a: MainActivity) {
 /** Theme of the XR panels: one card per style with its colours, tap to choose. */
 @Composable
 private fun ThemeCard(a: MainActivity, current: com.hyperxr.settings.XrThemeStyle) {
-    SectionCard("Tema", "Cores e cantos dos painéis no XR. Temas próprios do HyperMagic; alguns lembram o clima de outros sistemas de VR, sem copiar logos nem telas.") {
+    SectionCard("Tema", "Cores e cantos dos painéis no XR. Os temas com nome de outro sistema são inspirados nele: cores próprias do HyperMagic, sem logos nem telas copiadas.") {
         for (t in com.hyperxr.settings.XrThemeStyle.entries) {
             val p = t.palette
             val sel = t == current
@@ -397,6 +397,7 @@ private fun ThemeCard(a: MainActivity, current: com.hyperxr.settings.XrThemeStyl
                 androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 14.dp).weight(1f)) {
                     Text(t.label + if (sel) "  ✓" else "", color = HxColors.text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
                     Note(t.description)
+                    t.credit?.let { Note(it, HxColors.dim) }
                 }
             }
         }
