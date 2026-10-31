@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyperxr.compat.CompatLayer
 import com.hyperxr.files.ApkImports
+import com.hyperxr.files.ImportedGame
+import com.hyperxr.files.ImportedGames
 import com.hyperxr.shell.ShellBridge
 import com.hyperxr.shell.ShizukuState
 import com.hyperxr.xrapps.ApkReport
@@ -43,25 +45,46 @@ class ApkImportState(private val a: MainActivity) {
     var status by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var open by mutableStateOf(false)
+    private var label = ""
 
-    fun import(uri: Uri) {
-        open = true; busy = true; report = null; plan = null; file = null; status = "Copiando e analisando o APK…"
+    fun import(uri: Uri) = analyse("Copiando e analisando o APK…") { ApkImports.copy(a, uri) }
+
+    /** An APK already on the phone (found by the import tab): read where it is, nothing copied. */
+    fun importFile(f: File) = analyse("Analisando o APK…") {
+        ApkImports.dir(a).listFiles()?.forEach { it.delete() }
+        f
+    }
+
+    private fun analyse(first: String, source: () -> File) {
+        open = true; busy = true; report = null; plan = null; file = null; status = first
         a.io.execute {
             try {
-                val copied = ApkImports.copy(a, uri)
+                val picked = source()
                 // split bundles (.xapk/.apks): base + this phone's native libraries in one APK
-                val f = if (com.hyperxr.xrapps.ApkBundle.isBundle(copied)) {
+                val f = if (com.hyperxr.xrapps.ApkBundle.isBundle(picked)) {
                     a.runOnUiThread { status = "Juntando o pacote dividido num APK…" }
-                    com.hyperxr.xrapps.ApkBundle.merge(copied, File(copied.parentFile, copied.nameWithoutExtension + "-merged.apk"), Build.SUPPORTED_ABIS.toList()).apk
-                } else copied
+                    com.hyperxr.xrapps.ApkBundle.merge(picked, File(ApkImports.dir(a), picked.nameWithoutExtension + "-merged.apk"), Build.SUPPORTED_ABIS.toList()).apk
+                } else picked
                 val r = QuestApk.inspect(f, Build.SUPPORTED_ABIS.toList())
                 val p = if (r.xrApi != XrApi.NONE || r.questApp) runCatching { CompatLayer.plan(a, f) }.getOrNull() else null
-                a.runOnUiThread { file = f; report = r; plan = p; status = null; busy = false }
+                a.runOnUiThread { file = f; label = picked.nameWithoutExtension; report = r; plan = p; status = null; busy = false }
             } catch (t: Throwable) {
                 a.runOnUiThread { status = "Não foi possível ler o APK: ${t.message}"; busy = false }
             }
         }
     }
+
+    /** Whether the analysed app is installed now (the installer may have finished meanwhile). */
+    fun installedNow(): Boolean = report?.let { CompatLayer.installed(a, it.packageName) } ?: false
+
+    fun play() {
+        val r = report ?: return
+        try { ImportedGames.launch(a, ImportedGames.all(a).firstOrNull { it.first.packageName == r.packageName }?.first ?: gameOf(r, false)) }
+        catch (t: Throwable) { status = "Não abriu: ${t.message}" }
+    }
+
+    private fun gameOf(r: ApkReport, patched: Boolean) =
+        ImportedGame(r.packageName, ImportedGames.installedLabel(a, r.packageName) ?: label, r.launchActivity, r.xrApi, patched, System.currentTimeMillis())
 
     fun patchAndInstall() {
         val f = file ?: return
@@ -70,24 +93,25 @@ class ApkImportState(private val a: MainActivity) {
             try {
                 val (rep, out) = CompatLayer.patchAndSign(a, f) { s -> a.runOnUiThread { status = s } }
                 if (out == null) a.runOnUiThread { status = rep.blockers.joinToString(" • "); busy = false }
-                else install(out)
+                else install(out, patched = true)
             } catch (t: Throwable) {
                 a.runOnUiThread { status = "Falha no patch: ${t.message}"; busy = false }
             }
         }
     }
 
-    fun installOriginal() { file?.let { busy = true; a.io.execute { install(it) } } }
+    fun installOriginal() { file?.let { busy = true; a.io.execute { install(it, patched = false) } } }
 
     /** Shizuku installs directly; otherwise the Android installer asks on screen. */
-    private fun install(apk: File) {
+    private fun install(apk: File, patched: Boolean) {
+        report?.let { ImportedGames.remember(a, it, label, patched) }  // listed in the import tab once installed
         if (ShellBridge.state(a) == ShizukuState.READY) {
             ShellBridge.withService(a) { svc ->
                 a.io.execute {
                     val err = svc?.let { s -> ParcelFileDescriptor.open(apk, ParcelFileDescriptor.MODE_READ_ONLY).use { s.installApk(it, apk.length()) } } ?: "Shizuku não respondeu"
                     a.runOnUiThread {
                         status = when {
-                            err.isEmpty() -> "Instalado. Abra pelo HyperMagic (Apps XR)."
+                            err.isEmpty() -> "Instalado. Toque em Jogar, ou abra pela aba Importar e jogar."
                             err.contains("UPDATE_INCOMPATIBLE") || err.contains("signatures do not match", true) ->
                                 "Já existe uma versão com outra assinatura: desinstale-a e tente de novo (os dados do jogo serão apagados)."
                             else -> "Falha: $err"
@@ -121,7 +145,7 @@ fun ApkImportCard(a: MainActivity) {
     SectionCard("Corrigir APK: OpenXR, Quest e Daydream", "Escolha o APK de um jogo OpenXR, de Quest ou de um app Daydream/Cardboard. O HyperMagic diz se ele pode rodar, corrige para o runtime HyperMagic (OpenXR da Khronos; Daydream vira Cardboard), assina e instala.") {
         Button(onClick = { a.pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed", "application/xapk-package-archive", "application/vnd.apkm")) },
             colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
-        Note("Também no XR: Apps XR > Importar APK para corrigir.")
+        Note("Tudo sobre importar e jogar fica na aba Importar e jogar. No XR: Apps XR > Importar APK para corrigir.")
     }
 }
 
@@ -156,6 +180,8 @@ fun ApkImportDialog(a: MainActivity) {
                 if (r != null && p != null && p.blockers.isEmpty() && p.changes.isNotEmpty())
                     TextButton(enabled = !s.busy, onClick = { s.patchAndInstall() }) { Text("Corrigir e instalar") }
                 if (r != null) TextButton(enabled = !s.busy, onClick = { s.installOriginal() }) { Text("Instalar original") }
+                @Suppress("UNUSED_EXPRESSION") a.refresh  // re-checked when the installer returns
+                if (r != null && !s.busy && s.installedNow()) TextButton(onClick = { s.play() }) { Text("Jogar") }
             }
         },
         dismissButton = { TextButton(enabled = !s.busy, onClick = { s.open = false }) { Text("Fechar") } },

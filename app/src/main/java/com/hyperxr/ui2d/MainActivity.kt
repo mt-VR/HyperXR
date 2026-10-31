@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class Section(val title: String) {
-    HOME("Início"), LAUNCHER("Launcher"), GRAPHICS("Gráficos"), PERFORMANCE("Desempenho"),
+    HOME("Início"), IMPORTS("Importar e jogar"), LAUNCHER("Launcher"), GRAPHICS("Gráficos"), PERFORMANCE("Desempenho"),
     REALITY_LENSES("RealityLenses"), HEAD("Head tracking"), HANDS("Hand tracking"), CONTROLS("Controles"), HYPERCONTROLLER("HyperController"), COLOR_CONTROLLER("Controle por cor"), PERMISSIONS("Permissões e pacotes"),
     RUNTIME("OpenXR, Monado e Broker"), ENVIRONMENTS("Ambientes 3D"), APPS("Apps XR e Web"), PEOPLE("Pessoas"), MINECRAFT("Minecraft"), AUDIO("Áudio"),
     DEVICE("Dispositivo e diagnóstico"), ACCESSIBILITY("Acessibilidade"), NETWORK("Rede"),
@@ -161,6 +161,7 @@ private fun Root(a: MainActivity) {
                 @Suppress("UNUSED_EXPRESSION") a.refresh // recompose on refresh
                 when (section) {
                     Section.HOME -> HomeSection(a)
+                    Section.IMPORTS -> ImportsSection(a)
                     Section.LAUNCHER -> LauncherSection(a)
                     Section.GRAPHICS -> GraphicsSection(a)
                     Section.PERFORMANCE -> PerformanceSection(a)
