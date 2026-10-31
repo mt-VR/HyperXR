@@ -120,4 +120,14 @@ class QuestApkTest {
         assertTrue("XR_META_body_tracking_fidelity" in s.extensions())
         assertTrue(QuestApk.isValidObbName("main.42.com.example.questgame.obb"))
     }
+
+    @Test fun fridaGadgetIsReported() {
+        val r = QuestApk.inspect(apk(mapOf(
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
+            "lib/arm64-v8a/libunity.so" to ByteArray(10),
+            "lib/arm64-v8a/libfrda.so" to ByteArray(10),
+            "lib/arm64-v8a/libfrda.config.so" to ByteArray(10),
+        )))
+        assertTrue(r.reasons.any { it.contains("Frida") && it.contains("libfrda.config.so") })
+    }
 }

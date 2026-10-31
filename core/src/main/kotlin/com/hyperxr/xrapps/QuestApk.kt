@@ -223,6 +223,11 @@ object QuestApk {
         else if (godotRenderer != null) reasons += "Godot com o renderizador Compatibilidade (OpenGL ES): o que o runtime HyperMagic oferece"
         if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperMagic aceita OpenGL ES")
         else if ("Vulkan" in graphics && godotRenderer == null) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperMagic só oferece esse)"
+        // Frida gadget: a library plus its "<name>.config.so", put in by whoever modified the APK
+        val gadget = libNames.filter { it.endsWith(".config.so") && it.removeSuffix(".config.so") + ".so" in libNames } +
+            libNames.filter { it.contains("frida", true) || it.contains("gadget", true) }
+        if (gadget.isNotEmpty()) reasons += "APK modificado: traz o Frida gadget (${gadget.distinct().joinToString()}), que não faz parte do jogo. " +
+            "Em Android recente ele costuma derrubar o jogo antes de abrir (SIGSEGV em memória anônima); use o APK sem modificação"
         if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
         val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) && it !in RUNTIME_EXTENSIONS }.sorted()
         val metaOk = exts.count { (it.startsWith("XR_FB_") || it.startsWith("XR_META_")) && it in RUNTIME_EXTENSIONS }
