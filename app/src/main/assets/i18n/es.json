@@ -569,6 +569,7 @@
 "Dica: dá pra jogar com Joy-Con, gamepad ou outro celular.": "Consejo: puedes jugar con Joy-Con, un mando u otro móvil.",
 "Dica: eu fico em cima da sua mesa. Segure a pinça em mim pra me mudar de lugar.": "Consejo: vivo en tu mesa. Mantén el pellizco sobre mí para moverme.",
 "Dica: na Loja tem jogo novo toda hora.": "Consejo: en la Tienda siempre hay juegos nuevos.",
+"Dica: arminha pra cima, fecha o indicador e abre onde quiser o menu.": "Consejo: pistola con el dedo hacia arriba, cierra el índice y ábrelo donde quieras el menú.",
 "Dica: palma pra cima e pinça abrem o menu.": "Consejo: la palma hacia arriba y un pellizco abren el menú.",
 "Dica: segure a pinça num app da Biblioteca pra fixar.": "Consejo: mantén el pellizco en una app de la Biblioteca para fijarla.",
 "Diga oi para {0}!": "¡Saluda a {0}!",
@@ -2047,5 +2048,7 @@
 "ícone do Daydream Home": "icono de Daydream Home",
 "ícones dos painéis": "iconos de los paneles",
 "• unsafe — só pode ser concedida no app 2D, com confirmação explícita. Sem ela o pacote roda no sandbox.": "• unsafe — solo se puede conceder en la app 2D, con confirmación explícita. Sin ella el paquete funciona en el sandbox.",
-"‹ Loja": "‹ Tienda"
+"‹ Loja": "‹ Tienda",
+"Faça uma arminha com a mão, o indicador apontando para cima. Feche o indicador, leve a mão até onde quer o menu e abra o indicador: o menu em círculo abre ali (voltar, recentralizar, teclado, voz, captura, biblioteca e janelas). Aponte para a opção e feche o indicador de novo para escolher.": "Haz una pistola con la mano, el índice apuntando hacia arriba. Cierra el índice, lleva la mano adonde quieras el menú y abre el índice: el menú circular se abre ahí (volver, recentrar, teclado, voz, captura, biblioteca y ventanas). Apunta a la opción y cierra el índice de nuevo para elegirla.",
+"Menu rápido": "Menú rápido"
 }

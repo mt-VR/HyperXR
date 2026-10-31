@@ -478,7 +478,7 @@ class HyperBot(world: AppWorld) : WorldObject(world, KEY) {
             "Fui ao médico: ele disse que eu tenho um vírus. Era só atualização.",
         )
         private val TIPS = listOf(
-            "Dica: palma pra cima e pinça abrem o menu.",
+            "Dica: arminha pra cima, fecha o indicador e abre onde quiser o menu.",
             "Dica: segure a pinça num app da Biblioteca pra fixar.",
             "Dica: na Loja tem jogo novo toda hora.",
             "Dica: dá pra jogar com Joy-Con, gamepad ou outro celular.",

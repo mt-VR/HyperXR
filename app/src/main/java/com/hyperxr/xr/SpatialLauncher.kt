@@ -346,6 +346,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     // one menu for both gestures: pinch with the palm up (opens at once) or pinch and hold
     private val radialItems = listOf("Voltar", "Início", "Teclado", "Captura", "Voz", "Recentralizar", "Biblioteca", "Janelas", "Fita métrica")
     private val radials = arrayOf(com.hyperxr.input.RadialMenu(radialItems), com.hyperxr.input.RadialMenu(radialItems))
+    /** The quick menu's gesture, per hand: finger gun up, close the index, open it where the menu goes. */
+    private val guns = arrayOf(com.hyperxr.handtracking.GunMenuGesture(), com.hyperxr.handtracking.GunMenuGesture())
+    private val gunConfirmWas = BooleanArray(2)
     private val radialTex = IntArray(radialItems.size)
     private val radialAspect = FloatArray(radialItems.size)
     private val wasPinching = BooleanArray(2)
@@ -428,16 +431,23 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
                 lab?.handBusy?.get(i) == true
             if (h.isUsable) {
                 pinchPoint.set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
-                // the pinch starting with the palm up opens the menu right away
-                val palmUp = pinching && !wasPinching[i] && !linkDrag.active && lab?.handBusy?.get(i) != true &&
-                    com.hyperxr.handtracking.PalmMenuDetector.isPalmUp(h.joints, h.handedness == com.hyperxr.handtracking.Handedness.RIGHT, input.head.position)
-                // drawing in the air: a pinch away from the UI draws, so it must not open the radial menu
-                if (airDraw.active) radials[i].update(false, pinchPoint, input.head, true, now)
-                else radials[i].update(pinching, pinchPoint, input.head, overTarget, now, instant = palmUp)?.let { radialAction(it) }
+                val m = radials[i]
+                if (m.phase == com.hyperxr.input.RadialMenu.Phase.OPEN && m.pointed) {
+                    // the open quick menu: the index tip chooses, closing the index again (or a pinch) picks
+                    val closing = com.hyperxr.handtracking.GunMenuGesture.indexClosed(h.joints) || pinching
+                    val confirm = closing && !gunConfirmWas[i]
+                    gunConfirmWas[i] = closing
+                    m.updatePointed(h.joints[HandJoint.INDEX_TIP], confirm, now)?.let { radialAction(it) }
+                } else {
+                    if (m.phase != com.hyperxr.input.RadialMenu.Phase.IDLE) m.cancel()
+                    // finger gun pointing up, close the index, open it where the quick menu should be
+                    val busy = linkDrag.active || lab?.handBusy?.get(i) == true || airDraw.active
+                    if (guns[i].update(if (busy) null else h.joints, now)) { m.openAt(guns[i].at, input.head, now); gunConfirmWas[i] = pinching }
+                }
                 airBusy[i] = overTarget
-            } else radials[i].update(false, pinchPoint, input.head, true, now)
+            } else { radials[i].cancel(); guns[i].reset() }
             wasPinching[i] = h.isUsable && pinching
-            val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE && (!overTarget || radials[i].openedInstantly)
+            val menuOpen = radials[i].phase != com.hyperxr.input.RadialMenu.Phase.IDLE
             // a hand working on the lab bench (holding or reaching an object) does not point at the UI
             val labBusy = lab?.handBusy?.get(i) == true
             // The pinch ball is the pointer: what is under the ball, as seen from the eyes, is what a
@@ -460,7 +470,8 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             pinchBallVisible[i] = h.isUsable && !labBusy && (!pointMode || pointPush[i].pointing)
             val handRay = handStabilizers[i].update(raw, now, handRayOut[i])
             // a fist (no finger extended) grabs: it moves windows, pushing/pulling them in depth
-            val fist = h.isUsable && (h.gesture == com.hyperxr.handtracking.Gesture.FIST || h.gesture == com.hyperxr.handtracking.Gesture.GRAB)
+            val fist = h.isUsable && (h.gesture == com.hyperxr.handtracking.Gesture.FIST || h.gesture == com.hyperxr.handtracking.Gesture.GRAB) &&
+                guns[i].phase != com.hyperxr.handtracking.GunMenuGesture.Phase.COCKED
             if (!handRays[i].grabbing || handRays[i].captured == null) handRays[i].grabbing = fist
             // the click (push or pinch) is read from the held state so a lost frame does not release it
             val pinch = if (handRays[i].grabbing) fist || (raw == null && handRays[i].captured != null && handRay != null)

@@ -569,6 +569,7 @@
 "Dica: dá pra jogar com Joy-Con, gamepad ou outro celular.": "Совет: можно играть с Joy-Con, геймпадом или другим телефоном.",
 "Dica: eu fico em cima da sua mesa. Segure a pinça em mim pra me mudar de lugar.": "Совет: я живу на вашем столе. Удерживайте щипок на мне, чтобы переставить.",
 "Dica: na Loja tem jogo novo toda hora.": "Совет: в Магазине постоянно новые игры.",
+"Dica: arminha pra cima, fecha o indicador e abre onde quiser o menu.": "Совет: «пистолет» пальцем вверх, согните указательный и разогните там, где нужно меню.",
 "Dica: palma pra cima e pinça abrem o menu.": "Совет: ладонь вверх и щипок открывают меню.",
 "Dica: segure a pinça num app da Biblioteca pra fixar.": "Совет: удерживайте щипок на приложении в Библиотеке, чтобы закрепить.",
 "Diga oi para {0}!": "Передайте привет {0}!",
@@ -2047,5 +2048,7 @@
 "ícone do Daydream Home": "значок Daydream Home",
 "ícones dos painéis": "значки панелей",
 "• unsafe — só pode ser concedida no app 2D, com confirmação explícita. Sem ela o pacote roda no sandbox.": "• unsafe — даётся только в 2D-приложении с явным подтверждением. Без него пакет работает в песочнице.",
-"‹ Loja": "‹ Магазин"
+"‹ Loja": "‹ Магазин",
+"Faça uma arminha com a mão, o indicador apontando para cima. Feche o indicador, leve a mão até onde quer o menu e abra o indicador: o menu em círculo abre ali (voltar, recentralizar, teclado, voz, captura, biblioteca e janelas). Aponte para a opção e feche o indicador de novo para escolher.": "Сделайте «пистолет» рукой, указательный палец вверх. Согните указательный, поднесите руку туда, где нужно меню, и разогните палец: там откроется круговое меню (назад, центрировать, клавиатура, голос, снимок, библиотека и окна). Наведите палец на пункт и снова согните, чтобы выбрать.",
+"Menu rápido": "Быстрое меню"
 }

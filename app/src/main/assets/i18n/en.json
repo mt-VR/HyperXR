@@ -569,6 +569,7 @@
 "Dica: dá pra jogar com Joy-Con, gamepad ou outro celular.": "Tip: you can play with Joy-Con, a gamepad or another phone.",
 "Dica: eu fico em cima da sua mesa. Segure a pinça em mim pra me mudar de lugar.": "Tip: I live on your table. Hold a pinch on me to move me.",
 "Dica: na Loja tem jogo novo toda hora.": "Tip: there are new games in the Store all the time.",
+"Dica: arminha pra cima, fecha o indicador e abre onde quiser o menu.": "Tip: finger gun pointing up, close the index, open it where you want the menu.",
 "Dica: palma pra cima e pinça abrem o menu.": "Tip: palm up and a pinch open the menu.",
 "Dica: segure a pinça num app da Biblioteca pra fixar.": "Tip: hold a pinch on an app in the Library to pin it.",
 "Diga oi para {0}!": "Say hi to {0}!",
@@ -2047,5 +2048,7 @@
 "ícone do Daydream Home": "Daydream Home icon",
 "ícones dos painéis": "panel icons",
 "• unsafe — só pode ser concedida no app 2D, com confirmação explícita. Sem ela o pacote roda no sandbox.": "• unsafe — can only be granted in the 2D app, with explicit confirmation. Without it the package runs in the sandbox.",
-"‹ Loja": "‹ Store"
+"‹ Loja": "‹ Store",
+"Faça uma arminha com a mão, o indicador apontando para cima. Feche o indicador, leve a mão até onde quer o menu e abra o indicador: o menu em círculo abre ali (voltar, recentralizar, teclado, voz, captura, biblioteca e janelas). Aponte para a opção e feche o indicador de novo para escolher.": "Make a finger gun with the index pointing up. Close the index, take your hand where you want the menu and open the index: the circular menu opens there (back, recenter, keyboard, voice, capture, library and windows). Point at an option and close the index again to choose it.",
+"Menu rápido": "Quick menu"
 }

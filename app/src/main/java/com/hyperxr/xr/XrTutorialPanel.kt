@@ -3,8 +3,6 @@ package com.hyperxr.xr
 import android.graphics.Paint
 import android.graphics.RectF
 import com.hyperxr.handtracking.Gesture
-import com.hyperxr.handtracking.Handedness
-import com.hyperxr.handtracking.PalmMenuDetector
 import com.hyperxr.spatialui.PanelCanvas
 import com.hyperxr.spatialui.XrPanel
 import com.hyperxr.spatialui.XrTheme
@@ -16,13 +14,14 @@ import com.hyperxr.spatialui.XrTheme
  */
 class XrTutorialPanel(private val ctx: XrContext, private val onDone: () -> Unit) : XrPanel(1.15f, 0.66f, title = "Tutorial") {
     private enum class Step(val title: String) {
-        WELCOME("Bem-vindo ao HyperMagic"), HANDS("Mostre as mãos"), PINCH("Pinça"), PALM("Menu na palma"),
+        WELCOME("Bem-vindo ao HyperMagic"), HANDS("Mostre as mãos"), PINCH("Pinça"), PALM("Menu rápido"),
         FIST("Mão fechada"), DOCK("Dock e Modo VR"), DONE("Tudo pronto"),
     }
     private var step = Step.WELCOME
     private var progress = 0f
     private var pinches = 0
     private val wasPinch = BooleanArray(2)
+    private val guns = arrayOf(com.hyperxr.handtracking.GunMenuGesture(), com.hyperxr.handtracking.GunMenuGesture())
     private var shownProgress = -1
     private var noHandsTime = 0f
     private var placed = false
@@ -60,11 +59,12 @@ class XrTutorialPanel(private val ctx: XrContext, private val onDone: () -> Unit
                 if (pinches >= 3) next()
             }
             Step.PALM -> {
+                val t = System.nanoTime()
                 for (i in 0..1) {
                     val h = hands[i]
-                    val p = h.isUsable && h.gesture == Gesture.PINCH
-                    if (p && !wasPinch[i] && PalmMenuDetector.isPalmUp(h.joints, h.handedness == Handedness.RIGHT, ctx.input.head.position)) next()
-                    wasPinch[i] = p
+                    if (guns[i].update(if (h.isUsable) h.joints else null, t)) { next(); break }
+                    progress = if (guns.any { it.phase == com.hyperxr.handtracking.GunMenuGesture.Phase.COCKED }) 0.66f
+                        else if (guns.any { it.phase == com.hyperxr.handtracking.GunMenuGesture.Phase.AIMING }) 0.33f else 0f
                 }
             }
             Step.FIST -> {
@@ -90,7 +90,7 @@ class XrTutorialPanel(private val ctx: XrContext, private val onDone: () -> Unit
             Step.HANDS -> "Levante as duas mãos abertas na frente do celular, a uns 40 cm do rosto, e deixe-as paradas um instante. O HyperMagic mede o tamanho delas para desenhar e acertar a pinça." +
                 (ctx.hands?.calibrationProgress?.takeIf { it < 0.99f }?.let { "\n\nMedindo as mãos: ${(it * 100).toInt()}%" } ?: "")
             Step.PINCH -> "Junte e solte as pontas do polegar e do indicador três vezes. É assim que você clica à distância, onde a bolinha do ponteiro estiver.\n\nPinças: $pinches de 3"
-            Step.PALM -> "Vire a palma de uma mão para cima, na sua frente, e faça a pinça. Abre o menu em círculo: voltar, recentralizar, teclado, voz, captura, biblioteca e janelas. Mova a mão até a opção e solte."
+            Step.PALM -> "Faça uma arminha com a mão, o indicador apontando para cima. Feche o indicador, leve a mão até onde quer o menu e abra o indicador: o menu em círculo abre ali (voltar, recentralizar, teclado, voz, captura, biblioteca e janelas). Aponte para a opção e feche o indicador de novo para escolher."
             Step.FIST -> "Feche a mão e segure fechada por um segundo. Com a mão fechada sobre uma janela, você a segura e move pelo espaço."
             Step.DOCK -> "Embaixo fica a dock: Biblioteca com todos os apps e jogos, os apps fixados, Voz, Ajustes e o botão Modo VR, que troca a câmera por um ambiente virtual (escolha qual no app Ambientes).\n\nO seu óculos e a calibração ficam em RealityLenses, nas configurações 2D."
             Step.DONE -> "Pronto! Divirta-se. Os 11 jogos, o navegador, o YouTube XR e os emuladores estão na Biblioteca.\n\nPara rever este tutorial: configurações 2D > Início > Refazer a configuração inicial e o tutorial."

@@ -87,14 +87,50 @@ class RadialMenu(val items: List<String>, var holdNs: Long = 450_000_000L, var d
     var openedInstantly = false
         private set
 
+    /** Opened by the finger gun ([com.hyperxr.handtracking.GunMenuGesture]): the index tip chooses. */
+    var pointed = false
+        private set
+    private var openedNs = 0L
+
+    /** Opens the menu at [point] (the finger gun's index tip), facing the head. */
+    fun openAt(point: Vec3, head: Pose, nowNs: Long) { open(point, head); pointed = true; openedInstantly = true; openedNs = nowNs }
+
+    fun cancel() { phase = Phase.IDLE; selected = -1; pointed = false }
+
+    /**
+     * The menu opened by the finger gun: [tip] (the index tip) highlights an item; [confirm] (the
+     * index closing again, or a pinch) picks it, or closes the menu from the centre. Taking the hand
+     * away or leaving it open too long closes it.
+     */
+    fun updatePointed(tip: Vec3, confirm: Boolean, nowNs: Long): Int? {
+        if (phase != Phase.OPEN || !pointed) return null
+        plane.inverse().transformPoint(tip, local)
+        val r = kotlin.math.sqrt(local.x * local.x + local.y * local.y)
+        selected = if (r < deadZone) -1 else sectorOf(local.x, local.y)
+        if (r > CLOSE_DISTANCE || kotlin.math.abs(local.z) > CLOSE_DISTANCE || nowNs - openedNs > OPEN_NS) { cancel(); return null }
+        if (confirm) {
+            val pick = selected
+            cancel()
+            return if (pick >= 0) pick else null
+        }
+        return null
+    }
+
     private fun open(pinchPoint: Vec3, head: Pose) {
         phase = Phase.OPEN
+        pointed = false
         center.set(pinchPoint)
         plane.position.set(pinchPoint)
         val dx = pinchPoint.x - head.position.x
         val dz = pinchPoint.z - head.position.z
         com.hyperxr.math.Quat.fromAxisAngle(0f, 1f, 0f, atan2(-dx, -dz), plane.orientation)
         selected = -1
+    }
+
+    companion object {
+        /** The finger-gun menu closes when the hand goes this far (metres) or stays open [OPEN_NS]. */
+        const val CLOSE_DISTANCE = 0.3f
+        const val OPEN_NS = 8_000_000_000L
     }
 
     /** Items are laid out clockwise starting at the top. */
