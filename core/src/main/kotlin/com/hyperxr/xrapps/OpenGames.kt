@@ -47,6 +47,8 @@ object OpenGames {
     val CURATED = listOf(
         OpenGame("Open Saber", "mt-VR/HyperXR", "O jogo de ritmo com sabres de luz: corte os blocos na direção da seta. Port do Open Saber (Godot 4, OpenXR) compilado do código-fonte para o runtime do HyperMagic; as músicas vêm do BeatSaver, no menu do jogo",
             "MIT", OpenGame.Kind.OPENXR, needs = "dois controles com posição (Joy-Cons, controle por cor ou HyperConnect)", releaseTag = "opensaber-v0.5.0", ready = true),
+        OpenGame("Godot XR Tools Demo", "mt-VR/HyperXR", "O playground de VR do Godot: ande, escale, pegue e jogue objetos, atire e voe por vários mundinhos. Compilado do código-fonte para o runtime do HyperMagic",
+            "MIT", OpenGame.Kind.OPENXR, needs = "controles com posição (Joy-Cons, controle por cor ou HyperConnect) ou as mãos", releaseTag = "xrtools-v4.4.0", ready = true),
         OpenGame("Quest DOOM", "CommunityPokeOrg/quest-doom", "DOOM em VR com OpenXR (doomgeneric); tem versão para celular comum", "GPL-2.0",
             OpenGame.Kind.OPENXR, needs = ""),
         OpenGame("QuestZDoom", "DrBeef/QuestZDoom", "GZDoom em VR: DOOM, Heretic, Hexen e mods", "GPL-3.0",

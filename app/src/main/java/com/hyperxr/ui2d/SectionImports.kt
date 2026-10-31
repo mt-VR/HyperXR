@@ -34,6 +34,9 @@ import com.hyperxr.files.ApkImports
 import com.hyperxr.files.FileKinds
 import com.hyperxr.files.ImportedGames
 import com.hyperxr.files.StorageAccess
+import com.hyperxr.files.downloadFile
+import com.hyperxr.files.githubGet
+import com.hyperxr.xrapps.OpenGames
 import com.hyperxr.xrapps.XrApi
 import java.io.File
 import java.text.SimpleDateFormat
@@ -61,6 +64,7 @@ fun ImportsSection(a: MainActivity) {
     }
     RuntimeReadyCard(a)
     ImportedGamesCard(a)
+    OpenSourceGamesCard(a)
     PhoneApksCard(a)
 }
 
@@ -143,6 +147,48 @@ private fun OtherXrAppsCard(a: MainActivity, imported: Set<String>) {
                 OutlinedButton(onClick = { a.app.xrApps.launch(x) }) { Text("Jogar") }
             }
         }
+    }
+}
+
+/**
+ * Open-source VR games: the APK of each one's release on GitHub is downloaded and goes through the
+ * same analysis / fix / install as any imported APK.
+ */
+@Composable
+private fun OpenSourceGamesCard(a: MainActivity) {
+    var busy by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    SectionCard("Jogos open source", "Código aberto, com a licença conferida. Os marcados \"pronto\" foram compilados pelo HyperMagic para o runtime dele; os outros passam pelo Corrigir e instalar.") {
+        OpenGames.CURATED.forEach { g ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(g.name + if (g.ready) "  • pronto" else "", color = HxColors.text, fontWeight = FontWeight.SemiBold)
+                    Note("${g.description} (${g.license}, ${g.kind.name.lowercase()})")
+                    if (g.needs.isNotEmpty()) Note("Precisa de: ${g.needs}", HxColors.warn)
+                }
+                OutlinedButton(enabled = busy == null && !a.apkImport.busy, onClick = {
+                    busy = g.repo; status = "Procurando o APK de ${g.name}…"
+                    a.io.execute {
+                        val msg = try {
+                            val apk = OpenGames.parseRelease(githubGet(OpenGames.releaseUrl(g))).firstOrNull()
+                            if (apk == null) {
+                                a.runOnUiThread { a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(g.url))) }
+                                "${g.name}: a última versão não tem APK; abri o código-fonte"
+                            } else {
+                                a.runOnUiThread { status = "Baixando ${apk.name} (${FileKinds.formatSize(apk.bytes)})…" }
+                                val dir = File(a.cacheDir, "opengames").apply { deleteRecursively(); mkdirs() }
+                                val out = File(dir, apk.name.replace('/', '_'))
+                                downloadFile(apk.url, out)
+                                a.runOnUiThread { a.apkImport.importFile(out) }
+                                null
+                            }
+                        } catch (t: Throwable) { "Falha ao baixar ${g.name}: ${t.message}" }
+                        a.runOnUiThread { busy = null; status = msg }
+                    }
+                }) { Text(if (busy == g.repo) "Baixando…" else "Baixar") }
+            }
+        }
+        status?.let { Note(it) }
     }
 }
 
