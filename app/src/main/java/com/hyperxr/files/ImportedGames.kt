@@ -56,11 +56,15 @@ object ImportedGames {
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
     }.getOrNull()
 
+    /** The last game started from here and when (to tell a crash on start from a normal exit). */
+    @Volatile var lastLaunch: Pair<String, Long>? = null
+
     /**
      * Starts a game: XR games through the compatibility layer (runtime visibility, hands), Cardboard
      * and Daydream apps with the viewer's calibration, other apps as Android starts them.
      */
     fun launch(ctx: Context, g: ImportedGame) {
+        lastLaunch = g.packageName to System.currentTimeMillis()
         val activity = g.activity ?: ctx.packageManager.getLaunchIntentForPackage(g.packageName)?.component?.className
             ?: throw IllegalStateException("o app não tem tela inicial")
         when (g.api) {

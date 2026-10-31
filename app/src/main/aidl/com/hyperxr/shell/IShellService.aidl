@@ -39,4 +39,7 @@ interface IShellService {
 
     // `pm uninstall <pkg>` (an original signed with another key blocks installing the patched one).
     String uninstall(String pkg) = 12;
+
+    // The recent system log lines of [pkg]'s processes (logcat as shell), newline-separated.
+    String gameLog(String pkg) = 13;
 }

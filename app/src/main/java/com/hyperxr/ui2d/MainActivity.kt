@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
         io.execute { app.capabilities.probe(app.runtimeBroker); runOnUiThread { refresh++ } }
     }
     val apkImport = ApkImportState(this)
+    val closeCheck = GameCloseCheck(this)
     val pickApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { apkImport.import(it) } }
     val pickPackage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { onPackagePicked(it) } }
     var pendingInstall by mutableStateOf<Pair<java.io.File, com.hyperxr.sdk.InspectionResult>?>(null)
@@ -116,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() { super.onResume(); refresh++ }
+    override fun onResume() { super.onResume(); refresh++; closeCheck.onResume() }
 
     companion object {
         /** Section name (Section.name) to open, e.g. from the XR library. */

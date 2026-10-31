@@ -80,6 +80,7 @@ private fun ImportedGamesCard(a: MainActivity) {
                     Button(onClick = {
                         error = try { ImportedGames.launch(a, g); null } catch (t: Throwable) { "Não abriu ${g.label}: ${t.message}" }
                     }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Jogar") }
+                    OutlinedButton(onClick = { a.closeCheck.show(g.packageName, "Log de ${g.label}") }) { Text("Log") }
                     OutlinedButton(onClick = {
                         a.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${g.packageName}")))
                     }) { Text("Desinstalar") }

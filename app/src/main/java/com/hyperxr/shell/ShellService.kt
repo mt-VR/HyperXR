@@ -179,6 +179,12 @@ class ShellService() : IShellService.Stub() {
         return if (out.contains("Success")) "" else out.also { lastError = it }
     }
 
+    override fun gameLog(pkg: String): String {
+        if (!pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$"))) return ""
+        val lines = run(listOf("logcat", "-d", "-v", "threadtime", "-b", "main,system,crash", "-t", "6000")).lines()
+        return com.hyperxr.xrapps.GameLog.filter(lines, pkg).joinToString("\n")
+    }
+
     override fun releaseDisplay(displayId: Int) {
         displays.remove(displayId)?.release()
     }

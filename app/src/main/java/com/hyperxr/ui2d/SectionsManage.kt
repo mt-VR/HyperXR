@@ -366,6 +366,7 @@ fun DiagnosticsCard() {
 @Composable
 fun Dialogs(a: MainActivity) {
     ApkImportDialog(a)
+    GameCloseDialog(a)
     a.pendingInstall?.let { (_, r) ->
         AlertDialog(
             onDismissRequest = { a.pendingInstall = null },

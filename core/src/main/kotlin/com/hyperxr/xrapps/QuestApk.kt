@@ -41,6 +41,8 @@ data class ApkReport(
     val daydreamController: Boolean = false,
     /** Daydream app (also when it supports Cardboard too). */
     val daydream: Boolean = false,
+    /** Native libraries the game's libraries need that neither the APK nor Android has. */
+    val missingLibs: List<String> = emptyList(),
     val verdict: Verdict,
     val reasons: List<String>,
 )
@@ -109,7 +111,12 @@ object QuestApk {
         // scan the libraries of the ABI this phone will load
         val abi = deviceAbis.firstOrNull { it in abis }
         val scan = StringScan()
-        if (abi != null) for (name in libs.filter { it.startsWith("lib/$abi/") }) zip.getInputStream(zip.getEntry(name)).use { scan.feed(it) }
+        val needed = HashMap<String, List<String>>()
+        if (abi != null) for (name in libs.filter { it.startsWith("lib/$abi/") }) {
+            val e = zip.getEntry(name)
+            zip.getInputStream(e).use { scan.feed(it) }
+            needed[name] = ElfNeeded.read { zip.getInputStream(e) }
+        }
         // Google VR / Cardboard apps: which Java APIs they use (controller, Daydream checks)
         val gvr = libs.any { it.endsWith("/libgvr.so") || it.endsWith("/libgvrunity.so") || it.endsWith("/libcardboard_api.so") || it.endsWith("/libGfxPluginCardboard.so") }
         val vrManifest = manifest.descendants("category").any { it.attr("name") == ApkPatcher.DAYDREAM || it.attr("name") == ApkPatcher.CARDBOARD } ||
@@ -119,11 +126,11 @@ object QuestApk {
         if (gvr || vrManifest) {
             zip.entries().asSequence().filter { it.name.matches(Regex("classes\\d*\\.dex")) }.forEach { e -> zip.getInputStream(e).use { scan.feed(it) } }
         }
-        analyze(manifest, libs, abis, abi, scan)
+        analyze(manifest, libs, abis, abi, scan, ElfNeeded.missing(needed))
     }
 
     /** Separated from [inspect] for tests. */
-    fun analyze(manifest: XmlElement, libs: List<String>, abis: Set<String>, abi: String?, scan: StringScan): ApkReport {
+    fun analyze(manifest: XmlElement, libs: List<String>, abis: Set<String>, abi: String?, scan: StringScan, missingLibs: List<String> = emptyList()): ApkReport {
         val pkg = manifest.attr("package") ?: ""
         val sdk = manifest.all("uses-sdk").firstOrNull()
         val app = manifest.all("application").firstOrNull()
@@ -189,6 +196,10 @@ object QuestApk {
         val reasons = ArrayList<String>()
         var verdict = Verdict.MAY_RUN
         fun wont(r: String) { verdict = Verdict.WONT_RUN; reasons += r }
+        val questOnly = missingLibs.filter { it in ElfNeeded.QUEST_ONLY }
+        if (questOnly.isNotEmpty()) wont("Precisa de ${questOnly.joinToString()}, que só existe dentro do sistema do Quest: o jogo fecha assim que abre")
+        val otherMissing = missingLibs - questOnly.toSet()
+        if (otherMissing.isNotEmpty()) reasons += "Pede bibliotecas que não vêm no APK nem são públicas no Android (${otherMissing.joinToString()}): se o celular não as tiver, o jogo fecha ao abrir"
         if (abi == null && abis.isNotEmpty()) wont("Bibliotecas só para ${abis.joinToString()}; este celular não as carrega")
         when (xrApi) {
             XrApi.VRAPI -> wont("Usa a VrApi da Meta (Gear VR / Quest antigo): o HyperMagic roda só OpenXR")
@@ -231,7 +242,7 @@ object QuestApk {
             minSdk = sdk?.attr("minSdkVersion")?.toIntOrNull() ?: 1, targetSdk = sdk?.attr("targetSdkVersion")?.toIntOrNull() ?: 0,
             abis = abis, nativeLibs = libNames.sorted(), engine = engine, xrApi = xrApi, loader = loader, questApp = questApp,
             supportedDevices = meta["com.oculus.supportedDevices"], platformSdk = platformSdk, graphics = graphics, extensions = exts,
-            launchActivity = launch, daydreamController = ddController, verdict = verdict, reasons = reasons, daydream = daydream, picoApp = picoApp,
+            launchActivity = launch, daydreamController = ddController, missingLibs = missingLibs, verdict = verdict, reasons = reasons, daydream = daydream, picoApp = picoApp,
         )
     }
 
