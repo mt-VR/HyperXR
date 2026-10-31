@@ -62,7 +62,7 @@ class OpenGamesPanel(private val host: MediaHost, private val openUrl: (String) 
         val list = if (tab == Tab.CURATED) OpenGames.CURATED else results
         if (list == null) { c.paragraph("Buscando no GitHub…", 26f); return }
         if (list.isEmpty()) { c.paragraph("Nada encontrado com licença open source.", 26f); return }
-        if (tab == Tab.CURATED) c.paragraph("Licença conferida em cada repositório. Ainda não testados no HyperMagic: jogos feitos para o Quest passam pelo Corrigir APK.", 22f)
+        if (tab == Tab.CURATED) c.paragraph("Licença conferida em cada repositório. Os marcados como prontos foram compilados para o runtime do HyperMagic.", 22f)
         val per = 5
         val pages = (list.size + per - 1) / per
         page = page.coerceIn(0, pages - 1)

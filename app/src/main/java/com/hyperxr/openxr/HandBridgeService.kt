@@ -37,10 +37,7 @@ import com.hyperxr.handtracking.TrackingState
  * a game is launched (an app may only use the camera from a foreground service it started while
  * visible), opens the back camera only while the game's runtime says it has a hand tracker, and
  * publishes the hands ~90 times a second in [HandBridge]'s shared file. When the game shows
- * passthrough (XR_FB_passthrough / ALPHA_BLEND), it also publishes small colour frames (~30 fps).
- *
- * When the game tracks the face (Meta's face tracking from audio), it measures the voice on the
- * microphone (only the loudness, nothing is recorded or kept) while the game asks for it.
+ * passthrough (the ALPHA_BLEND environment blend mode), it also publishes small colour frames (~30 fps).
  *
  * It also plays the game's vibrations on the controller of that hand (Joy-Con L / R or a gamepad):
  * the runtime inside the game may not vibrate anything itself.
@@ -62,9 +59,6 @@ class HandBridgeService : Service() {
     private var frameBuffer: java.nio.ByteBuffer? = null
     private var lastFrameNs = 0L
     private val hapticOut = FloatArray(3)
-    private var micAllowed = false
-    @Volatile private var voiceThread: Thread? = null
-    @Volatile private var voiceRun = false
     private var hapticSeq = -1
     private var device: CameraDevice? = null
     private var reader: ImageReader? = null
@@ -106,11 +100,7 @@ class HandBridgeService : Service() {
             .setContentText("A câmera rastreia suas mãos enquanto o jogo pede")
             .setOngoing(true)
             .build()
-        // the microphone joins only when its permission was given (a type without it is refused)
-        val mic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        micAllowed = mic
-        if (Build.VERSION.SDK_INT >= 30) startForeground(NOTIFICATION_ID, n,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or (if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0))
+        if (Build.VERSION.SDK_INT >= 30) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
         else startForeground(NOTIFICATION_ID, n)
     }
 
@@ -125,9 +115,6 @@ class HandBridgeService : Service() {
             if (now - lastSign > IDLE_STOP_NS) { stopSelf(); return }
             handsWanted = wants != 0L && now - wants < CAMERA_IDLE_NS && HyperXRApp.instance.settings.current.handTracking.openxrHands
             playHaptics()
-            val voice = HandBridge.nativeReaderWantsVoice(map)
-            val voiceWanted = micAllowed && voice != 0L && now - voice < PASSTHROUGH_IDLE_NS
-            if (voiceWanted && voiceThread == null) startVoice() else if (!voiceWanted && voiceThread != null) stopVoice()
             val pt = HandBridge.nativeCameraWanted(cameraMap)
             passthroughWanted = pt != 0L && now - pt < PASSTHROUGH_IDLE_NS
             val wanted = handsWanted || passthroughWanted
@@ -224,45 +211,6 @@ class HandBridgeService : Service() {
         HandBridge.nativeCameraWrite(cameraMap, captured, buf, bmp.width, bmp.height, intr.fx * s, intr.fy * s, cx, cy)
     }
 
-    /** Measures the voice loudness every 20 ms for the game's face tracker. */
-    @SuppressLint("MissingPermission")
-    private fun startVoice() {
-        voiceRun = true
-        voiceThread = Thread({
-            val rate = 16000
-            val min = android.media.AudioRecord.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
-            val rec = runCatching {
-                android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, android.media.AudioFormat.CHANNEL_IN_MONO,
-                    android.media.AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 3200))
-            }.getOrNull()
-            if (rec == null || rec.state != android.media.AudioRecord.STATE_INITIALIZED) { rec?.release(); voiceThread = null; return@Thread }
-            val buf = ShortArray(320)
-            var smooth = 0f
-            runCatching {
-                rec.startRecording()
-                while (voiceRun) {
-                    val n = rec.read(buf, 0, buf.size)
-                    if (n <= 0) continue
-                    var sum = 0.0
-                    for (i in 0 until n) sum += buf[i].toDouble() * buf[i]
-                    val rms = kotlin.math.sqrt(sum / n) / 32768.0
-                    val db = 20 * kotlin.math.log10(rms + 1e-9)
-                    val level = ((db + 50) / 40).toFloat().coerceIn(0f, 1f)  // -50 dBFS silent .. -10 dBFS loud
-                    smooth += (level - smooth) * (if (level > smooth) 0.6f else 0.25f)  // opens fast, closes softly
-                    HandBridge.nativeVoice(map, System.nanoTime(), smooth)
-                }
-            }
-            runCatching { rec.stop() }
-            rec.release()
-        }, "hx-handbridge-voice").apply { start() }
-    }
-
-    private fun stopVoice() {
-        voiceRun = false
-        voiceThread?.join(500)
-        voiceThread = null
-    }
-
     /** Plays the game's newest vibration request on the controller of that hand. */
     private fun playHaptics() {
         val seq = HandBridge.nativeHaptic(map, hapticOut)
@@ -303,7 +251,6 @@ class HandBridgeService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        stopVoice()
         closeCamera()
         hands?.shutdown(); hands = null
         // nothing tracked any more: the game sees no hands rather than frozen ones

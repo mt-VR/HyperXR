@@ -31,10 +31,13 @@ class QuestApkTest {
         assertTrue("com.oculus.intent.category.VR" in cats)
     }
 
-    private fun apk(libs: Map<String, ByteArray>): File {
+    // openxr_manifest.xml: a plain Android OpenXR game (no headset markers), compiled the same way
+    private val openxrManifest = javaClass.getResourceAsStream("/openxr_manifest.axml")!!.readBytes()
+
+    private fun apk(libs: Map<String, ByteArray>, manifest: ByteArray = manifestBytes): File {
         val f = Files.createTempFile("game", ".apk").toFile()
         ZipOutputStream(f.outputStream()).use { z ->
-            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(manifestBytes); z.closeEntry()
+            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(manifest); z.closeEntry()
             for ((n, b) in libs) { z.putNextEntry(ZipEntry(n)); z.write(b); z.closeEntry() }
         }
         return f
@@ -42,51 +45,54 @@ class QuestApkTest {
 
     private fun bin(vararg strings: String): ByteArray = strings.joinToString("\u0000") { it }.toByteArray() + byteArrayOf(0)
 
-    @Test fun khronosLoaderGlesGameMayRun() {
+    @Test fun questGameIsRefused() {
         val r = QuestApk.inspect(apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
-            "lib/arm64-v8a/libunity.so" to bin("XR_FB_passthrough", "XR_FB_display_refresh_rate", "XR_EXT_hand_tracking", "XR_FB_space_warp"),
+            "lib/arm64-v8a/libunity.so" to bin("XR_FB_passthrough", "XR_EXT_hand_tracking"),
             "lib/arm64-v8a/libil2cpp.so" to ByteArray(10),
         )))
         assertEquals("com.example.questgame", r.packageName)
         assertEquals(42L, r.versionCode)
         assertEquals("Unity", r.engine)
         assertEquals(XrApi.OPENXR, r.xrApi)
-        assertEquals(LoaderKind.KHRONOS_BROKER, r.loader)
         assertTrue(r.questApp)
         assertEquals("com.example.questgame.MainActivity", r.launchActivity)
-        assertTrue("XR_FB_passthrough" in r.extensions && "XR_EXT_hand_tracking" in r.extensions)
-        assertEquals(Verdict.MAY_RUN, r.verdict) // a Meta extension the runtime lacks (space warp)
+        assertEquals(Verdict.WONT_RUN, r.verdict)
+        assertTrue(r.reasons.any { "Feito para Quest" in it })
     }
 
-    @Test fun metaExtensionsTheRuntimeHasNoLongerHoldAGameBack() {
+    @Test fun khronosLoaderGlesGameRuns() {
         val r = QuestApk.inspect(apk(mapOf(
             "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
-            "lib/arm64-v8a/libunity.so" to bin("XR_FB_display_refresh_rate", "XR_FB_color_space", "XR_FB_foveation"),
-        )))
-        assertEquals(Verdict.LIKELY_RUNS, r.verdict)
-        assertTrue(r.reasons.any { "3 extensões Meta" in it })
-    }
-
-    @Test fun handTrackingGameIsServed() {
-        val r = QuestApk.inspect(apk(mapOf(
-            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
-            "lib/arm64-v8a/libunity.so" to bin("XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim", "XR_FB_passthrough"),
-        )))
+            "lib/arm64-v8a/libgodot_android.so" to bin("XR_EXT_hand_tracking", "XR_KHR_composition_layer_cylinder"),
+        ), openxrManifest))
+        assertEquals("com.example.openxrgame", r.packageName)
+        assertEquals("Godot", r.engine)
+        assertEquals(LoaderKind.KHRONOS_BROKER, r.loader)
+        assertEquals("com.example.openxrgame.GameActivity", r.launchActivity)
         assertEquals(Verdict.LIKELY_RUNS, r.verdict)
         assertTrue(r.reasons.any { "hand tracking" in it })
-        assertTrue(r.reasons.any { "passthrough" in it })
     }
 
-    @Test fun picoAppIsRecognised() {
+    @Test fun vendorExtensionsAndLoadersHoldAGameBack() {
+        val ext = QuestApk.inspect(apk(mapOf(
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable"),
+            "lib/arm64-v8a/libmain.so" to bin("XR_FB_display_refresh_rate", "XR_FB_passthrough"),
+        ), openxrManifest))
+        assertEquals(Verdict.MAY_RUN, ext.verdict)
+        assertTrue(ext.reasons.any { "2 extensões de fabricante" in it })
+        val metaLoader = QuestApk.inspect(apk(mapOf("lib/arm64-v8a/libopenxr_loader.so" to bin("libopenxr_forwardloader", "XR_KHR_opengl_es_enable")), openxrManifest))
+        assertEquals(Verdict.WONT_RUN, metaLoader.verdict)
+    }
+
+    @Test fun picoAppIsRefused() {
         val r = QuestApk.inspect(apk(mapOf(
-            "lib/arm64-v8a/libopenxr_loader.so" to bin("XR_KHR_opengl_es_enable", "XR_BD_controller_interaction", "XR_PICO_configuration"),
+            "lib/arm64-v8a/libopenxr_loader.so" to bin("org.khronos.openxr.runtime_broker", "XR_KHR_opengl_es_enable", "XR_BD_controller_interaction"),
             "lib/arm64-v8a/libpxr_api.so" to bin("pxr"),
-        )))
+        ), openxrManifest))
         assertTrue(r.picoApp)
-        assertTrue(r.reasons.any { "App da Pico" in it })
-        assertTrue(r.reasons.any { "XR_PICO_configuration" in it })
-        assertTrue(r.reasons.any { "libpxr_api.so" in it })
+        assertEquals(Verdict.WONT_RUN, r.verdict)
+        assertTrue(r.reasons.any { "Feito para Pico" in it })
     }
 
     @Test fun vrapiAndVulkanOnlyWontRun() {

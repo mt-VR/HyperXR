@@ -32,11 +32,6 @@ struct HxHandShared {
     uint32_t hapticHand;          // 0 left, 1 right
     float hapticAmplitude;        // 0..1 (0 stops)
     int32_t hapticDurationMs;
-    // the voice for face tracking from audio (Meta's lip sync): the app measures the microphone
-    int64_t voiceNs;              // when [voiceLevel] was measured (CLOCK_MONOTONIC), written by the app
-    float voiceLevel;             // 0 (silence) .. 1 (loud speech)
-    float voicePad;
-    int64_t readerWantsVoiceNs;   // written by the runtime: a game has a face tracker
 };
 
 #ifdef __cplusplus

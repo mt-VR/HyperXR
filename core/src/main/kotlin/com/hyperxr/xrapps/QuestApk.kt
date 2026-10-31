@@ -50,53 +50,20 @@ data class ApkReport(
 )
 
 /**
- * Inspects a Quest (or any XR) APK without installing it: manifest (package, SDK levels, VR
- * categories, Meta device list), bundled native libraries (engine, OpenXR loader, VrApi, Meta
- * Platform SDK) and the OpenXR extension names compiled into them, then states plainly whether
- * HyperXR's OpenXR runtime can run it.
+ * Inspects an XR APK without installing it: manifest (package, SDK levels, VR categories, headset
+ * markers), bundled native libraries (engine, OpenXR loader, VrApi, headset SDKs) and the OpenXR
+ * extension names compiled into them, then states plainly whether HyperXR's OpenXR runtime can
+ * run it. Games made for a Quest or a Pico are recognised and refused: HyperXR does not adapt them.
  */
 object QuestApk {
     /** Extensions the HyperXR runtime implements (native/openxr-runtime). */
     val RUNTIME_EXTENSIONS = setOf(
         "XR_KHR_android_create_instance", "XR_KHR_opengl_es_enable", "XR_KHR_convert_timespec_time",
-        "XR_EXT_local_floor", "XR_MND_headless",
-        // Meta (Quest)
-        "XR_FB_display_refresh_rate", "XR_FB_color_space", "XR_FB_swapchain_update_state", "XR_FB_swapchain_update_state_opengl_es",
-        "XR_FB_foveation", "XR_FB_foveation_configuration", "XR_FB_composition_layer_settings", "XR_FB_composition_layer_image_layout",
-        "XR_FB_touch_controller_pro", "XR_META_touch_controller_plus", "XR_EXT_performance_settings", "XR_KHR_android_thread_settings",
-        // Pico
-        "XR_BD_controller_interaction",
-        // hands (tracked by HyperMagic with the camera while the game runs)
-        "XR_EXT_hand_tracking", "XR_FB_hand_tracking_aim", "XR_FB_hand_tracking_mesh", "XR_FB_hand_tracking_capsules",
+        "XR_EXT_local_floor", "XR_MND_headless", "XR_EXT_performance_settings", "XR_KHR_android_thread_settings",
+        // hands (tracked by HyperMagic with the camera while the game runs), also as controllers
+        "XR_EXT_hand_tracking", "XR_EXT_hand_interaction",
         // curved panels and 180/360 images
         "XR_KHR_composition_layer_cylinder", "XR_KHR_composition_layer_equirect2",
-        // mixed reality: the phone's camera behind the game
-        "XR_FB_passthrough",
-        // anchors and the room (Meta scene model)
-        "XR_FB_spatial_entity", "XR_FB_spatial_entity_query", "XR_FB_spatial_entity_storage", "XR_FB_spatial_entity_container",
-        "XR_FB_scene", "XR_FB_scene_capture",
-        // controller models, per-layer blending, local dimming, headset id
-        "XR_FB_render_model", "XR_FB_composition_layer_alpha_blend", "XR_META_local_dimming", "XR_META_headset_id",
-        // hands as controllers, Touch proximity, haptics, and the smaller Meta extensions
-        "XR_EXT_hand_interaction", "XR_META_simultaneous_hands_and_controllers", "XR_FB_touch_controller_proximity",
-        "XR_FB_haptic_amplitude_envelope", "XR_FB_haptic_pcm", "XR_META_performance_metrics", "XR_META_recommended_layer_resolution",
-        "XR_FB_composition_layer_secure_content", "XR_META_automatic_layer_filter", "XR_FB_keyboard_tracking",
-        "XR_META_passthrough_preferences", "XR_META_passthrough_layer_resumed_event", "XR_FB_spatial_entity_storage_batch",
-        "XR_OCULUS_android_session_state_enable",
-        "XR_META_virtual_keyboard",
-        // Pico spatial sensing: anchors, the room, its planes and mesh (and the futures they use)
-        "XR_EXT_future", "XR_BD_future_progress", "XR_BD_spatial_sensing", "XR_BD_spatial_anchor", "XR_BD_spatial_scene",
-        "XR_BD_spatial_mesh", "XR_BD_spatial_plane",
-        // bodies inferred from the head and the hands (Meta upper / full body, Pico)
-        "XR_FB_body_tracking", "XR_META_body_tracking_full_body", "XR_BD_body_tracking",
-        // the room as a mesh, passthrough colour cubes, keyboard-hands passthrough layers
-        "XR_META_spatial_entity_mesh", "XR_META_passthrough_color_lut", "XR_FB_passthrough_keyboard_hands",
-        // room depth for occlusion, gaze from the head, thumb microgestures
-        "XR_META_environment_depth", "XR_FB_eye_tracking_social", "XR_META_hand_tracking_microgestures",
-        // the face from the voice, no external cameras, no detached controllers
-        "XR_FB_face_tracking", "XR_FB_face_tracking2", "XR_OCULUS_external_camera", "XR_META_detached_controllers",
-        // meshes for projected passthrough, eye-tracked foveation (never a gaze)
-        "XR_FB_triangle_mesh", "XR_META_foveation_eye_tracked",
     )
 
     /** Pico's own native SDK and platform (store) libraries. */
@@ -203,6 +170,7 @@ object QuestApk {
         if (questOnly.isNotEmpty()) wont("Precisa de ${questOnly.joinToString()}, que só existe dentro do sistema do Quest: o jogo fecha assim que abre")
         val otherMissing = missingLibs - questOnly.toSet()
         if (otherMissing.isNotEmpty()) reasons += "Pede bibliotecas que não vêm no APK nem são públicas no Android (${otherMissing.joinToString()}): se o celular não as tiver, o jogo fecha ao abrir"
+        if (questApp || picoApp || platformSdk) wont("Feito para " + (if (picoApp && !questApp) "Pico" else "Quest") + ": o HyperMagic não roda nem corrige jogos desses óculos")
         if (abi == null && abis.isNotEmpty()) wont("Bibliotecas só para ${abis.joinToString()}; este celular não as carrega")
         when (xrApi) {
             XrApi.VRAPI -> wont("Usa a VrApi da Meta (Gear VR / Quest antigo): o HyperMagic roda só OpenXR")
@@ -214,8 +182,8 @@ object QuestApk {
         }
         if (xrApi == XrApi.OPENXR) when (loader) {
             LoaderKind.KHRONOS_BROKER -> reasons += "Loader OpenXR padrão Khronos: encontra o runtime HyperMagic pelo broker"
-            LoaderKind.META_FORWARD -> wont("Loader OpenXR da Meta que só procura o runtime do Quest (\"Corrigir e instalar\" troca pelo loader da Khronos)")
-            LoaderKind.UNKNOWN -> reasons += "Loader OpenXR de origem desconhecida: \"Corrigir e instalar\" troca pelo loader da Khronos"
+            LoaderKind.META_FORWARD -> wont("Loader OpenXR da Meta, que só procura o runtime do Quest")
+            LoaderKind.UNKNOWN -> wont("Loader OpenXR de fabricante (não é o da Khronos): ele não procura o runtime HyperMagic")
             LoaderKind.NONE -> reasons += "Sem loader OpenXR embutido (espera o do sistema)"
         }
         val godotVulkan = godotRenderer != null && godotRenderer != GodotProject.COMPATIBILITY
@@ -228,25 +196,13 @@ object QuestApk {
             libNames.filter { it.contains("frida", true) || it.contains("gadget", true) }
         if (gadget.isNotEmpty()) reasons += "APK modificado: traz o Frida gadget (${gadget.distinct().joinToString()}), que não faz parte do jogo. " +
             "Em Android recente ele costuma derrubar o jogo antes de abrir (SIGSEGV em memória anônima); use o APK sem modificação"
-        if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
-        val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) && it !in RUNTIME_EXTENSIONS }.sorted()
-        val metaOk = exts.count { (it.startsWith("XR_FB_") || it.startsWith("XR_META_")) && it in RUNTIME_EXTENSIONS }
-        if (metaOk > 0) reasons += "$metaOk extensões Meta que o jogo usa o runtime HyperMagic atende (taxa de quadros, cores, foveação, controles Touch)"
-        if (meta2.isNotEmpty()) reasons += "Cita ${meta2.size} extensões Meta que o HyperMagic ainda não tem (${meta2.take(4).joinToString()}${if (meta2.size > 4) "..." else ""}); o jogo funciona só se forem opcionais"
-        if (picoApp) {
-            reasons += "App da Pico: os controles Pico 4 / Neo 3 / G3 são atendidos (pelos Joy-Con ou pelas mãos)"
-            val picoExt = exts.filter { (it.startsWith("XR_PICO_") || it.startsWith("XR_BD_")) && it !in RUNTIME_EXTENSIONS }.sorted()
-            if (picoExt.isNotEmpty()) reasons += "Cita ${picoExt.size} extensões Pico que o HyperMagic não tem (${picoExt.take(4).joinToString()}${if (picoExt.size > 4) "..." else ""}); o jogo funciona só se forem opcionais"
-            if (picoLibs.isNotEmpty()) reasons += "Traz o SDK nativo da Pico (${picoLibs.joinToString()}): o que ele pede aos serviços do óculos Pico (loja, limites de área) não existe num celular"
-        }
+        val vendorExt = exts.filter { e -> listOf("XR_FB_", "XR_META_", "XR_OCULUS_", "XR_BD_", "XR_PICO_").any { e.startsWith(it) } }.sorted()
+        if (vendorExt.isNotEmpty()) reasons += "Cita ${vendorExt.size} extensões de fabricante (${vendorExt.take(4).joinToString()}${if (vendorExt.size > 4) "..." else ""}) que o HyperMagic não tem; o jogo funciona só se forem opcionais"
         val ddController = scan.has("Lcom/google/vr/sdk/controller/ControllerManager;")
         if (daydream) reasons += "Detectado como Daydream por: ${daydreamSignals.joinToString()}"
         if (ddController) reasons += "Usa o controle Daydream: instale o HyperMagic Daydream (Ajustes > Mãos e controles) e o Joy-Con vira o controle; sem ele, as telas que exigem o controle não avançam"
-        if (questApp && xrApi == XrApi.OPENXR) reasons += "Jogos de Quest esperam controles Touch: aqui a entrada vem das mãos/Joy-Con e pode ficar limitada"
-        if ("XR_FB_scene" in exts || "XR_FB_spatial_entity" in exts) reasons += "Usa âncoras / modelo da sala da Meta: a sala vem da área desenhada no HyperGuardian (ou uma de 4 x 4 m); âncoras ficam paradas onde foram criadas"
-        if ("XR_FB_passthrough" in exts) reasons += "Usa passthrough (realidade mista): a câmera do celular aparece atrás do jogo, em baixa resolução e sem profundidade"
-        if ("XR_EXT_hand_tracking" in exts) reasons += "Usa hand tracking: o HyperMagic rastreia suas mãos pela câmera enquanto o jogo roda (juntas, pinça e mira da Meta)"
-        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && picoLibs.isEmpty() && ("Vulkan" !in graphics || godotRenderer == GodotProject.COMPATIBILITY)) verdict = Verdict.LIKELY_RUNS
+        if ("XR_EXT_hand_tracking" in exts) reasons += "Usa hand tracking: o HyperMagic rastreia suas mãos pela câmera enquanto o jogo roda"
+        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && vendorExt.isEmpty() && ("Vulkan" !in graphics || godotRenderer == GodotProject.COMPATIBILITY)) verdict = Verdict.LIKELY_RUNS
 
         return ApkReport(
             packageName = pkg, versionName = manifest.attr("versionName") ?: "", versionCode = manifest.attr("versionCode")?.toLongOrNull() ?: 0,

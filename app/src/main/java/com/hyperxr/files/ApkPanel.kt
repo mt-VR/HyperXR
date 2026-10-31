@@ -19,7 +19,7 @@ import com.hyperxr.xrapps.XrApi
 import java.io.File
 
 /**
- * Install an APK (Quest games included): shows what the APK is and whether HyperXR's OpenXR
+ * Install an APK: shows what the APK is and whether HyperXR's OpenXR
  * runtime can run it, then installs it with Shizuku (`pm install`, no prompt, OBB copied too) or
  * hands it to the system installer.
  */

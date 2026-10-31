@@ -8,49 +8,37 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-/**
- * Library the patcher puts into games, per ABI folder: the Khronos OpenXR loader (asks the
- * runtime broker, so it finds HyperXR's runtime).
- */
-class CompatLibraries(val loaders: Map<String, File>)
-
 data class PatchReport(
     val changes: List<String>,
     val warnings: List<String>,
     /** Problems that make the patched game useless; nothing is written when not empty. */
     val blockers: List<String>,
     val packageName: String,
-    val questGame: Boolean,
     /** Daydream app made launchable as a Cardboard app. */
     val daydream: Boolean,
 )
 
 /**
- * Prepares an OpenXR / Quest or Daydream APK for HyperXR, on the phone (after
- * Compatibility-Layer's compatibility_layer_port.py, OpenXR only, plus a Daydream layer):
+ * Prepares an OpenXR (Khronos loader) or Daydream APK for HyperXR, on the phone:
  *  - manifest: targetSdk capped at 29 (the game sees the runtime broker and runtime without
- *    `<queries>`), headset-only `uses-feature` made optional, Play split requirements removed;
- *  - Meta's OpenXR loader (or an unknown one) replaced by the Khronos loader;
+ *    `<queries>`), Android VR-mode `uses-feature` made optional, Play split requirements removed;
+ *  - Godot 4 games on Vulkan switched to the Compatibility renderer (OpenGL ES);
  *  - Daydream-only apps: the DAYDREAM launcher category becomes CARDBOARD, so the GVR SDK and
  *    launchers treat them as Cardboard apps (no Google VR Services or Daydream phone needed);
  *  - Daydream checks in the app's own code ("is this a Daydream-ready phone?") answer yes
  *    ([DexPatcher]); the Google VR SDK itself keeps running in Cardboard mode;
  *  - 32-bit only apps: run as they are on phones that execute 32-bit code; on 64-bit-only phones
  *    they are refused with the reason (native ARM code cannot be converted to 64 bits);
- *  - VrApi (Gear VR / old Quest) games are refused: HyperXR supports OpenXR only;
+ *  - games made for Quest or Pico (their vendor loaders and SDKs) and VrApi games are refused;
  *  - old signatures removed (the caller signs the result).
  */
 object ApkPatcher {
     const val MAX_TARGET_SDK = 29
     private val ABI_DIRS = listOf("arm64-v8a", "armeabi-v7a", "armeabi")
-    private val ENTITLEMENT = setOf("libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so")
-    private val PICO_PLATFORM = setOf("libPxrPlatform.so", "libpxrplatformloader.so", "libPxrPlatformLoader.so")
-    private val HEADSET_FEATURES = listOf("oculus.", "com.oculus.", "android.hardware.vr", "android.software.vr", "wave.feature", "picovr", "com.samsung.android.vr")
+    /** Android's own VR-mode features (Daydream apps require them; ordinary phones lack them). */
+    private val HEADSET_FEATURES = listOf("android.hardware.vr", "android.software.vr")
     const val DAYDREAM = "com.google.intent.category.DAYDREAM"
     const val CARDBOARD = "com.google.intent.category.CARDBOARD"
-
-    /** ABI folder in lib/ -> key of [CompatLibraries] maps ("armeabi" games load 32-bit ARM libraries too). */
-    fun libKey(abiDir: String) = if (abiDir == "armeabi") "armeabi-v7a" else abiDir
 
     /** Edits the binary manifest in place; returns the new bytes and what changed. */
     fun patchManifest(manifest: ByteArray): Pair<ByteArray, List<String>> {
@@ -85,7 +73,7 @@ object ApkPatcher {
     /**
      * @param device32Bit whether this phone runs 32-bit ARM code (null = unknown, no check).
      */
-    fun patch(input: File, output: File, libs: CompatLibraries, dryRun: Boolean = false, device32Bit: Boolean? = null): PatchReport {
+    fun patch(input: File, output: File, dryRun: Boolean = false, device32Bit: Boolean? = null): PatchReport {
         ZipFile(input).use { zip ->
             val entries = zip.entries().asSequence().toList()
             val names = entries.map { it.name }.toSet()
@@ -115,31 +103,15 @@ object ApkPatcher {
                 only32 -> warnings += "Jogo OpenXR 32 bits: o runtime HyperMagic é 64 bits, então ele só roda com outro runtime OpenXR de 32 bits"
             }
             val libNames = names.filter { it.startsWith("lib/") }.map { it.substringAfterLast('/') }.toSet()
-            ENTITLEMENT.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
-                warnings += "Verificação de compra da Meta (${it.joinToString()}): se o jogo exigir, ele fecha ao iniciar"
-            }
-            PICO_PLATFORM.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
-                warnings += "SDK da loja Pico (${it.joinToString()}): se o jogo exigir a verificação de compra da Pico, ele fecha ao iniciar"
-            }
-            // OVRPlugin builds can carry both backends: only VrApi without an OpenXR loader is VrApi-only
             if (abiDirs.any { "lib/$it/libvrapi.so" in names && "lib/$it/libopenxr_loader.so" !in names })
                 blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperMagic roda só OpenXR"
+            // made for a Quest or a Pico: their loaders and SDKs run only on those headsets
+            val meta = manifest.all("application").firstOrNull()?.all("meta-data").orEmpty().mapNotNull { it.attr("name") }
+            val vendor = QUEST_HINTS.any { it in categories } || "com.oculus.supportedDevices" in meta ||
+                meta.any { it.startsWith("pvr.") || it.startsWith("pico.") } || libNames.any { it in VENDOR_LIBS } ||
+                abiDirs.any { abi -> "lib/$abi/libopenxr_loader.so" in names && !zip.getInputStream(zip.getEntry("lib/$abi/libopenxr_loader.so")).use { i -> StringScan().also { it.feed(i) } }.has("org.khronos.openxr.runtime_broker") }
+            if (vendor) blockers += "Feito para Quest ou Pico: o HyperMagic não corrige jogos desses óculos"
 
-            // what replaces what
-            val replace = HashMap<String, File>()
-            for (abi in abiDirs) {
-                val key = libKey(abi)
-                val loaderPath = "lib/$abi/libopenxr_loader.so"
-                val loader = libs.loaders[key]
-                if (loaderPath in names && loader != null) {
-                    val scan = StringScan()
-                    zip.getInputStream(zip.getEntry(loaderPath)).use { scan.feed(it) }
-                    if (!scan.has("org.khronos.openxr.runtime_broker")) {
-                        replace[loaderPath] = loader
-                        changes += "Loader OpenXR do fabricante (Meta ou Pico, $abi) trocado pelo loader da Khronos"
-                    }
-                }
-            }
             // Godot 4 games on Vulkan: the Compatibility renderer (OpenGL ES) instead
             var godotProject: ByteArray? = null
             if (GodotProject.PATH in names && names.any { it.endsWith("/libgodot_android.so") }) {
@@ -159,9 +131,7 @@ object ApkPatcher {
                     changes += "Verificação \"celular Daydream?\" removida em ${r.sites} ponto(s) de $name (${r.methods.distinct().take(3).joinToString()}${if (r.methods.distinct().size > 3) "…" else ""})"
                 }
             }
-            val questGame = QUEST_HINTS.any { hint -> manifest.descendants("category").any { it.attr("name") == hint } } ||
-                manifest.all("application").firstOrNull()?.all("meta-data")?.any { it.attr("name") == "com.oculus.supportedDevices" } == true
-            val report = PatchReport(changes, warnings, blockers, pkg, questGame, daydream)
+            val report = PatchReport(changes, warnings, blockers, pkg, daydream)
             if (dryRun || blockers.isNotEmpty()) return report
 
             ZipOutputStream(output.outputStream().buffered(1 shl 20)).use { out ->
@@ -173,7 +143,6 @@ object ApkPatcher {
                     if (upper.startsWith("META-INF/") && (upper == "META-INF/MANIFEST.MF" || upper.substringAfterLast('.') in setOf("RSA", "DSA", "EC", "SF"))) continue
                     when {
                         name == "AndroidManifest.xml" -> putBytes(out, name, newManifest, stored = e.method == ZipEntry.STORED)
-                        name in replace -> putFile(out, name, replace.getValue(name), stored = true)
                         name == GodotProject.PATH && godotProject != null -> putBytes(out, name, godotProject, stored = e.method == ZipEntry.STORED)
                         name in dexPatched -> putBytes(out, name, dexPatched.getValue(name), stored = e.method == ZipEntry.STORED)
                         // native libraries and resources.arsc stay uncompressed (mapped in place)
@@ -186,6 +155,9 @@ object ApkPatcher {
     }
 
     private val QUEST_HINTS = listOf("com.oculus.intent.category.VR")
+    /** Native SDKs of Meta's and Pico's headsets (and their stores). */
+    private val VENDOR_LIBS = setOf("libOVRPlugin.so", "libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so",
+        "libpxr_api.so", "libPxrPlatform.so", "libpxrplatformloader.so", "libPxrPlatformLoader.so")
 
     private fun daydreamOrCardboard(manifest: ByteArray) =
         BinaryXml.parse(manifest).descendants("category").any { it.attr("name") == DAYDREAM || it.attr("name") == CARDBOARD }
@@ -198,8 +170,6 @@ object ApkPatcher {
         }
         out.putNextEntry(e); out.write(data); out.closeEntry()
     }
-
-    private fun putFile(out: ZipOutputStream, name: String, file: File, stored: Boolean) = putStream(out, name, stored, file.length()) { file.inputStream() }
 
     private fun putEntry(out: ZipOutputStream, zip: ZipFile, e: ZipEntry, stored: Boolean) =
         putStream(out, e.name, stored, e.size) { zip.getInputStream(e) }

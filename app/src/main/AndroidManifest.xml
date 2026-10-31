@@ -6,8 +6,6 @@
     <!-- Hands for OpenXR games: the camera runs in a foreground service while the game is in front. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <!-- Face tracking from the voice in OpenXR games (only when the microphone permission was given). -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -205,7 +203,7 @@
         <service
             android:name=".openxr.HandBridgeService"
             android:exported="false"
-            android:foregroundServiceType="camera|microphone" />
+            android:foregroundServiceType="camera" />
 
         <!-- Viewer calibration (IPD, FOV, lens) read by the runtime inside OpenXR apps, and the hands file. -->
         <provider

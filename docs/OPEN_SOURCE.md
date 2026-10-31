@@ -13,7 +13,7 @@ licenças) e no README.
 | 81 | Resonance Audio | som 3D (HRTF) de todos os sons posicionados, `app/src/main/cpp/spatial_audio.cpp` |
 | 86 | libyuv | câmera -> hand tracking com NEON e filtro box (0,21 ms contra 0,94 ms por quadro no teste), `yuv_convert.cpp` |
 | 06/07 | OpenXR-SDK / SDK-Source | loader e headers do runtime OpenXR |
-| 15 | Godot | o Open Saber da Loja é compilado com ele |
+| 15 | Godot | o Godot XR Tools Demo (aba Importar e jogar) é compilado com ele |
 | 39/40/41 | MediaPipe, TensorFlow Lite | mãos, IA no celular |
 | 44 | ONNX Runtime | detector de mãos (CPU/NPU) e HybridMagic no PC |
 | 38 | OpenCV | HybridMagic no PC |

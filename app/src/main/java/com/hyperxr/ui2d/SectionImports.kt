@@ -58,7 +58,7 @@ private fun apiName(api: XrApi) = when (api) {
  */
 @Composable
 fun ImportsSection(a: MainActivity) {
-    SectionCard("Importar um APK", "Jogos OpenXR, de Quest e de Pico, apps Daydream e Cardboard, e pacotes divididos (.xapk, .apks, .apkm). O HyperMagic diz se roda, corrige para o runtime HyperMagic, assina e instala.") {
+    SectionCard("Importar um APK", "Jogos OpenXR para Android (loader da Khronos), apps Daydream e Cardboard, e pacotes divididos (.xapk, .apks, .apkm). O HyperMagic diz se roda, corrige o que dá, assina e instala. Jogos feitos para Quest ou Pico não são suportados.") {
         Button(onClick = { a.pickApk.launch(APK_TYPES) }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
         Note("Com o Shizuku ativo a instalação é direta; sem ele, o instalador do Android pede confirmação.")
     }

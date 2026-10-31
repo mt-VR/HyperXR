@@ -106,14 +106,7 @@ struct HxInput {
     int touch;            // screen touched
 };
 
-/** A saved spatial anchor: its UUID and where it is (stage space). */
-struct HxSavedAnchor {
-    uint8_t uuid[16];
-    XrPosef pose;
-};
-
 struct HxSwapchainGfx;  // platform swapchain data
-struct HxDepthGfx;      // platform environment depth images (XR_META_environment_depth)
 struct HxSessionGfx;    // platform compositor data
 
 /** One projection view handed to the compositor. */
@@ -126,7 +119,7 @@ struct HxComposeView {
     XrFovf fov;
     int blendAlpha;      // drawn over what is behind it (passthrough) with the image's alpha
     int premultiplied;   // the alpha is already multiplied into the colour (OpenXR's default)
-    int blend[4];        // XR_FB_composition_layer_alpha_blend factors (XrBlendFactorFB), -1: none
+    int blend[4];        // custom blend factors (src/dst colour, src/dst alpha), -1: the usual blending
 };
 
 /** Passthrough for one frame: the phone's camera behind the app's layers, and its colour style. */
@@ -136,14 +129,14 @@ struct HxPassthroughState {
     float opacity;
     int colorMode;               // HxColorMode
     const uint8_t* map;          // HX_COLOR_MAP: 256 RGBA8 entries indexed by the camera's luminance
-    float brightness, contrast, saturation;  // HX_COLOR_BCS (Meta's units: -100..100, x, x)
+    float brightness, contrast, saturation;  // HX_COLOR_BCS (brightness -100..100, contrast and saturation as factors)
     const uint8_t* lutA;         // HX_COLOR_LUT: RGBA8 cube of lutRes^3 (null: the camera's own colour)
     const uint8_t* lutB;
     int lutRes;
     float lutWeight;             // mix from A to B
     uint32_t version;            // changes whenever the map or a LUT's contents change
     int reconstruction;          // the whole view (a reconstruction layer or ALPHA_BLEND)
-    const float* projected;      // projected-surface triangles, stage space, 9 floats each (XR_FB_triangle_mesh)
+    const float* projected;      // projected-surface triangles, stage space, 9 floats each
     int projectedCount;
 };
 
@@ -165,7 +158,7 @@ struct HxComposeQuad {
     // cylinder: radius, central angle, width / height; equirect: radius (0 = infinitely far),
     // central horizontal angle, upper and lower vertical angles
     float radius, centralAngle, aspectRatio, upperAngle, lowerAngle;
-    int blend[4];        // XR_FB_composition_layer_alpha_blend factors (XrBlendFactorFB), -1: none
+    int blend[4];        // custom blend factors (src/dst colour, src/dst alpha), -1: the usual blending
 };
 
 namespace hxp {
@@ -187,16 +180,8 @@ void readInput(HxInput* out);
 bool readHands(HxHandShared* out, bool wantsHands);
 /** A vibration for the controller of [hand] (amplitude 0 stops it), played by HyperMagic. */
 void haptic(int hand, float amplitude, int64_t durationNs);
-/** The voice level HyperMagic measures (0..1) and when; false when there is none. Asking keeps the microphone on. */
-bool readVoice(float* level, int64_t* timeNs);
 /** The app shows passthrough this frame: HyperMagic keeps the camera frames coming. */
 void passthroughWanted();
-/** Spatial anchors the app saved (XR_FB_spatial_entity_storage), kept in the app's own files. */
-int loadAnchors(HxSavedAnchor* out, int capacity);
-void saveAnchors(const HxSavedAnchor* anchors, int count);
-/** The room outline HyperMagic knows (HyperGuardian's area, floor x/z in metres); false: none. */
-bool loadRoom(float* x, float* z, int capacity, int* count, float* height);
-void randomBytes(void* out, size_t size);
 
 // Graphics. All return XrResult; the host build only supports headless sessions.
 XrResult gfxCreateSession(const void* binding, HxSessionGfx** out);
@@ -207,15 +192,6 @@ void gfxDestroySwapchain(HxSwapchainGfx* s);
 XrResult gfxEnumerateImages(HxSwapchainGfx* s, uint32_t capacity, uint32_t* count, XrSwapchainImageBaseHeader* images);
 /** Called when the app releases an image (rendering into it is complete on the app's context). */
 void gfxReleaseImage(HxSwapchainGfx* s, uint32_t index);
-/**
- * Environment depth: [count] depth textures of two layers (one per eye), [size] x [size]; their GL
- * names go to [textures]. The host build makes no textures (headless sessions).
- */
-XrResult gfxCreateDepth(HxSessionGfx* g, uint32_t size, uint32_t count, HxDepthGfx** out, uint32_t* textures);
-void gfxDestroyDepth(HxDepthGfx* d);
-/** Renders the depth of [tris] (xyz triangles, stage space) seen from two eyes into image [index]. */
-void gfxRenderDepth(HxSessionGfx* g, HxDepthGfx* d, uint32_t index, const XrPosef eyes[2], const XrFovf fov[2], float nearZ,
-                    const float* tris, int vertexCount);
 /** Composites one frame (projection views + quads) to the viewer, predicted head pose [head]. */
 void gfxCompose(HxSessionGfx* g, const HxConfig& cfg, const XrPosef& head, const HxComposeView* views, uint32_t viewCount,
                 const HxComposeQuad* quads, uint32_t quadCount, const HxPassthroughState& passthrough);

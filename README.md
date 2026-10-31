@@ -64,7 +64,7 @@ Free and open-source XR platform for Android phones. Put your phone in a VR Box 
 - **Hand tracking** with the camera, on the NPU or GPU: human hands with arms, pinch to click, palm menu, direct touch.
 - **Two interfaces**: *Hyper* (HyperMagic's own, windows over a dock) and *Meta* (Horizon OS-style library and round-button bar).
 - **Controllers**: Joy-Con, PlayStation, Xbox and other gamepads, a second phone (HyperConnect) and **colour-tracked 6DoF controllers** (stickers + calibrator, two at once).
-- **Own OpenXR runtime** and an on-device patcher for Quest, OpenXR, Daydream and Cardboard APKs.
+- **Own OpenXR runtime** and an on-device patcher for OpenXR, Daydream and Cardboard APKs.
 - **45 built-in games** (with Another Axiom's official Gorilla Locomotion), **Minecraft Java** (QuestCraft and GorillaCraft) and emulators (NES, Game Boy, GBA, DOS).
 - GeckoView **browser**, Android apps in windows (Shizuku), YouTube, files, gallery, store, people and calls.
 - **RealityLenses**: lens calibration for 46 viewers (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -94,7 +94,7 @@ Full guide (Portuguese): [below](#guide-pt) · honest status of every feature: [
 - **Отслеживание рук** камерой на NPU или GPU: человеческие руки с предплечьями, щипок для нажатия, меню на ладони, прямое касание.
 - **Два интерфейса**: *Hyper* (собственный, окна над док-панелью) и *Meta* (библиотека и панель круглых кнопок в стиле Horizon OS).
 - **Контроллеры**: Joy-Con, PlayStation, Xbox и другие геймпады, второй телефон (HyperConnect) и **6DoF-контроллеры по цвету** (наклейки + калибровка, два одновременно).
-- **Собственный runtime OpenXR** и патчер на устройстве для APK Quest, OpenXR, Daydream и Cardboard.
+- **Собственный runtime OpenXR** и патчер на устройстве для APK OpenXR, Daydream и Cardboard.
 - **45 встроенных игр** (с официальным Gorilla Locomotion от Another Axiom), **Minecraft Java** (QuestCraft и GorillaCraft) и эмуляторы (NES, Game Boy, GBA, DOS).
 - **Браузер** GeckoView, приложения Android в окнах (Shizuku), YouTube, файлы, галерея, магазин, люди и звонки.
 - **RealityLenses**: калибровка линз для 46 гарнитур (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -124,7 +124,7 @@ Plataforma XR gratuita e de código aberto para celulares Android. Coloque o cel
 - **Hand tracking** pela câmera, na NPU ou na GPU: mãos humanas com braço, pinça para clicar, menu na palma, toque direto.
 - **Duas interfaces**: *Hyper* (a do HyperMagic, janelas sobre a dock) e *Meta* (Biblioteca e barra de botões redondos no estilo do Horizon OS).
 - **Controles**: Joy-Con, PlayStation, Xbox e outros gamepads, outro celular (HyperConnect) e **controles 6DoF por cor** (adesivos + calibrador, dois ao mesmo tempo).
-- **Runtime OpenXR próprio** e patcher no celular para APKs de Quest, OpenXR, Daydream e Cardboard.
+- **Runtime OpenXR próprio** e patcher no celular para APKs OpenXR, Daydream e Cardboard.
 - **45 jogos** embutidos (com o Gorilla Locomotion oficial da Another Axiom), **Minecraft Java** (QuestCraft e GorillaCraft) e emuladores (NES, Game Boy, GBA, DOS).
 - **Navegador** GeckoView, apps Android em janelas (Shizuku), YouTube, arquivos, galeria, loja, pessoas e chamadas.
 - **RealityLenses**: calibração das lentes de 46 óculos (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -154,7 +154,7 @@ Plataforma XR gratuita y de código abierto para móviles Android. Pon el móvil
 - **Seguimiento de manos** con la cámara, en la NPU o la GPU: manos humanas con brazo, pellizco para hacer clic, menú en la palma, toque directo.
 - **Dos interfaces**: *Hyper* (la de HyperMagic, ventanas sobre el dock) y *Meta* (biblioteca y barra de botones redondos al estilo de Horizon OS).
 - **Mandos**: Joy-Con, PlayStation, Xbox y otros gamepads, otro móvil (HyperConnect) y **mandos 6DoF por color** (pegatinas + calibrador, dos a la vez).
-- **Runtime OpenXR propio** y parcheador en el móvil para APK de Quest, OpenXR, Daydream y Cardboard.
+- **Runtime OpenXR propio** y parcheador en el móvil para APK OpenXR, Daydream y Cardboard.
 - **45 juegos** incluidos (con el Gorilla Locomotion oficial de Another Axiom), **Minecraft Java** (QuestCraft y GorillaCraft) y emuladores (NES, Game Boy, GBA, DOS).
 - **Navegador** GeckoView, apps Android en ventanas (Shizuku), YouTube, archivos, galería, tienda, personas y llamadas.
 - **RealityLenses**: calibración de lentes para 46 visores (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -184,7 +184,7 @@ Plateforme XR libre et gratuite pour téléphones Android. Glissez le téléphon
 - **Suivi des mains** par la caméra, sur le NPU ou le GPU : mains humaines avec bras, pincement pour cliquer, menu dans la paume, toucher direct.
 - **Deux interfaces** : *Hyper* (celle de HyperMagic, fenêtres au-dessus d'un dock) et *Meta* (bibliothèque et barre de boutons ronds façon Horizon OS).
 - **Manettes** : Joy-Con, PlayStation, Xbox et autres, un second téléphone (HyperConnect) et des **manettes 6DoF suivies par couleur** (autocollants + calibrage, deux à la fois).
-- **Runtime OpenXR maison** et un patcheur sur l'appareil pour les APK Quest, OpenXR, Daydream et Cardboard.
+- **Runtime OpenXR maison** et un patcheur sur l'appareil pour les APK OpenXR, Daydream et Cardboard.
 - **45 jeux intégrés** (avec le Gorilla Locomotion officiel d'Another Axiom), **Minecraft Java** (QuestCraft et GorillaCraft) et des émulateurs (NES, Game Boy, GBA, DOS).
 - **Navigateur** GeckoView, applis Android en fenêtres (Shizuku), YouTube, fichiers, galerie, boutique, contacts et appels.
 - **RealityLenses** : calibrage des lentilles de 46 casques (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -214,7 +214,7 @@ Freie, kostenlose XR-Plattform für Android-Handys. Steck das Handy in eine VR B
 - **Hand-Tracking** über die Kamera, auf NPU oder GPU: menschliche Hände mit Armen, Pinch zum Klicken, Handflächenmenü, direktes Berühren.
 - **Zwei Oberflächen**: *Hyper* (die eigene, Fenster über einem Dock) und *Meta* (Bibliothek und Leiste mit runden Knöpfen im Stil von Horizon OS).
 - **Controller**: Joy-Con, PlayStation, Xbox und andere Gamepads, ein zweites Handy (HyperConnect) und **per Farbe getrackte 6DoF-Controller** (Aufkleber + Kalibrierung, zwei gleichzeitig).
-- **Eigene OpenXR-Runtime** und ein Patcher auf dem Gerät für Quest-, OpenXR-, Daydream- und Cardboard-APKs.
+- **Eigene OpenXR-Runtime** und ein Patcher auf dem Gerät für OpenXR-, Daydream- und Cardboard-APKs.
 - **45 eingebaute Spiele** (mit Another Axioms offizieller Gorilla Locomotion), **Minecraft Java** (QuestCraft und GorillaCraft) und Emulatoren (NES, Game Boy, GBA, DOS).
 - GeckoView-**Browser**, Android-Apps in Fenstern (Shizuku), YouTube, Dateien, Galerie, Store, Kontakte und Anrufe.
 - **RealityLenses**: Linsenkalibrierung für 46 Brillen (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -244,7 +244,7 @@ Piattaforma XR gratuita e open source per telefoni Android. Metti il telefono in
 - **Tracciamento delle mani** con la fotocamera, su NPU o GPU: mani umane con braccia, pizzico per cliccare, menu sul palmo, tocco diretto.
 - **Due interfacce**: *Hyper* (quella di HyperMagic, finestre sopra un dock) e *Meta* (libreria e barra di pulsanti rotondi in stile Horizon OS).
 - **Controller**: Joy-Con, PlayStation, Xbox e altri gamepad, un secondo telefono (HyperConnect) e **controller 6DoF tracciati dal colore** (adesivi + calibrazione, due insieme).
-- **Runtime OpenXR proprio** e un patcher sul dispositivo per APK Quest, OpenXR, Daydream e Cardboard.
+- **Runtime OpenXR proprio** e un patcher sul dispositivo per APK OpenXR, Daydream e Cardboard.
 - **45 giochi inclusi** (con il Gorilla Locomotion ufficiale di Another Axiom), **Minecraft Java** (QuestCraft e GorillaCraft) ed emulatori (NES, Game Boy, GBA, DOS).
 - **Browser** GeckoView, app Android in finestre (Shizuku), YouTube, file, galleria, store, persone e chiamate.
 - **RealityLenses**: calibrazione delle lenti per 46 visori (Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -274,7 +274,7 @@ Guida completa (in portoghese): [qui sotto](#guide-pt) · stato onesto di ogni f
 - 用摄像头进行**手部追踪**，运行在 NPU 或 GPU 上：带手臂的真实人手、捏合点击、掌心菜单、直接触摸。
 - **两种界面**：*Hyper*（HyperMagic 自己的，窗口位于 Dock 之上）和 *Meta*（Horizon OS 风格的资源库和圆形按钮栏）。
 - **控制器**：Joy-Con、PlayStation、Xbox 等手柄，另一部手机（HyperConnect），以及**颜色追踪的 6DoF 控制器**（贴纸 + 校准，可同时用两个）。
-- **自研 OpenXR 运行时**，以及在手机上为 Quest、OpenXR、Daydream 和 Cardboard APK 打补丁的工具。
+- **自研 OpenXR 运行时**，以及在手机上为 OpenXR、Daydream 和 Cardboard APK 打补丁的工具。
 - **45 款内置游戏**（使用 Another Axiom 官方的 Gorilla Locomotion）、**Minecraft Java**（QuestCraft 和 GorillaCraft）以及模拟器（NES、Game Boy、GBA、DOS）。
 - GeckoView **浏览器**、窗口中的 Android 应用（Shizuku）、YouTube、文件、相册、商店、好友和通话。
 - **RealityLenses**：46 款眼镜的镜片校准（Cardboard、Daydream、Gear VR、VR Box、千幻魔镜、小宅 BOBOVR……）。
@@ -304,7 +304,7 @@ Android スマートフォン向けの無料・オープンソースの XR プ�
 - カメラによる**ハンドトラッキング**（NPU / GPU）：腕付きの人の手、ピンチでクリック、手のひらメニュー、ダイレクトタッチ。
 - **2 つのインターフェース**：*Hyper*（HyperMagic 独自、ドックの上にウィンドウ）と *Meta*（Horizon OS 風のライブラリと丸ボタンのバー）。
 - **コントローラー**：Joy-Con、PlayStation、Xbox などのゲームパッド、2 台目のスマホ（HyperConnect）、**色で追跡する 6DoF コントローラー**（シール + キャリブレーション、2 台同時）。
-- **独自の OpenXR ランタイム**と、Quest・OpenXR・Daydream・Cardboard の APK を端末上でパッチするツール。
+- **独自の OpenXR ランタイム**と、OpenXR・Daydream・Cardboard の APK を端末上でパッチするツール。
 - **45 本の内蔵ゲーム**（Another Axiom 公式の Gorilla Locomotion を使用）、**Minecraft Java**（QuestCraft と GorillaCraft）、エミュレーター（NES、ゲームボーイ、GBA、DOS）。
 - GeckoView **ブラウザ**、ウィンドウで動く Android アプリ（Shizuku）、YouTube、ファイル、ギャラリー、ストア、フレンドと通話。
 - **RealityLenses**：46 種類のゴーグルのレンズ補正（Cardboard、Daydream、Gear VR、VR Box、Shinecon、BOBOVR など）。
@@ -334,7 +334,7 @@ Android 휴대폰을 위한 무료 오픈 소스 XR 플랫폼입니다. 휴대�
 - 카메라 **손 추적**(NPU 또는 GPU): 팔이 있는 사람 손, 핀치로 클릭, 손바닥 메뉴, 직접 터치.
 - **두 가지 인터페이스**: *Hyper*(HyperMagic 고유, 독 위의 창)와 *Meta*(Horizon OS 스타일의 라이브러리와 둥근 버튼 바).
 - **컨트롤러**: Joy-Con, PlayStation, Xbox 등 게임패드, 두 번째 휴대폰(HyperConnect), **색상으로 추적하는 6DoF 컨트롤러**(스티커 + 보정, 동시에 두 개).
-- **자체 OpenXR 런타임**과 Quest, OpenXR, Daydream, Cardboard APK를 기기에서 패치하는 도구.
+- **자체 OpenXR 런타임**과 OpenXR, Daydream, Cardboard APK를 기기에서 패치하는 도구.
 - **내장 게임 45개**(Another Axiom 공식 Gorilla Locomotion 사용), **Minecraft Java**(QuestCraft와 GorillaCraft), 에뮬레이터(NES, 게임보이, GBA, DOS).
 - GeckoView **브라우저**, 창으로 실행되는 Android 앱(Shizuku), YouTube, 파일, 갤러리, 스토어, 친구와 통화.
 - **RealityLenses**: 46가지 고글의 렌즈 보정(Cardboard, Daydream, Gear VR, VR Box, Shinecon, BOBOVR...).
@@ -399,7 +399,7 @@ Every release is built by [.github/workflows/release.yml](.github/workflows/rele
 ## Guia completo (Português)
 
 <details>
-<summary>Abrir o guia: uso, navegador, arquivos e galeria, jogos de Quest e OpenXR, Minecraft, apps Android</summary>
+<summary>Abrir o guia: uso, navegador, arquivos e galeria, jogos OpenXR, Minecraft, apps Android</summary>
 
 ##### Fluxo de uso
 
@@ -437,28 +437,26 @@ cinema para vídeos em tela cheia. O GeckoView vem no APK de 64 bits (arm64) e n
   detectados pelos metadados (Photo Sphere, Spherical Video) ou pela proporção 2:1 e abrem ao seu
   redor, inclusive 3D cima/baixo ou lado a lado. Uma foto 360 pode ser **salva como ambiente**.
 
-#### Jogos de Quest e apps OpenXR
+#### Jogos OpenXR
 
-Abra o APK em **Arquivos**. **Corrigir e instalar** prepara o jogo no próprio celular (sem PC):
-targetSdk 29, recursos de headset opcionais e o loader OpenXR da Meta trocado pelo da Khronos;
-depois assina com uma chave criada no Keystore do celular. Se o original já estiver instalado com
-outra assinatura, o painel oferece desinstalá-lo (os dados do jogo são apagados). O HyperMagic lê o APK antes de instalar e diz, sem rodeios, se ele pode
-rodar no runtime HyperMagic: motor (Unity/Unreal/Godot), loader OpenXR (o da Khronos funciona; o da
-Meta não), VrApi (não roda), Meta Platform SDK (a checagem de licença pode fechar o jogo), Vulkan
-ou OpenGL ES e extensões Meta citadas. Com o Shizuku ativo a instalação é direta e o OBB que estiver
-ao lado do APK é copiado para `Android/obb`; sem ele, o instalador do Android pergunta na tela.
+Na aba **Importar e jogar** (ou em **Arquivos**), escolha o APK. O HyperMagic lê o APK antes de
+instalar e diz, sem rodeios, se ele pode rodar no runtime HyperMagic: motor (Unity/Unreal/Godot),
+loader OpenXR (o da Khronos funciona), Vulkan ou OpenGL ES e extensões de fabricante citadas.
+**Corrigir e instalar** ajusta o que dá no próprio celular (targetSdk 29; jogos Godot 4 em Vulkan
+passam para o renderizador Compatibilidade) e assina com uma chave criada no Keystore do celular.
+Com o Shizuku ativo a instalação é direta; sem ele, o instalador do Android pergunta na tela.
 
-Jogos com **hand tracking** (Quest e Pico, `XR_EXT_hand_tracking` e a mira `XR_FB_hand_tracking_aim`) recebem
-suas mãos: enquanto o jogo roda, o HyperMagic rastreia as mãos pela câmera num serviço em primeiro plano
-e o runtime as entrega ao jogo (detalhes em `docs/OPENXR_RUNTIME.md`). Jogos de realidade mista (`XR_FB_passthrough` ou o modo `ALPHA_BLEND`) mostram a câmera do celular atrás
-do jogo, em baixa resolução e sem profundidade. Ainda não testado com um jogo real.
+Jogos feitos para **Quest** ou **Pico** não são suportados: o runtime não tem as extensões da Meta
+nem da Pico, e o importador recusa esses APKs (loader, SDK ou loja do fabricante) e diz o motivo.
 
-Para apps OpenXR acharem o runtime HyperMagic instale também o APK pequeno **HyperMagic OpenXR Broker**
-(`broker/`); se ele não instalar por conflito, o celular já tem um broker OpenXR: escolha "HyperMagic
-Runtime" nele. Os
-Joy-Cons/gamepad e o toque na tela viram os controles do jogo (perfil Touch); a mira segue o olhar.
-Jogos feitos só para o Quest geralmente exigem recursos que um celular não tem, então espere
-muitos "não vai funcionar" — o veredito existe para não desperdiçar seu tempo.
+Jogos com **hand tracking** (`XR_EXT_hand_tracking`) recebem suas mãos: enquanto o jogo roda, o
+HyperMagic rastreia as mãos pela câmera num serviço em primeiro plano e o runtime as entrega ao jogo
+(detalhes em `docs/OPENXR_RUNTIME.md`). Jogos no modo `ALPHA_BLEND` mostram a câmera do celular
+atrás do jogo, em baixa resolução e sem profundidade.
+
+O broker OpenXR do HyperMagic vem dentro do app: se a aba **Importar e jogar** mostrar "Falta o broker
+OpenXR", toque em instalar. Os Joy-Cons/gamepad e o toque na tela viram os controles do jogo (perfil
+Touch); a mira segue o olhar.
 
 #### Minecraft: QuestCraft e GorillaCraft
 
@@ -519,7 +517,7 @@ HyperMagic is free software: you can redistribute it and/or modify it under the 
 - libyuv (Google/Chromium), camera frames for hand tracking, built from source by `tools/build_libyuv.sh`: BSD-3-Clause (`native/libyuv`)
 - Real-ESRGAN general x4v3 (Xintao Wang et al.), passthrough enhancement: BSD-3-Clause; int8 TFLite export by Qualcomm AI Hub (`app/src/main/assets/models/README.md`)
 - Depth Anything V2 Small (AI depth, 3D photos; downloaded once by the app): Apache-2.0, Qualcomm AI Hub release
-- Open Saber (leandrodreamer, port of NeoSpark314's Beep Saber), built from source for the HyperMagic runtime: MIT (`ports/opensaber`)
+- Godot XR Tools Demo (Bastiaan Olij and contributors), built from source for the HyperMagic runtime: MIT (`ports/xrtools`)
 - HybridMagic PC (`hybridmagic/`): ONNX Runtime (MIT), OpenCV (Apache-2.0), NumPy (BSD-3-Clause), PyInstaller (GPL-2.0 with bootloader exception)
 - MediaPipe Tasks GenAI: Apache-2.0; Qwen 2.5 models (downloaded by the user in the app): Apache-2.0
 - Hand models: MediaPipe Hand Landmarker, RTMDet-nano and RTMPose-m (OpenMMLab), MediaPipe selfie multiclass: Apache-2.0 (`app/src/main/assets/models/README.md`)

@@ -9,7 +9,6 @@ import android.security.keystore.KeyProperties
 import com.android.apksig.ApkSigner
 import com.hyperxr.diagnostics.Diagnostics
 import com.hyperxr.xrapps.ApkPatcher
-import com.hyperxr.xrapps.CompatLibraries
 import com.hyperxr.xrapps.PatchReport
 import java.io.File
 import java.math.BigInteger
@@ -21,40 +20,22 @@ import java.util.Calendar
 import javax.security.auth.x500.X500Principal
 
 /**
- * HyperXR's compatibility layer for OpenXR / Quest and Daydream / Cardboard apps (the patcher
- * follows Compatibility-Layer's port tool, third_party/compatibility-layer): patches APKs on the phone, signs them with a key that never
- * leaves this phone's keystore, and starts games so they can see the runtime, the broker and the
- * VrApi driver.
+ * HyperXR's compatibility layer for OpenXR and Daydream / Cardboard apps: patches APKs on the
+ * phone, signs them with a key that never leaves this phone's keystore, and starts games so they
+ * can see the runtime and the broker.
  */
 object CompatLayer {
     private const val KEY_ALIAS = "hyperxr-game-signing"
     const val BROKER_PACKAGE = "com.hypermagic.broker"
 
-    /** Copies the bundled Khronos loaders out of the APK (once per app update). */
-    fun libraries(ctx: Context): CompatLibraries {
-        val dir = File(ctx.filesDir, "compat")
-        val stamp = File(dir, "version")
-        val version = ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime.toString()
-        val abis = listOf("arm64-v8a", "armeabi-v7a")
-        if (!stamp.isFile || stamp.readText() != version) {
-            dir.deleteRecursively()
-            for (abi in abis) for (lib in listOf("libopenxr_loader.so")) {
-                val out = File(dir, "$abi/$lib").apply { parentFile?.mkdirs() }
-                ctx.assets.open("compat/$abi/$lib").use { i -> out.outputStream().use { i.copyTo(it) } }
-            }
-            stamp.writeText(version)
-        }
-        return CompatLibraries(abis.associateWith { File(dir, "$it/libopenxr_loader.so") })
-    }
-
-    fun plan(ctx: Context, apk: File): PatchReport = ApkPatcher.patch(apk, File(ctx.cacheDir, "unused.apk"), libraries(ctx), dryRun = true, device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
+    fun plan(ctx: Context, apk: File): PatchReport = ApkPatcher.patch(apk, File(ctx.cacheDir, "unused.apk"), dryRun = true, device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
 
     /** Patches and signs [apk]; returns the report and the installable file (null when blocked). */
     fun patchAndSign(ctx: Context, apk: File, progress: (String) -> Unit): Pair<PatchReport, File?> {
         val work = File(ctx.cacheDir, "patch").apply { deleteRecursively(); mkdirs() }
         val unsigned = File(work, "unsigned.apk")
         progress("Corrigindo o APK...")
-        val report = ApkPatcher.patch(apk, unsigned, libraries(ctx), device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
+        val report = ApkPatcher.patch(apk, unsigned, device32Bit = android.os.Build.SUPPORTED_32_BIT_ABIS.isNotEmpty())
         if (report.blockers.isNotEmpty()) return report to null
         progress("Assinando...")
         val signed = File(work, "${report.packageName}-hyperxr.apk")

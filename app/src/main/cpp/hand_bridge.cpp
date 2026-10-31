@@ -70,18 +70,6 @@ JNIEXPORT jlong JNICALL Java_com_hyperxr_openxr_HandBridge_nativeReaderWantsHand
     return map ? __atomic_load_n(&asMap(map)->readerWantsHandsNs, __ATOMIC_RELAXED) : 0;
 }
 
-/** The voice level for face tracking from audio (0..1), measured at [timeNs]. */
-JNIEXPORT void JNICALL Java_com_hyperxr_openxr_HandBridge_nativeVoice(JNIEnv*, jclass, jlong map, jlong timeNs, jfloat level) {
-    HxHandShared* h = asMap(map);
-    if (!h) return;
-    h->voiceLevel = level;
-    __atomic_store_n(&h->voiceNs, timeNs, __ATOMIC_RELEASE);
-}
-
-JNIEXPORT jlong JNICALL Java_com_hyperxr_openxr_HandBridge_nativeReaderWantsVoice(JNIEnv*, jclass, jlong map) {
-    return map ? __atomic_load_n(&asMap(map)->readerWantsVoiceNs, __ATOMIC_RELAXED) : 0;
-}
-
 /** The last haptic request of the game: returns its sequence number, [out] = hand, amplitude, milliseconds. */
 JNIEXPORT jint JNICALL Java_com_hyperxr_openxr_HandBridge_nativeHaptic(JNIEnv* env, jclass, jlong map, jfloatArray out) {
     HxHandShared* h = asMap(map);

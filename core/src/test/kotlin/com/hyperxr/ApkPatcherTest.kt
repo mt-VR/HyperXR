@@ -4,7 +4,6 @@ import com.android.apksig.ApkSigner
 import com.android.apksig.ApkVerifier
 import com.hyperxr.xrapps.ApkPatcher
 import com.hyperxr.xrapps.BinaryXml
-import com.hyperxr.xrapps.CompatLibraries
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,8 +31,6 @@ class ApkPatcherTest {
         return f
     }
 
-    private fun lib(text: String): File = tmp("$text.so").apply { writeText(text) }
-
     @Test fun manifestEditsInPlace() {
         val (patched, changes) = ApkPatcher.patchManifest(manifestBytes)
         assertEquals(manifestBytes.size, patched.size)
@@ -44,21 +41,31 @@ class ApkPatcherTest {
         assertEquals(2, changes.size)
     }
 
-    @Test fun swapsMetaLoaderAndSigns() {
-        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("KHRONOS-LOADER")))
-        val input = apk(mapOf(
-            "lib/arm64-v8a/libopenxr_loader.so" to "libopenxr_forwardloader meta".toByteArray(),
-            "lib/arm64-v8a/libunity.so" to ByteArray(5000) { (it % 7).toByte() },
-            "assets/data.bin" to ByteArray(20000),
-        ))
+    @Test fun questAndPicoGamesAreRefused() {
+        val quest = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libopenxr_loader.so" to "libopenxr_forwardloader meta".toByteArray())), tmp("q.apk"))
+        assertTrue(quest.blockers.toString(), quest.blockers.any { it.contains("Quest ou Pico") })
+        assertFalse(tmp("q.apk").exists() && tmp("q.apk").length() > 0)
+        val x86 = ApkPatcher.patch(apk(mapOf("lib/x86_64/libmain.so" to ByteArray(3))), tmp("x.apk"))
+        assertTrue(x86.blockers.isNotEmpty())
+        // OpenXR only: VrApi games are refused
+        val vrapi = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3))), tmp("v.apk"))
+        assertTrue(vrapi.blockers.any { it.contains("VrApi") })
+    }
+
+    @Test fun patchedApkSigns() {
+        val dd = ApkPatcherTest::class.java.getResourceAsStream("/daydream_manifest.axml")!!.readBytes()
+        val input = tmp("sign.apk")
+        ZipOutputStream(input.outputStream()).use { z ->
+            z.putNextEntry(ZipEntry("AndroidManifest.xml")); z.write(dd); z.closeEntry()
+            z.putNextEntry(ZipEntry("META-INF/CERT.RSA")); z.write(byteArrayOf(1, 2, 3)); z.closeEntry()
+            z.putNextEntry(ZipEntry("lib/arm64-v8a/libgvr.so")); z.write(ByteArray(5000) { (it % 7).toByte() }); z.closeEntry()
+            z.putNextEntry(ZipEntry("assets/data.bin")); z.write(ByteArray(20000)); z.closeEntry()
+        }
         val unsigned = tmp("unsigned.apk")
-        val report = ApkPatcher.patch(input, unsigned, libs)
+        val report = ApkPatcher.patch(input, unsigned)
         assertTrue(report.blockers.toString(), report.blockers.isEmpty())
-        assertTrue(report.questGame && !report.daydream)
-        assertEquals("com.example.questgame", report.packageName)
         ZipFile(unsigned).use { z ->
-            assertEquals("KHRONOS-LOADER", z.getInputStream(z.getEntry("lib/arm64-v8a/libopenxr_loader.so")).readBytes().decodeToString())
-            assertEquals(ZipEntry.STORED, z.getEntry("lib/arm64-v8a/libunity.so").method)
+            assertEquals(ZipEntry.STORED, z.getEntry("lib/arm64-v8a/libgvr.so").method)
             assertTrue(z.getEntry("META-INF/CERT.RSA") == null)
             assertEquals(20000, z.getInputStream(z.getEntry("assets/data.bin")).readBytes().size)
         }
@@ -73,20 +80,6 @@ class ApkPatcherTest {
         assertTrue(v.errors.toString(), v.isVerified)
     }
 
-    @Test fun nothingToDoForKhronosLoaderAndBlocksNonArm() {
-        val libs = CompatLibraries(mapOf("arm64-v8a" to lib("NEW")))
-        val ok = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libopenxr_loader.so" to "org.khronos.openxr.runtime_broker".toByteArray())), tmp("o.apk"), libs, dryRun = true)
-        assertFalse(ok.changes.any { it.contains("Loader") })
-        val x86 = ApkPatcher.patch(apk(mapOf("lib/x86_64/libmain.so" to ByteArray(3))), tmp("x.apk"), libs)
-        assertTrue(x86.blockers.isNotEmpty())
-        // OpenXR only: VrApi games are refused
-        val vrapi = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3))), tmp("v.apk"), libs)
-        assertTrue(vrapi.blockers.any { it.contains("VrApi") })
-        // both backends (OVRPlugin): the OpenXR one is used
-        val both = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3), "lib/arm64-v8a/libopenxr_loader.so" to ByteArray(3))), tmp("vb.apk"), libs, dryRun = true)
-        assertTrue(both.blockers.none { it.contains("VrApi") })
-    }
-
     @Test fun daydreamOnlyBecomesCardboard() {
         val dd = ApkPatcherTest::class.java.getResourceAsStream("/daydream_manifest.axml")!!.readBytes()
         val input = tmp("dd.apk")
@@ -95,7 +88,7 @@ class ApkPatcherTest {
             z.putNextEntry(ZipEntry("lib/armeabi-v7a/libgvr.so")); z.write(ByteArray(10)); z.closeEntry()
         }
         val out = tmp("dd-out.apk")
-        val r = ApkPatcher.patch(input, out, CompatLibraries(emptyMap()))
+        val r = ApkPatcher.patch(input, out)
         assertTrue(r.blockers.toString(), r.blockers.isEmpty())
         assertTrue(r.daydream)
         val m = ZipFile(out).use { z -> BinaryXml.parse(z.getInputStream(z.getEntry("AndroidManifest.xml")).readBytes()) }
@@ -123,7 +116,7 @@ class ApkPatcherTest {
 
     @Test fun daydreamChecksInTheAppCodeAreRemoved() {
         val out = tmp("dd2-out.apk")
-        val r = ApkPatcher.patch(daydreamApk(true), out, CompatLibraries(emptyMap()), device32Bit = true)
+        val r = ApkPatcher.patch(daydreamApk(true), out, device32Bit = true)
         assertTrue(r.blockers.toString(), r.blockers.isEmpty())
         assertTrue(r.changes.toString(), r.changes.any { it.contains("Daydream?") && it.contains("2 ponto") })
         assertTrue(r.changes.toString(), r.changes.any { it.contains("32 bits") })
@@ -133,7 +126,7 @@ class ApkPatcherTest {
     }
 
     @Test fun thirtyTwoBitOnlyAppOnSixtyFourBitOnlyPhoneIsExplained() {
-        val r = ApkPatcher.patch(daydreamApk(false), tmp("x.apk"), CompatLibraries(emptyMap()), dryRun = true, device32Bit = false)
+        val r = ApkPatcher.patch(daydreamApk(false), tmp("x.apk"), dryRun = true, device32Bit = false)
         assertTrue(r.blockers.toString(), r.blockers.any { it.contains("64 bits") })
     }
 }

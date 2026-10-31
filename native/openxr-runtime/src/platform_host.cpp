@@ -19,16 +19,6 @@ extern "C" void hxTestLastHaptic(uint32_t* seq, int* hand, float* amplitude, int
 }
 int64_t gPassthroughWantedNs = 0;
 extern "C" int64_t hxTestPassthroughWanted() { return gPassthroughWantedNs; }
-HxSavedAnchor gSaved[64];
-int gSavedCount = 0;
-float gRoomX[32], gRoomZ[32], gRoomHeight = 0;
-int gRoomCount = 0;
-extern "C" int hxTestSavedAnchors() { return gSavedCount; }
-extern "C" void hxTestSetRoom(const float* x, const float* z, int n, float height) {
-    gRoomCount = n; gRoomHeight = height;
-    for (int i = 0; i < n && i < 32; i++) { gRoomX[i] = x[i]; gRoomZ[i] = z[i]; }
-}
-
 extern "C" void hxTestSetInput(uint32_t buttons, float lx, float ly, float rx, float ry, float lt, float rt, int touch) {
     gInput.buttons = buttons;
     gInput.stick[0][0] = lx; gInput.stick[0][1] = ly; gInput.stick[1][0] = rx; gInput.stick[1][1] = ry;
@@ -63,36 +53,9 @@ bool headPose(int64_t, const HxConfig& cfg, XrPosef* out) {
 void recenter() {}
 void readInput(HxInput* out) { *out = gInput; }
 void passthroughWanted() { gPassthroughWantedNs = nowNs(); }
-bool readVoice(float* level, int64_t* timeNs) {
-    if (!gHandsSet) return false;
-    gHands.readerWantsVoiceNs = nowNs();
-    *level = gHands.voiceLevel;
-    *timeNs = gHands.voiceNs;
-    return gHands.voiceNs != 0;
-}
 void haptic(int hand, float amplitude, int64_t durationNs) {
     gHands.hapticSeq++; gHands.hapticHand = static_cast<uint32_t>(hand); gHands.hapticAmplitude = amplitude;
     gHands.hapticDurationMs = static_cast<int32_t>(durationNs / 1000000);
-}
-int loadAnchors(HxSavedAnchor* out, int capacity) {
-    int n = gSavedCount < capacity ? gSavedCount : capacity;
-    memcpy(out, gSaved, sizeof(HxSavedAnchor) * n);
-    return n;
-}
-void saveAnchors(const HxSavedAnchor* a, int n) {
-    gSavedCount = n < 64 ? n : 64;
-    memcpy(gSaved, a, sizeof(HxSavedAnchor) * gSavedCount);
-}
-bool loadRoom(float* x, float* z, int capacity, int* count, float* height) {
-    if (gRoomCount == 0 || gRoomCount > capacity) return false;
-    memcpy(x, gRoomX, sizeof(float) * gRoomCount); memcpy(z, gRoomZ, sizeof(float) * gRoomCount);
-    *count = gRoomCount; *height = gRoomHeight;
-    return true;
-}
-void randomBytes(void* out, size_t size) {
-    static uint64_t state = 0x9e3779b97f4a7c15ull;
-    uint8_t* b = static_cast<uint8_t*>(out);
-    for (size_t i = 0; i < size; i++) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; b[i] = static_cast<uint8_t>(state); }
 }
 bool readHands(HxHandShared* out, bool wantsHands) {
     if (!gHandsSet) return false;
@@ -108,13 +71,6 @@ XrResult gfxCreateSwapchain(HxSessionGfx*, const XrSwapchainCreateInfo*, HxSwapc
 void gfxDestroySwapchain(HxSwapchainGfx*) {}
 XrResult gfxEnumerateImages(HxSwapchainGfx*, uint32_t, uint32_t*, XrSwapchainImageBaseHeader*) { return XR_ERROR_FUNCTION_UNSUPPORTED; }
 void gfxReleaseImage(HxSwapchainGfx*, uint32_t) {}
-XrResult gfxCreateDepth(HxSessionGfx*, uint32_t, uint32_t count, HxDepthGfx** out, uint32_t* textures) {
-    for (uint32_t i = 0; i < count; i++) textures[i] = 100 + i;  // names only: nothing is drawn on the host
-    *out = nullptr;
-    return XR_SUCCESS;
-}
-void gfxDestroyDepth(HxDepthGfx*) {}
-void gfxRenderDepth(HxSessionGfx*, HxDepthGfx*, uint32_t, const XrPosef*, const XrFovf*, float, const float*, int) {}
 void gfxCompose(HxSessionGfx*, const HxConfig&, const XrPosef&, const HxComposeView*, uint32_t, const HxComposeQuad*, uint32_t,
                 const HxPassthroughState&) {}
 }  // namespace hxp

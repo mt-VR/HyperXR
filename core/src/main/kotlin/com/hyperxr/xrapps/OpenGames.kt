@@ -43,31 +43,17 @@ object OpenGames {
         "MPL-2.0", "ISC", "Zlib", "Unlicense", "CC0-1.0", "BSL-1.0", "EPL-2.0",
     )
 
-    /** Checked on 2026-10-23: licence file read from each repository. Not tested on a phone. */
+    /** Licence file read from each repository. Not tested on a phone. */
     val CURATED = listOf(
-        OpenGame("Open Saber", "mt-VR/HyperXR", "O jogo de ritmo com sabres de luz: corte os blocos na direção da seta. Port do Open Saber (Godot 4, OpenXR) compilado do código-fonte para o runtime do HyperMagic; as músicas vêm do BeatSaver, no menu do jogo",
-            "MIT", OpenGame.Kind.OPENXR, needs = "dois controles com posição (Joy-Cons, controle por cor ou HyperConnect)", releaseTag = "opensaber-v0.5.0", ready = true),
         OpenGame("Godot XR Tools Demo", "mt-VR/HyperXR", "O playground de VR do Godot: ande, escale, pegue e jogue objetos, atire e voe por vários mundinhos. Compilado do código-fonte para o runtime do HyperMagic",
             "MIT", OpenGame.Kind.OPENXR, needs = "controles com posição (Joy-Cons, controle por cor ou HyperConnect) ou as mãos", releaseTag = "xrtools-v4.4.0", ready = true),
-        OpenGame("Quest DOOM", "CommunityPokeOrg/quest-doom", "DOOM em VR com OpenXR (doomgeneric); tem versão para celular comum", "GPL-2.0",
-            OpenGame.Kind.OPENXR, needs = ""),
-        OpenGame("QuestZDoom", "DrBeef/QuestZDoom", "GZDoom em VR: DOOM, Heretic, Hexen e mods", "GPL-3.0",
-            OpenGame.Kind.OPENXR, needs = "um WAD (o Freedoom é livre)"),
-        OpenGame("Quake3Quest", "DrBeef/ioq3quest", "Quake III Arena em VR (ioquake3)", "GPL-2.0",
-            OpenGame.Kind.OPENXR, needs = "os arquivos .pk3 do Quake III (ou da demo)"),
-        OpenGame("Quake2Quest", "DrBeef/Quake2Quest", "Quake II em VR (Yamagi Quake II)", "GPL-2.0",
-            OpenGame.Kind.OPENXR, needs = "os dados do Quake II (ou da demo)"),
-        OpenGame("OpenMW VR", "tomups/openmw-vr-quest", "OpenMW (motor livre de Morrowind) em VR", "GPL-3.0",
-            OpenGame.Kind.OPENXR, needs = "os dados do Morrowind"),
-        OpenGame("Godot XR Tools (demo)", "GodotVR/godot-xr-tools", "Kit e demo de VR do Godot: andar, pegar objetos, teleporte", "MIT",
-            OpenGame.Kind.OPENXR),
         OpenGame("Hello Cardboard", "googlevr/cardboard", "Exemplo oficial do SDK Cardboard: ache o objeto e toque", "Apache-2.0",
             OpenGame.Kind.CARDBOARD),
     )
 
     /** GitHub search queries per kind (sorted by stars on the API side). */
     fun queries(kind: OpenGame.Kind): List<String> = when (kind) {
-        OpenGame.Kind.OPENXR -> listOf("topic:openxr topic:android", "topic:openxr topic:quest game", "openxr android game in:name,description,topics")
+        OpenGame.Kind.OPENXR -> listOf("topic:openxr topic:android", "openxr android game in:name,description,topics")
         OpenGame.Kind.CARDBOARD -> listOf("topic:google-cardboard-vr", "topic:cardboard-vr", "topic:cardboard game", "cardboard vr android game in:name,description")
     }
 

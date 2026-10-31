@@ -12,7 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** APKs brought into HyperXR to be checked and patched (OpenXR, Quest, Daydream, Cardboard). */
+/** APKs brought into HyperXR to be checked and patched (OpenXR, Daydream, Cardboard). */
 object ApkImports {
     fun dir(ctx: Context) = File(ctx.filesDir, "imports").apply { mkdirs() }
 
@@ -67,7 +67,7 @@ class ApkPickerPanel(private val host: MediaHost) : XrPanel(1.4f, 1.15f, title =
 
     override fun draw(c: PanelCanvas) {
         val act = host.activity
-        c.paragraph("Jogos OpenXR, de Quest e apps Daydream/Cardboard: escolha o APK e o HyperMagic mostra se roda e oferece Corrigir e instalar.", 24f)
+        c.paragraph("Jogos OpenXR e apps Daydream/Cardboard: escolha o APK e o HyperMagic mostra se roda e oferece Corrigir e instalar.", 24f)
         if (!StorageAccess.granted(act)) {
             c.paragraph("Para listar os APKs do celular, permita o acesso aos arquivos (a tela aparece no celular).", 26f, XrTheme.text)
             c.button("grant", "Permitir acesso", c.pad, c.y, 340f, 76f, accent = true) { StorageAccess.request(act) }

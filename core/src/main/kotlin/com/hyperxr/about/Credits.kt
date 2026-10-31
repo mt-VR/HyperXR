@@ -24,7 +24,7 @@ object Credits {
         Entry("Eigen, PFFFT, base HRTF SADIE", "Eigen, Julien Pommier, Univ. de York", "MPL-2.0, BSD, Apache-2.0", "partes do Resonance Audio"),
         Entry("Depth Anything V2 Small", "Lihe Yang et al. (export Qualcomm AI Hub)", "Apache-2.0", "profundidade por IA, fotos 3D"),
         Entry("GorillaLocomotion", "Another Axiom", "MIT", "movimento dos jogos de gorila"),
-        Entry("Open Saber", "leandrodreamer (Beep Saber de NeoSpark314)", "MIT", "jogo na Loja, compilado do código-fonte"),
+        Entry("Godot XR Tools Demo", "Bastiaan Olij e colaboradores", "MIT", "jogo na aba Importar e jogar, compilado do código-fonte"),
         Entry("Pojlib / QuestCraft", "QuestCraftPlusPlus", "LGPL-3.0", "Minecraft Java em VR"),
         Entry("ViveMonkeCraft", "laggyboi20-jpg", "MIT", "perfil GorillaCraft"),
         Entry("GeckoView", "Mozilla", "MPL-2.0", "navegador"),

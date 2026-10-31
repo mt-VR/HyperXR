@@ -88,26 +88,8 @@ val packHyperx = tasks.register<JavaExec>("packHyperx") {
 }
 tasks.named("preBuild") { dependsOn(packHyperx) }
 
-/**
- * Library the on-device patcher puts into OpenXR / Quest games: the Khronos OpenXR loader, from
- * the same Maven artifact HyperXR links, for 64- and 32-bit ARM. (The VrApi adapter is not
- * bundled: only its sources are in third_party/compatibility-layer, see README there.)
- */
-val compatAar: Configuration by configurations.creating
 // Robolectric's Android jar comes through Gradle (its own downloader can't use the proxy)
 val robolectricSdk: Configuration by configurations.creating
-
-dependencies { compatAar("org.khronos.openxr:openxr_loader_for_android:${libs.versions.openxrLoader.get()}@aar") }
-val compatAssets = tasks.register<Sync>("compatAssets") {
-    group = "hyperxr"
-    from(compatAar.elements.map { files -> files.map { zipTree(it) } }) {
-        include("jni/arm64-v8a/libopenxr_loader.so", "jni/armeabi-v7a/libopenxr_loader.so")
-        eachFile { path = "compat/" + path.removePrefix("jni/") }
-    }
-    includeEmptyDirs = false
-    into(layout.buildDirectory.dir("generated/compat-assets"))
-}
-android.sourceSets["main"].assets.srcDir(compatAssets)
 
 /** Companion APKs shipped inside HyperXR: HyperXR Daydream (:vrcore), HyperConnect (:hyperconnect) and the OpenXR broker (:broker). */
 val daydreamAssets = tasks.register<Sync>("daydreamAssets") {

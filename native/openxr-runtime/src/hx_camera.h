@@ -1,5 +1,5 @@
-// Camera frames from the HyperMagic app to its OpenXR runtime, for passthrough (XR_FB_passthrough
-// and the ALPHA_BLEND environment blend mode).
+// Camera frames from the HyperMagic app to its OpenXR runtime, for passthrough (the ALPHA_BLEND
+// environment blend mode).
 //
 // HyperMagic's hand bridge service owns the camera while a game runs (the game has no camera
 // permission). When the runtime asks for passthrough, the service writes small RGBA frames into

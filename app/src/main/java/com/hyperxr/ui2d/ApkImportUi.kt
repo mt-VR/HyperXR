@@ -35,7 +35,7 @@ import com.hyperxr.xrapps.XrApi
 import java.io.File
 
 /**
- * Import an APK in the 2D app (OpenXR, Quest, Daydream, Cardboard): analyse, patch for the
+ * Import an APK in the 2D app (OpenXR, Daydream, Cardboard): analyse, patch for the
  * HyperXR runtime, sign and install, all on the phone screen where the installer asks anyway.
  */
 class ApkImportState(private val a: MainActivity) {
@@ -162,7 +162,7 @@ class ApkImportState(private val a: MainActivity) {
 
 @Composable
 fun ApkImportCard(a: MainActivity) {
-    SectionCard("Corrigir APK: OpenXR, Quest e Daydream", "Escolha o APK de um jogo OpenXR, de Quest ou de um app Daydream/Cardboard. O HyperMagic diz se ele pode rodar, corrige para o runtime HyperMagic (OpenXR da Khronos; Daydream vira Cardboard), assina e instala.") {
+    SectionCard("Corrigir APK: OpenXR e Daydream", "Escolha o APK de um jogo OpenXR ou de um app Daydream/Cardboard. O HyperMagic diz se ele pode rodar, corrige o que dá (Daydream vira Cardboard), assina e instala. Jogos de Quest e Pico não são suportados.") {
         Button(onClick = { a.pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed", "application/xapk-package-archive", "application/vnd.apkm")) },
             colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
         Note("Tudo sobre importar e jogar fica na aba Importar e jogar. No XR: Apps XR > Importar APK para corrigir.")
