@@ -19,8 +19,8 @@ android {
         applicationId = "com.hypermagic"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4.0"
         // -PhxAbi=arm64-v8a builds a phone-only APK (x86_64 is for emulators); -PhxAbi=armeabi-v7a
         // the APK for phones with a 32-bit Android (they refuse an arm64-only APK as "invalid package")
         ndk { abiFilters += hxAbis }

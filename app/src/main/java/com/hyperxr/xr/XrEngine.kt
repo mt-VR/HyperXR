@@ -779,6 +779,7 @@ class XrEngine(
     private fun updateControllers(dt: Float) {
         for (i in 0..1) { val c = input.controllers[i]; c.connected = false; c.aim = null; c.haptics = null; c.buttons = 0; c.stickX = 0f; c.stickY = 0f; c.stick2X = 0f; c.stick2Y = 0f; input.holding[i] = false }
         val now = System.nanoTime()
+        smartHand.settings = app.settings.current.controllers.smartHand
         joyCons.tick(now)
         for (jc in joyCons.controllers.values) {
             val idx = when (jc.side) { JoyConSide.LEFT -> 0; else -> 1 }
@@ -797,7 +798,7 @@ class XrEngine(
             c.pose.orientation.set(fusions[idx].worldOrientation)
             c.pose.position.set(fusions[idx].gripPosition)
             c.positionFromHand = fusions[idx].positionFromHand
-            if (c.positionFromHand) {
+            if (c.positionFromHand && !smartHand.enabled) {
                 // held: it points where the hand holding it points, and its buttons click for the hand
                 c.aim = fusions[idx].ray(heldRays[idx])
                 input.holding[idx] = true
@@ -806,6 +807,18 @@ class XrEngine(
         for (i in 0..1) if (input.holding[i] && input.controllers[i].buttons and SELECT_BITS != 0) {
             input.hands[i].gesture = com.hyperxr.handtracking.Gesture.PINCH
             input.hands[i].pinchStrength = 1f
+        }
+        // SmartHand: the hand keeps aiming with its pinch ball and the buttons decide the gesture,
+        // so a hand closed around a controller neither pinches nor grabs by itself
+        if (smartHand.enabled) for (i in 0..1) {
+            val h = input.hands[i]
+            if (!h.isUsable) continue
+            val inHand = input.controllers[i].connected
+            when {
+                smartHand.grab[i] -> { h.gesture = com.hyperxr.handtracking.Gesture.FIST; h.pinchStrength = 0f }
+                smartHand.click[i] -> { h.gesture = com.hyperxr.handtracking.Gesture.PINCH; h.pinchStrength = 1f }
+                inHand -> { h.gesture = com.hyperxr.handtracking.Gesture.NONE; h.pinchStrength = 0f }
+            }
         }
     }
 
@@ -893,6 +906,7 @@ class XrEngine(
 
     fun onKey(e: KeyEvent): Boolean {
         if (::ctx.isInitialized) ctx.gameInput?.let { if (it.onKey(e)) return true }
+        if (smartKey(e)) return true
         if (joyCons.onKeyEvent(e)) return true
         // Viewer buttons / volume keys act as select so a plain VR Box remains usable.
         if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_ENTER || e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
@@ -900,6 +914,29 @@ class XrEngine(
             return true
         }
         return false
+    }
+
+    /** SmartHand: the hand aims, the controller's buttons click / grab / go back for that hand. */
+    val smartHand = com.hyperxr.input.SmartHand()
+
+    private fun smartKey(e: KeyEvent): Boolean {
+        smartHand.settings = app.settings.current.controllers.smartHand
+        if (!smartHand.enabled) return false
+        val jc = joyCons.controllers[e.deviceId]
+        val button = jc?.let { com.hyperxr.input.GamepadProfiles.mapKey(e.keyCode, it.profile) }
+        val binding = button?.let { com.hyperxr.input.SmartHand.buttonBinding(it) } ?: com.hyperxr.input.SmartHand.keyBinding(e.keyCode)
+        val events = smartHand.onKey(e.deviceId, binding, jc?.profile?.side, e.device?.name ?: jc?.name ?: "",
+            e.action == KeyEvent.ACTION_DOWN, e.repeatCount > 0, joyCon = jc?.family == com.hyperxr.input.GamepadProfiles.Family.NINTENDO) ?: return false
+        for (ev in events) {
+            val a = when (ev.action) {
+                com.hyperxr.settings.SmartAction.BACK -> ControllerAction.BACK
+                com.hyperxr.settings.SmartAction.MENU -> ControllerAction.MENU
+                com.hyperxr.settings.SmartAction.RECENTER -> ControllerAction.RECENTER
+                else -> continue
+            }
+            pendingActions += Triple(a, ev.pressed, if (ev.hand == 0) JoyConSide.LEFT else JoyConSide.RIGHT)
+        }
+        return true
     }
 
     fun onGeneric(e: MotionEvent): Boolean {
@@ -920,6 +957,7 @@ class XrEngine(
         activity.runOnUiThread { android.view.Choreographer.getInstance().removeFrameCallback(vsyncCallback) }
         tracker?.stop()
         gyro.stop()
+        smartHand.releaseAll()
         content.onPause()
     }
 

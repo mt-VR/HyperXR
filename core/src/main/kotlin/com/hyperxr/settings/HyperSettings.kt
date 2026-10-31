@@ -167,6 +167,28 @@ data class ControllerSettings(
     val controllerModel: Boolean = true,
     /** The hand stays drawn (closed around the controller) while it holds one. */
     val showHandsWithController: Boolean = true,
+    /** SmartHand: the hand aims with the pinch ball, the controller's buttons click. */
+    val smartHand: SmartHandSettings = SmartHandSettings(),
+)
+
+/** What a controller button does for its hand in SmartHand. */
+@Serializable
+enum class SmartAction(val label: String) {
+    CLICK("Clicar (pinça)"), GRAB("Agarrar"), BACK("Voltar"), MENU("Menu"), RECENTER("Recentralizar"), NONE("Nada"),
+}
+
+/**
+ * SmartHand: hand tracking used together with any controller. The hand points (the pinch ball),
+ * the buttons act; [bindings] maps "btn:<ControllerButton>" or "key:<keycode>" to an action.
+ */
+@Serializable
+data class SmartHandSettings(
+    val enabled: Boolean = false,
+    /** Controllers that are neither a left nor a right Joy-Con act for this hand. */
+    val rightHanded: Boolean = true,
+    /** Joy-Cons get the preset buttons automatically (anything bound by hand wins). */
+    val autoJoyCon: Boolean = true,
+    val bindings: Map<String, SmartAction> = com.hyperxr.input.SmartHand.DEFAULT,
 )
 
 @Serializable

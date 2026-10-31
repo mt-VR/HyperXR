@@ -35,6 +35,10 @@ object QuestGameCatalog {
             "Você só tem um cano na mão e não anda: engate nas barras e puxe, apoie a ponta no chão e empurre, salte os vãos. Nas paredes de vidro o cano escorrega"),
         Info("encontro", "Encontro", "salas sociais em VR", false, "group",
             "Escolha uma sala (20 mapas ou um glTF seu) e um avatar (30, de domínio público) e encontre quem está online na mesma sala. Ande com o analógico ou aponte para o chão, faça a pinça e solte"),
+        Info("atelie", "Ateliê 3D", "pintura em 3D no espaço (Tilt Brush / Open Brush)", false, "brush",
+            "Faça a pinça para desenhar no ar em 6DoF; escolha cor, espessura e pincel (tubo, neon, fita) no menu ou na paleta da mão esquerda. Mão fechada move e gira o desenho"),
+        Info("modelos", "Modelos 3D", "visualizadores de modelos 3D", false, "view_in_ar",
+            "Escolha uma pasta com .glb / .gltf e abra os modelos no espaço: mão fechada pega o modelo inteiro, a pinça puxa uma parte; separe e monte de novo"),
         Info("macacada", "Macacada", "Gorilla Tag", false, "pets",
             "Pega-pega de gorilas: ande e pule só com os braços (empurre o chão, escale árvores) e pegue todos; online com outros jogadores do HyperMagic"),
         Info("babuino", "Babuíno da Meia-Noite", "jogos de terror de gorila (Scary Baboon)", false, "pets",
@@ -106,5 +110,5 @@ object QuestGameCatalog {
     val ids = games.map { it.id }.toSet()
 
     /** Games that also play with a controller (the trigger grabs, shoots or touches). */
-    val controllerToo = setOf("encontro", "climb", "pipeclimb", "macacada", "babuino", "expediente", "slowtime", "neonrail", "drumboat", "domeracket", "slingshot", "basketball", "bowling", "darts", "dodgeball", "zombieyard", "saber", "skeet", "paintball", "zerog", "bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon", "sketch", "kayak", "wingsuit", "tableracing", "jewelthief")
+    val controllerToo = setOf("encontro", "atelie", "climb", "pipeclimb", "macacada", "babuino", "expediente", "slowtime", "neonrail", "drumboat", "domeracket", "slingshot", "basketball", "bowling", "darts", "dodgeball", "zombieyard", "saber", "skeet", "paintball", "zerog", "bomb", "spydesk", "pieces", "cubes", "fallingblocks", "tinytown", "dungeon", "sketch", "kayak", "wingsuit", "tableracing", "jewelthief")
 }

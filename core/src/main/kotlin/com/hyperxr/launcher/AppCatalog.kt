@@ -57,7 +57,7 @@ object IconLibrary {
     val LIBRARY = listOf(
         "importapk", "opengames", "youtube", "emulators", "androidapps", "handlab", "appworld", "assistant",
         "screenshare", "workspaces", "reality", "catgame", "twitch", "tiktok", "hyperx_package", "ocean", "guardian",
-        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb", "qg_pipeclimb", "qg_macacada", "qg_encontro", "qg_babuino", "qg_expediente",
+        "qg_rhythm", "qg_fruit", "qg_boxing", "qg_plank", "qg_golf", "qg_slowtime", "qg_drones", "qg_pingpong", "qg_fishing", "qg_diorama", "qg_climb", "qg_pipeclimb", "qg_macacada", "qg_encontro", "qg_atelie", "qg_modelos", "qg_babuino", "qg_expediente",
         "qg_neonrail", "qg_orbs", "qg_shapewall", "qg_drumboat", "qg_fittargets", "qg_domeracket", "qg_archery", "qg_slingshot",
         "qg_basketball", "qg_bowling", "qg_darts", "qg_dodgeball", "qg_zombieyard", "qg_saber", "qg_spells", "qg_skeet",
         "qg_paintball", "qg_zerog", "qg_bomb", "qg_spydesk", "qg_pieces", "qg_cubes", "qg_fallingblocks", "qg_tinytown",

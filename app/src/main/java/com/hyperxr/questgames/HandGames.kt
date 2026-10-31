@@ -829,6 +829,8 @@ object QuestGames {
         "pipeclimb" -> PipeClimbGame(host)
         "macacada" -> MacacadaGame(host)
         "encontro" -> EncontroGame(host)
+        "atelie" -> AtelierGame(host)
+        "modelos" -> ModelsGame(host)
         "babuino" -> BabuinoGame(host)
         "expediente" -> ExpedienteGame(host)
         "neonrail" -> NeonRailGame(host)

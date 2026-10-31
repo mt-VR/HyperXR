@@ -246,6 +246,13 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
         fun classify(dev: InputDevice): JoyConSide? = profileOf(dev)?.let { sideOf(it) }
 
         /** "Name (kind)" of every controller connected now. */
+        /** SmartHand binding name of a key event: the button's name on a known pad, else its keycode. */
+        fun bindingOf(e: KeyEvent): String {
+            val profile = e.device?.let { profileOf(it) }
+            val button = profile?.let { GamepadProfiles.mapKey(e.keyCode, it) }
+            return button?.let { com.hyperxr.input.SmartHand.buttonBinding(it) } ?: com.hyperxr.input.SmartHand.keyBinding(e.keyCode)
+        }
+
         fun connectedJoyCons(): List<String> =
             InputDevice.getDeviceIds().toList().mapNotNull { InputDevice.getDevice(it) }.mapNotNull { d -> profileOf(d)?.let { "${d.name} (${it.label})" } }.distinct()
 

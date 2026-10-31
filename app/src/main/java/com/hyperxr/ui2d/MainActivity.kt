@@ -124,6 +124,27 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_SECTION = "section"
     }
     override fun onDestroy() { io.shutdown(); super.onDestroy() }
+
+    /** SmartHand calibration: while set, the next controller / key press is handed here (binding name). */
+    var keyCapture by mutableStateOf<((String) -> Unit)?>(null)
+
+    @android.annotation.SuppressLint("RestrictedApi")  // lint-only: the framework override every Activity has
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val cb = keyCapture
+        if (cb != null) {
+            // the phone's own back key still leaves the screen
+            val phoneBack = event.keyCode == android.view.KeyEvent.KEYCODE_BACK && event.device?.isVirtual != false
+            if (!phoneBack) {
+                if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    keyCapture = null
+                    cb(com.hyperxr.joycon.JoyConManager.bindingOf(event))
+                }
+                return true
+            }
+            keyCapture = null
+        }
+        return super.dispatchKeyEvent(event)
+    }
 }
 
 enum class Section(val title: String) {

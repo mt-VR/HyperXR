@@ -2,6 +2,7 @@ package com.hyperxr.ui2d
 
 import android.Manifest
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,6 +12,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -322,6 +325,45 @@ fun ControlsSection(a: MainActivity) {
         ChoiceRow("Botão HOME", actions, c.buttonHome, ::name) { v -> a.update { it.copy(controllers = it.controllers.copy(buttonHome = v)) } }
         ToggleRow("Toque na tela seleciona (VR Box)", c.screenTapSelects) { v -> a.update { it.copy(controllers = it.controllers.copy(screenTapSelects = v)) } }
         ToggleRow("Clique automático ao apontar (olhar parado num botão)", c.dwellClick) { v -> a.update { it.copy(controllers = it.controllers.copy(dwellClick = v)) } }
+    }
+    SmartHandCard(a)
+}
+
+/** SmartHand: the hand aims with the pinch ball, any controller's buttons act; calibrated here. */
+@Composable
+fun SmartHandCard(a: MainActivity) {
+    val sh = a.settingsState.controllers.smartHand
+    fun set(f: (com.hyperxr.settings.SmartHandSettings) -> com.hyperxr.settings.SmartHandSettings) =
+        a.update { it.copy(controllers = it.controllers.copy(smartHand = f(it.controllers.smartHand))) }
+    SectionCard("SmartHand", "O hand tracking junto com o controle: a mão mira com a bolinha da pinça e os botões do controle clicam, agarram e voltam. Funciona com qualquer controle (Joy-Con, PlayStation, Xbox, 8BitDo, controle do VR Box, teclado).") {
+        ToggleRow("Usar SmartHand", sh.enabled, "A mão que segura o controle continua apontando com a bolinha; a pinça é o botão") { v -> set { it.copy(enabled = v) } }
+        ToggleRow("Auto calibração de Joy-Con", sh.autoJoyCon, "Joy-Con esquerdo age pela mão esquerda e o direito pela direita; ZR/ZL e A clicam, R/L agarram, B volta, + / - abrem o menu, Home recentraliza") { v -> set { it.copy(autoJoyCon = v) } }
+        ToggleRow("Destro", sh.rightHanded, "Outros controles (um só para as duas mãos) agem pela mão direita; desligado, pela esquerda") { v -> set { it.copy(rightHanded = v) } }
+        Text("Botões", color = HxColors.text, fontWeight = FontWeight.SemiBold)
+        val capturing = a.keyCapture != null
+        var waitingFor by remember { mutableStateOf<com.hyperxr.settings.SmartAction?>(null) }
+        if (capturing && waitingFor != null) Note("Aperte o botão do controle para \"${waitingFor!!.label}\"…")
+        val actions = com.hyperxr.settings.SmartAction.entries.filter { it != com.hyperxr.settings.SmartAction.NONE }
+        for (act in actions) {
+            val bound = sh.bindings.filterValues { it == act }.keys.toList()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(act.label, color = HxColors.text)
+                    Text(if (bound.isEmpty()) "Nenhum botão" else bound.joinToString(", ") { com.hyperxr.input.SmartHand.label(it) }, fontSize = 12.sp, color = HxColors.dim)
+                }
+                OutlinedButton(onClick = {
+                    waitingFor = act
+                    a.keyCapture = { b -> waitingFor = null; set { it.copy(bindings = it.bindings + (b to act)) } }
+                }) { Text(if (waitingFor == act && capturing) "Aperte…" else "Adicionar") }
+                if (bound.isNotEmpty()) TextButton(onClick = { set { s -> s.copy(bindings = s.bindings - bound.toSet()) } }) { Text("Limpar") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { set { it.copy(bindings = com.hyperxr.input.SmartHand.JOYCON_PRESET) } }) { Text("Calibrar Joy-Con") }
+            OutlinedButton(onClick = { set { it.copy(bindings = com.hyperxr.input.SmartHand.DEFAULT) } }) { Text("Padrão") }
+            if (capturing) TextButton(onClick = { a.keyCapture = null; waitingFor = null }) { Text("Cancelar") }
+        }
+        Note("Calibrar: toque em Adicionar e aperte o botão no controle. Um mesmo botão só faz uma coisa; um botão novo para a mesma ação soma.")
     }
 }
 

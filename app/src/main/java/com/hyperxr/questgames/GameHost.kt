@@ -148,6 +148,29 @@ class GameHost(val ctx: XrContext, private val id: String, private val onExit: (
 
     // ---------------------------------------------------------------- space
     fun toWorld(x: Float, y: Float, z: Float, out: Vec3 = Vec3()): Vec3 = origin.transformPoint(tmpIn.set(x, y, z), out)
+
+    /** Hands pointing at a panel (the game's menu, the HUD) this frame: their pinch is a click there, not a game action. */
+    val uiBusy = BooleanArray(2)
+    private val hj = Array(4) { Vec3() }
+
+    /** Where hand [i]'s thumb and index meet, in game space; false when the hand is not tracked. */
+    fun pinchPoint(i: Int, out: Vec3): Boolean {
+        val h = ctx.input.hands[i]
+        if (!h.isUsable) return false
+        hj[0].set(h.joints[HandJoint.THUMB_TIP]).add(h.joints[HandJoint.INDEX_TIP]).scale(0.5f)
+        toGame(hj[0], out)
+        return true
+    }
+
+    /** Rigid pose of hand [i] in game space (palm centre, fingers along -z); false when not tracked. */
+    fun handPose(i: Int, out: Pose): Boolean {
+        val h = ctx.input.hands[i]
+        if (!h.isUsable) return false
+        toGame(h.joints[HandJoint.WRIST], hj[0]); toGame(h.joints[HandJoint.INDEX_MCP], hj[1])
+        toGame(h.joints[HandJoint.PINKY_MCP], hj[2]); toGame(h.joints[HandJoint.MIDDLE_MCP], hj[3])
+        com.hyperxr.input.HandGrip.handPose(hj[0], hj[1], hj[2], hj[3], out)
+        return true
+    }
     fun toGame(w: Vec3, out: Vec3): Vec3 = inv.transformPoint(w, out)
     fun dirToGame(w: Vec3, out: Vec3): Vec3 = inv.orientation.rotate(w, out)
     private val tmpIn = Vec3()

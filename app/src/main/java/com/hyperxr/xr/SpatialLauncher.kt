@@ -273,6 +273,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
         ocean?.let { it.update(dt, head); it.submit(ctx.scene) }
         game?.let { g ->
             // a failing game closes by itself (with a report) instead of taking HyperXR down
+            airBusy.copyInto(g.uiBusy)
             try { g.update(dt); g.draw() } catch (t: Throwable) { gameFailed(t) }
         }
         tutorial?.let { it.update(dt); it.submit(ctx.scene) }

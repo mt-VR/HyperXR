@@ -10,6 +10,9 @@ on:
       tag:
         description: "Tag of the release (e.g. v0.2.0)"
         required: true
+      name:
+        description: "Name of the version (e.g. HyperCache), shown after the tag"
+        required: false
 
 permissions:
   contents: write
@@ -62,7 +65,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.names.outputs.tag }}
-          name: HyperMagic ${{ steps.names.outputs.tag }}
+          name: HyperMagic ${{ steps.names.outputs.tag }}${{ github.event.inputs.name && format(' {0}', github.event.inputs.name) || '' }}
           body_path: ${{ steps.names.outputs.notes }}
           files: |
             HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk
