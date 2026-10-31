@@ -121,7 +121,8 @@ object ApkPatcher {
             PICO_PLATFORM.intersect(libNames).takeIf { it.isNotEmpty() }?.let {
                 warnings += "SDK da loja Pico (${it.joinToString()}): se o jogo exigir a verificação de compra da Pico, ele fecha ao iniciar"
             }
-            if (abiDirs.any { "lib/$it/libvrapi.so" in names })
+            // OVRPlugin builds can carry both backends: only VrApi without an OpenXR loader is VrApi-only
+            if (abiDirs.any { "lib/$it/libvrapi.so" in names && "lib/$it/libopenxr_loader.so" !in names })
                 blockers += "Jogo VrApi (Gear VR / Quest antigo): o HyperMagic roda só OpenXR"
 
             // what replaces what

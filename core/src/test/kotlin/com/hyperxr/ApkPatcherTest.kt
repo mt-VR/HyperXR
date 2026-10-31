@@ -82,6 +82,9 @@ class ApkPatcherTest {
         // OpenXR only: VrApi games are refused
         val vrapi = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3))), tmp("v.apk"), libs)
         assertTrue(vrapi.blockers.any { it.contains("VrApi") })
+        // both backends (OVRPlugin): the OpenXR one is used
+        val both = ApkPatcher.patch(apk(mapOf("lib/arm64-v8a/libvrapi.so" to ByteArray(3), "lib/arm64-v8a/libopenxr_loader.so" to ByteArray(3))), tmp("vb.apk"), libs, dryRun = true)
+        assertTrue(both.blockers.none { it.contains("VrApi") })
     }
 
     @Test fun daydreamOnlyBecomesCardboard() {

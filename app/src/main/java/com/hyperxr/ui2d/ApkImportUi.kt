@@ -74,6 +74,26 @@ class ApkImportState(private val a: MainActivity) {
         }
     }
 
+    /** Everything the analysis found, as text to paste in a message when a game does not work. */
+    fun reportText(): String {
+        val r = report ?: return status ?: ""
+        return buildString {
+            appendLine("${r.packageName} ${r.versionName} (${r.versionCode}) • ${r.verdict} • ${r.xrApi} • ${r.engine} • loader ${r.loader}")
+            appendLine("Android ${r.minSdk}+ (alvo ${r.targetSdk}) • ABIs ${r.abis.joinToString()} • gráficos ${r.graphics.joinToString()}")
+            appendLine("Quest ${r.questApp} • Pico ${r.picoApp} • Platform SDK ${r.platformSdk} • atividade ${r.launchActivity}")
+            r.reasons.forEach { appendLine("• $it") }
+            plan?.let { p ->
+                p.changes.forEach { appendLine("Patch: $it") }
+                p.warnings.forEach { appendLine("Aviso: $it") }
+                p.blockers.forEach { appendLine("Impede: $it") }
+            }
+            status?.let { appendLine("Estado: $it") }
+            appendLine("Bibliotecas: ${r.nativeLibs.joinToString()}")
+            appendLine("Extensões: ${r.extensions.sorted().joinToString()}")
+            append("Celular: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}, ${Build.SUPPORTED_ABIS.joinToString()}")
+        }
+    }
+
     /** Whether the analysed app is installed now (the installer may have finished meanwhile). */
     fun installedNow(): Boolean = report?.let { CompatLayer.installed(a, it.packageName) } ?: false
 
@@ -184,6 +204,15 @@ fun ApkImportDialog(a: MainActivity) {
                 if (r != null && !s.busy && s.installedNow()) TextButton(onClick = { s.play() }) { Text("Jogar") }
             }
         },
-        dismissButton = { TextButton(enabled = !s.busy, onClick = { s.open = false }) { Text("Fechar") } },
+        dismissButton = {
+            Row {
+                if (r != null || s.status != null) TextButton(onClick = {
+                    a.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("HyperMagic APK", s.reportText()))
+                    android.widget.Toast.makeText(a, "Relatório copiado", android.widget.Toast.LENGTH_SHORT).show()
+                }) { Text("Copiar relatório") }
+                TextButton(enabled = !s.busy, onClick = { s.open = false }) { Text("Fechar") }
+            }
+        },
     )
 }
