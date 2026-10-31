@@ -137,6 +137,14 @@ object CompatLayer {
         installApkFile(ctx, apk) { ok, msg -> done(if (ok) "HyperMagic Daydream instalado. Abra-o uma vez para permitir o Joy-Con (Shizuku)" else msg) }
     }
 
+    /** Installs the HyperMagic OpenXR Broker from the APK inside HyperXR, so OpenXR games find the runtime. */
+    fun installBroker(ctx: Context, done: (String) -> Unit) {
+        val apk = File(ctx.cacheDir, "hyperxr-broker.apk")
+        try { ctx.assets.open("compat/hyperxr-broker.apk").use { i -> apk.outputStream().use { i.copyTo(it) } } }
+        catch (t: Throwable) { done("APK do broker ausente: ${t.message}"); return }
+        installApkFile(ctx, apk) { ok, msg -> done(if (ok) "Broker instalado: jogos OpenXR já encontram o runtime HyperMagic" else msg) }
+    }
+
     /**
      * Installs [apk] as it is: through Shizuku when ready (silent), otherwise the system installer
      * asks on the phone's screen. [done] gets (installed now, message).

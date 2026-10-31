@@ -43,6 +43,8 @@ data class ApkReport(
     val daydream: Boolean = false,
     /** Native libraries the game's libraries need that neither the APK nor Android has. */
     val missingLibs: List<String> = emptyList(),
+    /** Godot 4 games: the renderer they start with on Android ("gl_compatibility", "mobile"...). */
+    val godotRenderer: String? = null,
     val verdict: Verdict,
     val reasons: List<String>,
 )
@@ -126,11 +128,12 @@ object QuestApk {
         if (gvr || vrManifest) {
             zip.entries().asSequence().filter { it.name.matches(Regex("classes\\d*\\.dex")) }.forEach { e -> zip.getInputStream(e).use { scan.feed(it) } }
         }
-        analyze(manifest, libs, abis, abi, scan, ElfNeeded.missing(needed))
+        val godot = zip.getEntry(GodotProject.PATH)?.let { e -> GodotProject.parse(zip.getInputStream(e).use { it.readBytes() }) }?.let(GodotProject::renderer)
+        analyze(manifest, libs, abis, abi, scan, ElfNeeded.missing(needed), godot)
     }
 
     /** Separated from [inspect] for tests. */
-    fun analyze(manifest: XmlElement, libs: List<String>, abis: Set<String>, abi: String?, scan: StringScan, missingLibs: List<String> = emptyList()): ApkReport {
+    fun analyze(manifest: XmlElement, libs: List<String>, abis: Set<String>, abi: String?, scan: StringScan, missingLibs: List<String> = emptyList(), godotRenderer: String? = null): ApkReport {
         val pkg = manifest.attr("package") ?: ""
         val sdk = manifest.all("uses-sdk").firstOrNull()
         val app = manifest.all("application").firstOrNull()
@@ -215,8 +218,11 @@ object QuestApk {
             LoaderKind.UNKNOWN -> reasons += "Loader OpenXR de origem desconhecida: \"Corrigir e instalar\" troca pelo loader da Khronos"
             LoaderKind.NONE -> reasons += "Sem loader OpenXR embutido (espera o do sistema)"
         }
+        val godotVulkan = godotRenderer != null && godotRenderer != GodotProject.COMPATIBILITY
+        if (godotVulkan) reasons += "Godot com o renderizador \"$godotRenderer\" (Vulkan): o runtime HyperMagic só oferece OpenGL ES. \"Corrigir e instalar\" troca para o renderizador Compatibilidade (OpenGL ES); alguns efeitos podem mudar"
+        else if (godotRenderer != null) reasons += "Godot com o renderizador Compatibilidade (OpenGL ES): o que o runtime HyperMagic oferece"
         if (graphics == setOf("Vulkan")) wont("Renderiza só com Vulkan; o runtime HyperMagic aceita OpenGL ES")
-        else if ("Vulkan" in graphics) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperMagic só oferece esse)"
+        else if ("Vulkan" in graphics && godotRenderer == null) reasons += "Tem Vulkan e OpenGL ES: precisa escolher OpenGL ES (o runtime HyperMagic só oferece esse)"
         if (platformSdk) reasons += "Usa o Meta Platform SDK: a verificação de licença da loja Meta pode fechar o jogo"
         val meta2 = exts.filter { (it.startsWith("XR_FB_") || it.startsWith("XR_META_") || it.startsWith("XR_OCULUS_")) && it !in RUNTIME_EXTENSIONS }.sorted()
         val metaOk = exts.count { (it.startsWith("XR_FB_") || it.startsWith("XR_META_")) && it in RUNTIME_EXTENSIONS }
@@ -235,14 +241,14 @@ object QuestApk {
         if ("XR_FB_scene" in exts || "XR_FB_spatial_entity" in exts) reasons += "Usa âncoras / modelo da sala da Meta: a sala vem da área desenhada no HyperGuardian (ou uma de 4 x 4 m); âncoras ficam paradas onde foram criadas"
         if ("XR_FB_passthrough" in exts) reasons += "Usa passthrough (realidade mista): a câmera do celular aparece atrás do jogo, em baixa resolução e sem profundidade"
         if ("XR_EXT_hand_tracking" in exts) reasons += "Usa hand tracking: o HyperMagic rastreia suas mãos pela câmera enquanto o jogo roda (juntas, pinça e mira da Meta)"
-        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && picoLibs.isEmpty() && "Vulkan" !in graphics) verdict = Verdict.LIKELY_RUNS
+        if (verdict == Verdict.MAY_RUN && xrApi == XrApi.OPENXR && loader == LoaderKind.KHRONOS_BROKER && meta2.isEmpty() && !platformSdk && picoLibs.isEmpty() && ("Vulkan" !in graphics || godotRenderer == GodotProject.COMPATIBILITY)) verdict = Verdict.LIKELY_RUNS
 
         return ApkReport(
             packageName = pkg, versionName = manifest.attr("versionName") ?: "", versionCode = manifest.attr("versionCode")?.toLongOrNull() ?: 0,
             minSdk = sdk?.attr("minSdkVersion")?.toIntOrNull() ?: 1, targetSdk = sdk?.attr("targetSdkVersion")?.toIntOrNull() ?: 0,
             abis = abis, nativeLibs = libNames.sorted(), engine = engine, xrApi = xrApi, loader = loader, questApp = questApp,
             supportedDevices = meta["com.oculus.supportedDevices"], platformSdk = platformSdk, graphics = graphics, extensions = exts,
-            launchActivity = launch, daydreamController = ddController, missingLibs = missingLibs, verdict = verdict, reasons = reasons, daydream = daydream, picoApp = picoApp,
+            launchActivity = launch, daydreamController = ddController, missingLibs = missingLibs, godotRenderer = godotRenderer, verdict = verdict, reasons = reasons, daydream = daydream, picoApp = picoApp,
         )
     }
 

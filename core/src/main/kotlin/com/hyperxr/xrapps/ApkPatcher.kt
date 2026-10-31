@@ -140,6 +140,15 @@ object ApkPatcher {
                     }
                 }
             }
+            // Godot 4 games on Vulkan: the Compatibility renderer (OpenGL ES) instead
+            var godotProject: ByteArray? = null
+            if (GodotProject.PATH in names && names.any { it.endsWith("/libgodot_android.so") }) {
+                val settings = GodotProject.parse(zip.getInputStream(zip.getEntry(GodotProject.PATH)).use { it.readBytes() })
+                if (settings != null && GodotProject.renderer(settings) != GodotProject.COMPATIBILITY) {
+                    godotProject = GodotProject.serialize(GodotProject.withCompatibility(settings))
+                    changes += "Godot: renderizador \"${GodotProject.renderer(settings)}\" (Vulkan) trocado por Compatibilidade (OpenGL ES), o que o runtime HyperMagic oferece"
+                }
+            }
             // Daydream checks in the app's own code
             val dexPatched = HashMap<String, ByteArray>()
             for (name in names.filter { Regex("^classes\\d*\\.dex$").matches(it) }) {
@@ -165,6 +174,7 @@ object ApkPatcher {
                     when {
                         name == "AndroidManifest.xml" -> putBytes(out, name, newManifest, stored = e.method == ZipEntry.STORED)
                         name in replace -> putFile(out, name, replace.getValue(name), stored = true)
+                        name == GodotProject.PATH && godotProject != null -> putBytes(out, name, godotProject, stored = e.method == ZipEntry.STORED)
                         name in dexPatched -> putBytes(out, name, dexPatched.getValue(name), stored = e.method == ZipEntry.STORED)
                         // native libraries and resources.arsc stay uncompressed (mapped in place)
                         else -> putEntry(out, zip, e, stored = e.method == ZipEntry.STORED || name.endsWith(".so") || name == "resources.arsc")

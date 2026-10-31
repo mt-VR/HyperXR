@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.hyperxr.compat.CompatLayer
 import com.hyperxr.files.ApkImports
 import com.hyperxr.files.FileKinds
 import com.hyperxr.files.ImportedGames
@@ -58,8 +59,42 @@ fun ImportsSection(a: MainActivity) {
         Button(onClick = { a.pickApk.launch(APK_TYPES) }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Escolher APK") }
         Note("Com o Shizuku ativo a instalação é direta; sem ele, o instalador do Android pede confirmação.")
     }
+    RuntimeReadyCard(a)
     ImportedGamesCard(a)
     PhoneApksCard(a)
+}
+
+/** OpenXR games find the runtime only through a broker: install the one inside HyperMagic. */
+@Composable
+private fun RuntimeReadyCard(a: MainActivity) {
+    val broker = a.app.runtimeBroker
+    var active by remember { mutableStateOf<Boolean?>(null) }
+    var owners by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
+    var activeName by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(a.refresh) {
+        a.io.execute {
+            val r = broker.activeRuntime(); val o = broker.brokerOwners()
+            a.runOnUiThread { active = r?.packageName == a.packageName; activeName = r?.label; owners = o }
+        }
+    }
+    when (active) {
+        null -> return
+        true -> SectionCard("Runtime OpenXR pronto", "Os jogos OpenXR encontram o runtime HyperMagic.") {}
+        false -> SectionCard("Falta o broker OpenXR", "Sem ele, jogos OpenXR mostram \"OpenXR failed to start\" ou abrem fora do VR: o loader do jogo não acha o runtime HyperMagic.") {
+            val other = owners["org.khronos.openxr.runtime_broker"]?.takeIf { it != CompatLayer.BROKER_PACKAGE }
+            if (other != null) {
+                Note("O broker $other já está instalado e tem prioridade: escolha \"HyperMagic Runtime\" nele, ou desinstale-o e instale o do HyperMagic.", HxColors.warn)
+            } else {
+                if (activeName != null) Note("Hoje os jogos recebem o runtime \"$activeName\".", HxColors.warn)
+                Button(onClick = {
+                    status = "Instalando…"
+                    CompatLayer.installBroker(a) { msg -> a.runOnUiThread { status = msg; a.refresh++ } }
+                }, colors = ButtonDefaults.buttonColors(containerColor = HxColors.accent)) { Text("Instalar o broker do HyperMagic") }
+            }
+            status?.let { Note(it) }
+        }
+    }
 }
 
 @Composable

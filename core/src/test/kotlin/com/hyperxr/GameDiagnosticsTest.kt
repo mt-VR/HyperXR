@@ -2,6 +2,7 @@ package com.hyperxr
 
 import com.hyperxr.xrapps.ElfNeeded
 import com.hyperxr.xrapps.GameLog
+import com.hyperxr.xrapps.GodotProject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,5 +38,21 @@ class GameDiagnosticsTest {
         assertEquals(5, kept.size)
         val s = GameLog.summary(kept)
         assertTrue(s.any { it.contains("libvrapi.so") } && s.any { it.contains("has died") })
+    }
+
+    @Test fun godotRendererSwitchesToCompatibility() {
+        val settings = listOf(
+            "application/config/name" to GodotProject.encodeString("Jogo"),
+            "xr/openxr/enabled" to byteArrayOf(1, 0, 0, 0, 1, 0, 0, 0),
+        )
+        val bytes = GodotProject.serialize(settings)
+        val parsed = GodotProject.parse(bytes)!!
+        assertEquals("Jogo", GodotProject.string(parsed[0].second))
+        assertEquals("mobile", GodotProject.renderer(parsed))
+        val fixed = GodotProject.parse(GodotProject.serialize(GodotProject.withCompatibility(parsed)))!!
+        assertEquals(GodotProject.COMPATIBILITY, GodotProject.renderer(fixed))
+        assertEquals(4, fixed.size)
+        assertTrue(fixed.any { it.first == "xr/openxr/enabled" })
+        assertEquals(null, GodotProject.parse("nope".toByteArray()))
     }
 }

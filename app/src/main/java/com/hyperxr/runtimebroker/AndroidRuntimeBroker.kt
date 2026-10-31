@@ -63,6 +63,12 @@ class AndroidRuntimeBroker(private val context: Context) {
         }
     }
 
+    /** The runtime an OpenXR game gets: the first broker that answers, in the loader's order. */
+    fun activeRuntime(): RuntimeDescriptor? = BROKER_AUTHORITIES.firstNotNullOfOrNull { queryBroker(it) }
+
+    /** Whether OpenXR games find the HyperMagic runtime. */
+    fun hyperMagicActive(): Boolean = activeRuntime()?.packageName == context.packageName
+
     fun brokerInstalled(): Boolean = BROKER_AUTHORITIES.any { context.packageManager.resolveContentProvider(it, 0) != null }
 
     /** Which package holds each broker authority (null = free), to explain install conflicts. */

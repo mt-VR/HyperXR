@@ -22,6 +22,8 @@ data class ImportedGame(
  * "Jogar" button. Only the ones still installed are shown.
  */
 object ImportedGames {
+    const val RUNTIME_MISSING = "os jogos OpenXR ainda não encontram o runtime HyperMagic: instale o broker no topo desta aba"
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("imported_games", Context.MODE_PRIVATE)
 
     fun remember(ctx: Context, r: ApkReport, label: String, patched: Boolean) {
@@ -69,7 +71,11 @@ object ImportedGames {
             ?: throw IllegalStateException("o app não tem tela inicial")
         when (g.api) {
             XrApi.CARDBOARD, XrApi.DAYDREAM -> { CompatLayer.writeCardboardParams(ctx); CompatLayer.launchGame(ctx, g.packageName, activity) }
-            XrApi.OPENXR, XrApi.VRAPI -> CompatLayer.launchGame(ctx, g.packageName, activity)
+            XrApi.OPENXR, XrApi.VRAPI -> {
+                // without the broker the game's loader finds no runtime and the game says "OpenXR failed to start"
+                if (!com.hyperxr.HyperXRApp.instance.runtimeBroker.hyperMagicActive()) throw IllegalStateException(RUNTIME_MISSING)
+                CompatLayer.launchGame(ctx, g.packageName, activity)
+            }
             XrApi.NONE -> ctx.startActivity(Intent(Intent.ACTION_MAIN).setClassName(g.packageName, activity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
