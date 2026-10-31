@@ -97,8 +97,10 @@ class SettingsHubPanel(private val a: LauncherActions, private val open: (String
                 settings.update { it.copy(handTracking = it.handTracking.copy(skinTone = (it.handTracking.skinTone + 1) % com.hyperxr.settings.SKIN_TONES.size)) }
             },
             Item.Toggle("Direct Touch", "Tocar botões com o dedo indicador", { it.handTracking.directTouch }) { s, v -> s.copy(handTracking = s.handTracking.copy(directTouch = v)) },
+            Item.Toggle("Raio curto + pinça", "Clique das mãos: um raio curto mira, a pinça clica", { it.handTracking.clickGesture == ClickGesture.SHORT_RAY }) { s, v ->
+                s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.SHORT_RAY else ClickGesture.PINCH)) },
             Item.Toggle("Clicar apontando e empurrando", "Em vez da pinça", { it.handTracking.clickGesture == ClickGesture.POINT_PUSH }) { s, v ->
-                s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.POINT_PUSH else ClickGesture.PINCH)) },
+                s.copy(handTracking = s.handTracking.copy(clickGesture = if (v) ClickGesture.POINT_PUSH else ClickGesture.SHORT_RAY)) },
             Item.Info("HyperConnect") { hyperConnectMessage.ifEmpty { a.hyperConnectStatus } },
             Item.Toggle("HyperConnect", "Outro celular como controle, por Bluetooth", { it.controllers.hyperConnect }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnect = v)) },
             Item.Toggle("Vibração no HyperConnect", "O celular controle vibra ao apontar um botão", { it.controllers.hyperConnectHaptics }) { s, v -> s.copy(controllers = s.controllers.copy(hyperConnectHaptics = v)) },
