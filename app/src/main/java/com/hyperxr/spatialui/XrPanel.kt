@@ -26,28 +26,45 @@ import com.hyperxr.rendering.PanelSurface
  * window bar (title, close, minimise) along the bottom edge with a grab handle under it.
  */
 object XrTheme {
-    val panelTop = Color.argb(246, 61, 90, 99)
-    val panelBottom = Color.argb(246, 47, 72, 80)
-    val bar = Color.argb(250, 40, 61, 68)
-    val border = Color.argb(40, 255, 255, 255)
-    val text = Color.rgb(246, 249, 250)
-    val textDim = Color.rgb(184, 201, 206)
-    val accent = Color.rgb(52, 132, 246)
-    val accentPressed = Color.rgb(96, 160, 255)
-    val accent2 = Color.rgb(120, 182, 255)
-    val button = Color.argb(255, 76, 103, 111)
-    val buttonHover = Color.argb(255, 92, 121, 129)
-    val buttonPressed = Color.argb(255, 112, 141, 149)
-    val buttonDisabled = Color.argb(255, 60, 84, 92)
-    val tile = Color.argb(255, 74, 101, 109)
-    val danger = Color.rgb(236, 84, 84)
-    val ok = Color.rgb(76, 206, 140)
+    // the current style's colours and shapes (Settings > Launcher > Tema); set by [apply]
+    var panelTop = Color.argb(246, 61, 90, 99)
+    var panelBottom = Color.argb(246, 47, 72, 80)
+    var bar = Color.argb(250, 40, 61, 68)
+    var border = Color.argb(40, 255, 255, 255)
+    var text = Color.rgb(246, 249, 250)
+    var textDim = Color.rgb(184, 201, 206)
+    var accent = Color.rgb(52, 132, 246)
+    var accentPressed = Color.rgb(96, 160, 255)
+    var accent2 = Color.rgb(120, 182, 255)
+    var button = Color.argb(255, 76, 103, 111)
+    var buttonHover = Color.argb(255, 92, 121, 129)
+    var buttonPressed = Color.argb(255, 112, 141, 149)
+    var buttonDisabled = Color.argb(255, 60, 84, 92)
+    var tile = Color.argb(255, 74, 101, 109)
+    var danger = Color.rgb(236, 84, 84)
+    var ok = Color.rgb(76, 206, 140)
     /** Corner radius of panels in metres (also used by the quad shader). */
-    const val PANEL_RADIUS_M = 0.04f
+    var PANEL_RADIUS_M = 0.04f
     /** Controls are pills: radius as a fraction of the control height. */
-    const val CONTROL_ROUNDING = 0.5f
+    var CONTROL_ROUNDING = 0.5f
     /** Rounded tiles (cards, big toggles): radius in pixels at 900 px per metre. */
-    const val TILE_RADIUS = 22f
+    var TILE_RADIUS = 22f
+    /** Bumped when the style changes: panels redraw themselves. */
+    @Volatile var version = 0; private set
+    private var style: com.hyperxr.settings.XrThemeStyle? = null
+
+    /** Switches to [s] (cheap when it is already the current one: call it every frame). */
+    fun apply(s: com.hyperxr.settings.XrThemeStyle) {
+        if (s == style) return
+        style = s
+        val p = s.palette
+        panelTop = p.panelTop; panelBottom = p.panelBottom; bar = p.bar; border = p.border
+        text = p.text; textDim = p.textDim; accent = p.accent; accentPressed = p.accentPressed; accent2 = p.accent2
+        button = p.button; buttonHover = p.buttonHover; buttonPressed = p.buttonPressed; buttonDisabled = p.buttonDisabled
+        tile = p.tile; danger = p.danger; ok = p.ok
+        PANEL_RADIUS_M = p.panelRadiusM; CONTROL_ROUNDING = p.controlRounding; TILE_RADIUS = p.tileRadius
+        version++
+    }
     val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 }
@@ -105,6 +122,7 @@ abstract class XrPanel(
     open val windowBar: Boolean get() = closable || title.isNotEmpty()
     private var handleTex = 0
     private var langVersion = -1
+    private var themeVersion = -1
 
     /** Renders when dirty and submits the quad to the frame (GL thread). */
     open fun submit(scene: FrameScene) {
@@ -113,6 +131,7 @@ abstract class XrPanel(
         if (s == null) { s = PanelSurface(pxW, pxH); surface = s }
         if (s.widthPx != pxW || s.heightPx != pxH) { s.resize(pxW, pxH); dirty = true }
         if (langVersion != com.hyperxr.i18n.I18n.version) { langVersion = com.hyperxr.i18n.I18n.version; dirty = true }
+        if (themeVersion != XrTheme.version) { themeVersion = XrTheme.version; dirty = true }
         if (dirty) {
             s.begin()
             renderTo(s.canvas)

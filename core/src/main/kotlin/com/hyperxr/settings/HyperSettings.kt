@@ -215,6 +215,8 @@ data class LauncherSettings(
     val restoreWindows: Boolean = true,
     /** The built-in 360 environments follow the clock (night street at night, sunset at dusk...). */
     val autoEnvironmentByTime: Boolean = false,
+    /** Colours and shapes of the XR panels ([XrThemes]). */
+    val theme: XrThemeStyle = XrThemeStyle.HYPERMAGIC,
 ) {
     companion object {
         val DEFAULT_PINNED = listOf(

@@ -200,6 +200,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
 
     // ---------------------------------------------------------------- per frame
     override fun onFrame(ctx: XrContext, dt: Float) {
+        com.hyperxr.spatialui.XrTheme.apply(app.settings.current.launcher.theme)
         while (true) { val t = glTasks.poll() ?: break; t() }
         followSocial(dt)
         deliverPhoneTyping()
