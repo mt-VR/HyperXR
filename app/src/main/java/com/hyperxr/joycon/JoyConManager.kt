@@ -17,7 +17,7 @@ enum class JoyConSide { LEFT, RIGHT, PRO, COMBINED }
 
 /**
  * Live state of one controller as Android exposes it: buttons, sticks, d-pad, and for remotes in
- * mouse mode the mouse movement turned into a stick. Motion sensors are never used.
+ * mouse mode the mouse movement turned into a stick, plus its gyroscope as a pointer when Android exposes it.
  */
 class JoyCon(val deviceId: Int, val name: String, val side: JoyConSide, val profile: GamepadProfiles.Profile) {
     @Volatile var buttons = 0
@@ -33,14 +33,60 @@ class JoyCon(val deviceId: Int, val name: String, val side: JoyConSide, val prof
     internal var mouseX = 0f; internal var mouseY = 0f; internal var mouseNs = 0L
     internal var lastMouseX = Float.NaN; internal var lastMouseY = Float.NaN
     val family get() = profile.family
+    /** The controller's own gyroscope as a pointer, when Android exposes it (Android 12+). */
+    @Volatile var gyro: com.hyperxr.input.GyroPointer? = null
+    internal var motion: ControllerMotion? = null
+}
+
+/**
+ * Reads a controller's gyroscope and accelerometer through the InputDevice sensor manager
+ * (Android 12+; DualSense, DualShock 4, Switch Pro and Joy-Cons with the kernel driver) and feeds
+ * a [com.hyperxr.input.GyroPointer]. Samples arrive on their own thread.
+ */
+class ControllerMotion private constructor(private val sm: android.hardware.SensorManager, private val gyroSensor: android.hardware.Sensor,
+                                           private val accel: android.hardware.Sensor?, val pointer: com.hyperxr.input.GyroPointer) : android.hardware.SensorEventListener {
+    private val thread = android.os.HandlerThread("controller-motion").apply { start() }
+    private var lastNs = 0L
+
+    fun start() {
+        val h = Handler(thread.looper)
+        sm.registerListener(this, gyroSensor, android.hardware.SensorManager.SENSOR_DELAY_GAME, h)
+        accel?.let { sm.registerListener(this, it, android.hardware.SensorManager.SENSOR_DELAY_GAME, h) }
+    }
+
+    fun stop() { runCatching { sm.unregisterListener(this) }; thread.quitSafely() }
+
+    override fun onSensorChanged(e: android.hardware.SensorEvent) {
+        when (e.sensor.type) {
+            android.hardware.Sensor.TYPE_ACCELEROMETER -> pointer.onAccel(e.values[0], e.values[1], e.values[2])
+            android.hardware.Sensor.TYPE_GYROSCOPE -> {
+                val dt = if (lastNs == 0L) 0f else (e.timestamp - lastNs) / 1e9f
+                lastNs = e.timestamp
+                pointer.onGyro(e.values[0], e.values[1], e.values[2], dt, System.nanoTime())
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+
+    companion object {
+        fun of(dev: InputDevice): ControllerMotion? {
+            if (Build.VERSION.SDK_INT < 31) return null
+            return runCatching {
+                val sm = dev.sensorManager
+                val g = sm.getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) ?: return null
+                ControllerMotion(sm, g, sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER), com.hyperxr.input.GyroPointer())
+            }.getOrNull()
+        }
+    }
 }
 
 /**
  * Every controller Android can see (GamepadProfiles): Joy-Con and Pro, DualShock 4 and
  * DualSense, Xbox, 8BitDo, any gamepad, and VR Box style remotes in game, keyboard or mouse mode.
  * Buttons come from KeyEvents, sticks, triggers and the d-pad hat from joystick MotionEvents, a
- * remote's mouse movement from mouse MotionEvents. Where the controller points always comes from
- * the hand holding it (the engine's ControllerPoseFusion), never from its own motion sensors.
+ * remote's mouse movement from mouse MotionEvents. Where the controller points comes from its own
+ * gyroscope when it has one (GyroPointer, Android 12+), else from the hand holding it.
  */
 class JoyConManager(context: Context) : InputManager.InputDeviceListener {
     private val im = context.getSystemService(InputManager::class.java)
@@ -69,13 +115,15 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
         val profile = profileOf(dev) ?: return
         if (controllers.containsKey(deviceId)) return
         val jc = JoyCon(deviceId, dev.name, sideOf(profile), profile)
+        ControllerMotion.of(dev)?.let { m -> jc.motion = m; jc.gyro = m.pointer; runCatching { m.start() } }
         controllers[deviceId] = jc
-        Diagnostics.log("Controller connected: ${dev.name} (${profile.label})")
+        Diagnostics.log("Controller connected: ${dev.name} (${profile.label})" + if (jc.gyro != null) ", gyroscope" else ", no gyroscope exposed")
         onChange?.invoke()
     }
 
     override fun onInputDeviceRemoved(deviceId: Int) {
         val jc = controllers.remove(deviceId) ?: return
+        jc.motion?.stop()
         // A button held while Bluetooth dropped must not stay pressed.
         mapperFor(jc.side).releaseAll().forEach { onAction?.invoke(jc.side, it) }
         Diagnostics.log("Controller disconnected: ${jc.name}")
@@ -254,7 +302,11 @@ class JoyConManager(context: Context) : InputManager.InputDeviceListener {
         }
 
         fun connectedJoyCons(): List<String> =
-            InputDevice.getDeviceIds().toList().mapNotNull { InputDevice.getDevice(it) }.mapNotNull { d -> profileOf(d)?.let { "${d.name} (${it.label})" } }.distinct()
+            InputDevice.getDeviceIds().toList().mapNotNull { InputDevice.getDevice(it) }.mapNotNull { d -> profileOf(d)?.let { "${d.name} (${it.label})" + if (hasGyro(d)) " · giroscópio" else "" } }.distinct()
+
+        /** Android exposes this controller's gyroscope (Android 12+ and a driver that reports motion). */
+        fun hasGyro(d: InputDevice): Boolean = Build.VERSION.SDK_INT >= 31 &&
+            runCatching { d.sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) != null }.getOrDefault(false)
 
         /** Kept for callers that map Nintendo keys directly. */
         fun mapKey(code: Int, side: JoyConSide): ControllerButton? =

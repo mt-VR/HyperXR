@@ -300,7 +300,15 @@ fun ControlsSection(a: MainActivity) {
         ToggleRow("Usar controles", c.joyConEnabled) { v -> a.update { it.copy(controllers = it.controllers.copy(joyConEnabled = v)) } }
         if (connected.isEmpty()) Note("Nenhum controle conectado agora.") else connected.forEach { KeyValue("Conectado", it) }
         CapabilityRow("IMU do controle", a.app.capabilities.last.inputDeviceSensors)
-        Note("Para onde o controle aponta vem sempre da mão rastreada (6DoF, sem drift): raio do ombro passando pela mão. O giroscópio do controle nunca é usado (é instável), mesmo quando ele tem um.")
+        ToggleRow("Apontar com o giroscópio do controle", c.gyroPointer, "DualSense, DualShock 4, Pro e Joy-Con: gire e incline o controle para mover o ponteiro, X / A clica. Precisa do Android 12 ou mais novo. Home (ou Recentralizar) põe o ponteiro de volta à frente") { v ->
+            a.update { it.copy(controllers = it.controllers.copy(gyroPointer = v)) }
+        }
+        if (c.gyroPointer) {
+            SliderRow("Velocidade do giroscópio", c.gyroSensitivity, 0.5f..4f, { "%.1fx".format(it) }) { v -> a.update { it.copy(controllers = it.controllers.copy(gyroSensitivity = v)) } }
+            ToggleRow("Inverter horizontal", c.gyroInvertX, "Se o ponteiro for para o lado errado ao girar o controle") { v -> a.update { it.copy(controllers = it.controllers.copy(gyroInvertX = v)) } }
+            ToggleRow("Inverter vertical", c.gyroInvertY, "Se o ponteiro subir quando o controle desce") { v -> a.update { it.copy(controllers = it.controllers.copy(gyroInvertY = v)) } }
+        }
+        Note("Sem giroscópio (ou com ele desligado), o controle aponta para onde a mão rastreada aponta; sem mão, o analógico move o cursor a partir do olhar.")
         ToggleRow("Modelo de controle VR na mão", c.controllerModel, "Com a mão vista pela câmera, o controle aparece como um controle VR onde a mão está") { v ->
             a.update { it.copy(controllers = it.controllers.copy(controllerModel = v)) }
         }

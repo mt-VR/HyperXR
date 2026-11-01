@@ -167,6 +167,12 @@ data class ControllerSettings(
     val controllerModel: Boolean = true,
     /** The hand stays drawn (closed around the controller) while it holds one. */
     val showHandsWithController: Boolean = true,
+    /** Point with the controller's own gyroscope (DualSense, DualShock 4, Pro, Joy-Con) instead of the gaze cursor. */
+    val gyroPointer: Boolean = true,
+    /** Gyro pointer speed: 1 = the pointer turns as much as the controller. */
+    val gyroSensitivity: Float = 1.5f,
+    val gyroInvertX: Boolean = false,
+    val gyroInvertY: Boolean = false,
     /** SmartHand: the hand aims with the pinch ball, the controller's buttons click. */
     val smartHand: SmartHandSettings = SmartHandSettings(),
 )

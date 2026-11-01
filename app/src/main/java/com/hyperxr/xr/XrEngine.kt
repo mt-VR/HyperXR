@@ -792,7 +792,7 @@ class XrEngine(
             if (jc.stickX * jc.stickX + jc.stickY * jc.stickY >= c.stickX * c.stickX + c.stickY * c.stickY) { c.stickX = jc.stickX; c.stickY = jc.stickY }
             if (jc.stick2X * jc.stick2X + jc.stick2Y * jc.stick2Y >= c.stick2X * c.stick2X + c.stick2Y * c.stick2Y) { c.stick2X = jc.stick2X; c.stick2Y = jc.stick2Y }
             if (!first) continue
-            // Controller motion sensors are not used; games get the pose of the hand holding it.
+            // The hand gives the pose here; a controller with a gyroscope then points with it (below).
             fusions[idx].useImu = false
             fusions[idx].update(null, input.hands[idx], input.head, rightSide = idx == 1, nowNs = now, dtSeconds = dt)
             c.pose.orientation.set(fusions[idx].worldOrientation)
@@ -802,6 +802,17 @@ class XrEngine(
                 // held: it points where the hand holding it points, and its buttons click for the hand
                 c.aim = fusions[idx].ray(heldRays[idx])
                 input.holding[idx] = true
+            }
+            // the controller's own gyroscope points (DualSense, DualShock 4, Pro, Joy-Con): it wins
+            // over the gaze cursor and over the hand holding it; A / cross clicks where it points
+            val gp = jc.gyro
+            val cs = app.settings.current.controllers
+            if (cs.gyroPointer && gp != null && gp.active(now)) {
+                gp.sensitivity = cs.gyroSensitivity; gp.invertX = cs.gyroInvertX; gp.invertY = cs.gyroInvertY
+                if (gp.recenterRequested) gp.recenter(input.head)
+                gp.orientation(c.pose.orientation)
+                c.aim = gp.ray(c.pose.position, heldRays[idx])
+                input.holding[idx] = false
             }
         }
         for (i in 0..1) if (input.holding[i] && input.controllers[i].buttons and SELECT_BITS != 0) {
@@ -890,7 +901,10 @@ class XrEngine(
         }
     }
 
-    private fun recenterControllers() { input.recenterCursor = true }
+    private fun recenterControllers() { input.recenterCursor = true; recenterGyros() }
+
+    /** Straight ahead for the gyro pointers becomes where the head looks. */
+    private fun recenterGyros() { for (jc in joyCons.controllers.values) jc.gyro?.recenterRequested = true }
 
     // ---------------------------------------------------------------- activity hooks
     fun onTouch(e: MotionEvent): Boolean {
