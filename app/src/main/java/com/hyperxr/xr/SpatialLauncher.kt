@@ -357,6 +357,12 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val ballPointers = arrayOf(com.hyperxr.input.BallPointer(), com.hyperxr.input.BallPointer())
     private val pinchBallVisible = BooleanArray(2)
     private val identityQ = Quat()
+    // the controller's laser pointer (drawn in submitPointers)
+    private var beamOn = false
+    private var beamPressed = false
+    private val beamFrom = Vec3(); private val beamTo = Vec3()
+    private val beamQ = Quat(); private val beamDir = Vec3(); private val beamA = Vec3(); private val beamB = Vec3()
+    private val beamUp = Vec3(0f, 1f, 0f); private val beamC = Vec3()
     private val MICRO_SCROLL_SCREENS = 1.5f
     private val microGestures = arrayOf(com.hyperxr.handtracking.MicroGestures(), com.hyperxr.handtracking.MicroGestures())
     private var gazeHit: Vec3? = null
@@ -405,6 +411,14 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             lastHapticTarget = hov
             recordPointer(1, ray, aDown)
             if (ctrlPointers[0].hitDistance.isNaN()) hitPoints += ray.pointAt(1.5f) else trackHit(ctrlPointers[0], ray)
+            // the controller's laser: only when the controller itself aims (gyroscope, hand holding it, phone)
+            beamOn = aim != null
+            if (beamOn) {
+                beamFrom.set(ray.origin)
+                val d = ctrlPointers[0].hitDistance
+                beamTo.set(ray.origin).addScaled(ray.direction, if (d.isNaN()) BEAM_FREE_LENGTH else (d - 0.006f).coerceAtLeast(0.05f))
+                beamPressed = aDown
+            }
             dragWindows(ctrlPointers[0], ray, aDown)
             if (kotlin.math.abs(scrollY) > 0.15f) {
                 val panel = (ctrlPointers[0].hovered as? com.hyperxr.spatialui.XrPanel)?.takeIf { it.scrollable }
@@ -420,7 +434,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             }
             if (!bDown && bWasDown && bDownNs != 0L) { bDownNs = 0L; backOrClose() }
             bWasDown = bDown
-        } else { ctrlPointers[0].update(null, false, surfaces, now); cursorRayValid = false; cursorLabDown = false }
+        } else { ctrlPointers[0].update(null, false, surfaces, now); cursorRayValid = false; cursorLabDown = false; beamOn = false }
         // hands: far rays clicked with a pinch, plus direct touch with the fingertip; a hand holding
         // a controller points and clicks through the controller instead
         for (i in 0..1) {
@@ -546,6 +560,9 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
     private val DRAG_START_COS = kotlin.math.cos(Math.toRadians(4.0)).toFloat()
     /** Joy-Con stick and thumb-slide scrolling of panels (the library), panel pixels. */
     private val PANEL_STICK_PX_PER_SEC = 520f
+    private val BEAM_SEGMENTS = 6
+    /** Length of the controller laser when it points at nothing, metres. */
+    private val BEAM_FREE_LENGTH = 2.5f
     private val PANEL_MICRO_PX = 700f
 
     /** Back: keyboard, then the top panel, then the window's own back. */
@@ -731,6 +748,7 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             p.width = 0.018f; p.height = 0.018f; p.radius = 0f
             p.overlay = true
         }
+        if (beamOn) drawBeam()
         // pinch ball: a small sphere between thumb and index, no beam. It fills with colour as the
         // fingers close and turns pink when the pinch (the click) is held.
         for (i in 0..1) {
@@ -749,6 +767,43 @@ class SpatialLauncher(override val activity: android.app.Activity, private val r
             val r = if (pinched) 0.008f else 0.011f - 0.002f * k
             com.hyperxr.math.Mat4.compose(pinchBall[i], identityQ, 2 * r, 2 * r, 2 * r, ball.matrix) // unit sphere mesh has radius 0.5
         }
+    }
+
+    /**
+     * A thin line of light from the controller to what it points at: a fine bright core and a soft
+     * glow in the theme's accent colour, fading out towards the far end (and brighter while A is
+     * held). Drawn after the panels so icons and windows never cover it.
+     */
+    private fun drawBeam() {
+        beamDir.set(beamTo).sub(beamFrom)
+        val len = beamDir.length()
+        if (len < 0.02f) return
+        beamDir.scale(1f / len)
+        com.hyperxr.math.Quat.fromTo(beamUp, beamDir, beamQ)
+        val ac = com.hyperxr.spatialui.XrTheme.accent
+        val ar = ((ac shr 16) and 255) / 255f; val ag = ((ac shr 8) and 255) / 255f; val ab = (ac and 255) / 255f
+        val boost = if (beamPressed) 1.35f else 1f
+        val start = 0.04f   // starts a little ahead of the controller
+        val segs = BEAM_SEGMENTS
+        for (k in 0 until segs) {
+            val t0 = start / len + (1f - start / len) * k / segs
+            val t1 = start / len + (1f - start / len) * (k + 1) / segs
+            if (t1 <= t0) continue
+            beamA.set(beamFrom).addScaled(beamDir, t0 * len); beamB.set(beamFrom).addScaled(beamDir, t1 * len)
+            val fade = 1f - 0.85f * (k + 0.5f) / segs
+            beamPart(0.0016f, 0.55f + ar * 0.45f, 0.55f + ag * 0.45f, 0.55f + ab * 0.45f, (0.9f * fade * boost).coerceAtMost(1f))
+            beamPart(0.006f, ar, ag, ab, (0.22f * fade * boost).coerceAtMost(1f))
+        }
+    }
+
+    private fun beamPart(width: Float, r: Float, g: Float, b: Float, a: Float) {
+        val d = ctx.scene.addDraw()
+        d.mesh = ctx.renderer.cylinder
+        d.unlit = true; d.additive = true; d.late = true; d.castShadow = false
+        d.color[0] = r; d.color[1] = g; d.color[2] = b; d.color[3] = a   // added as rgb * a
+        // the cylinder mesh is 1 m tall along y, 1 m across: centred between the segment's ends
+        beamC.set(beamA).add(beamB).scale(0.5f)
+        com.hyperxr.math.Mat4.compose(beamC, beamQ, width, beamA.distanceTo(beamB), width, d.matrix)
     }
 
     private fun ringBitmap(): Bitmap {

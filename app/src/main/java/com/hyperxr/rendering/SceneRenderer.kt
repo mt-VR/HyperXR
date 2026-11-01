@@ -538,20 +538,25 @@ class SceneRenderer {
     fun renderLate(scene: FrameScene, eye: EyeView) {
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glEnable(GLES30.GL_CULL_FACE)
-        for (pass in 0..1) {
+        // opaque, then transparent, then glow (added to what is behind: the controller laser)
+        for (pass in 0..2) {
             if (pass == 1) {
                 GLES30.glEnable(GLES30.GL_BLEND)
                 GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            } else if (pass == 2) {
+                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
+                GLES30.glDepthMask(false)
             }
             for (i in 0 until scene.drawCount) {
                 val d = scene.draw(i)
                 if (!d.late) continue
-                val isTransparent = d.transparent || d.color[3] < 0.999f
-                if ((pass == 1) != isTransparent) continue
+                val p = if (d.additive) 2 else if (d.transparent || d.color[3] < 0.999f) 1 else 0
+                if (p != pass) continue
                 val mesh = d.mesh ?: continue
-                drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal)
+                drawMesh(mesh, d.matrix, eye, d.color, d.texture, scene, d.unlit, gloss = d.gloss, metal = d.metal, additive = d.additive)
             }
         }
+        GLES30.glDepthMask(true)
         GLES30.glDisable(GLES30.GL_BLEND)
     }
 
