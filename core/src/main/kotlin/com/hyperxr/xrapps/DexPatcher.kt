@@ -128,7 +128,7 @@ object DexPatcher {
     private fun put(b: ByteBuffer, base: Int, unit: Int, v: Int) { b.putShort(base + unit * 2, v.toShort()) }
 
     /** Length in 16-bit units of the instruction (or payload) starting with [u] at [i]. */
-    private fun length(u: Int, i: Int, unit: (Int) -> Int): Int {
+    internal fun length(u: Int, i: Int, unit: (Int) -> Int): Int {
         val op = u and 0xff
         if (op == 0x00) {
             return when (u) {
@@ -171,7 +171,7 @@ object DexPatcher {
         }
     }
 
-    private class Uleb(private val d: ByteArray, var p: Int) {
+    internal class Uleb(private val d: ByteArray, var p: Int) {
         fun next(): Int {
             var r = 0; var s = 0
             while (true) {

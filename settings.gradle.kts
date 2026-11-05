@@ -21,4 +21,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "HyperXR"
-include(":core", ":app", ":broker", ":newpipe", ":vrcore", ":hyperconnect", ":minecraft")
+include(":core", ":app", ":broker", ":newpipe", ":vrcore", ":hyperconnect", ":minecraft", ":hyperdreamed")

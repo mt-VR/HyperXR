@@ -51,6 +51,12 @@ jobs:
           ./gradlew :app:assembleDebug -PhxAbi=armeabi-v7a --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk HyperMagic-armv7.apk
 
+      # HyperDreamed Patcher: a separate app (Daydream on phones that were never Daydream-ready)
+      - name: APK (HyperDreamed)
+        run: |
+          ./gradlew :hyperdreamed:assembleDebug --no-daemon
+          cp hyperdreamed/build/outputs/apk/debug/hyperdreamed-debug.apk HyperDreamed.apk
+
       - name: Name the APKs
         id: names
         run: |
@@ -58,6 +64,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           mv HyperMagic-arm64.apk "HyperMagic-$TAG-arm64.apk"
           mv HyperMagic-armv7.apk "HyperMagic-$TAG-armv7.apk"
+          mv HyperDreamed.apk "HyperDreamed-$TAG.apk"
           NOTES="docs/releases/$TAG.md"
           [ -f "$NOTES" ] || NOTES=README.md
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
@@ -70,3 +77,4 @@ jobs:
           files: |
             HyperMagic-${{ steps.names.outputs.tag }}-arm64.apk
             HyperMagic-${{ steps.names.outputs.tag }}-armv7.apk
+            HyperDreamed-${{ steps.names.outputs.tag }}.apk
