@@ -59,6 +59,14 @@ object VrServicesPatcher {
         // PackageManager.checkSignatures between them is made to answer "the same" (SIGNATURE_MATCH = 0)
         DexRules.Answer("Landroid/content/pm/PackageManager;", "checkSignatures", "Verificação de que os apps de RV têm a mesma assinatura aceita a nova", 0, shorty = "ILL"),
         DexRules.Answer("Landroid/content/pm/PackageManager;", "checkSignatures", "Verificação de que os apps de RV têm a mesma assinatura aceita a nova", 0, shorty = "III"),
+        // The real crash: the Google Play Services reject the re-signed apps ("GoogleCertificatesRslt:
+        // not allowed", go/gsrlt) when they sync their feature flags (Phenotype). Make the apps see
+        // the Play Services as unavailable (1 = SERVICE_MISSING) so they skip that call instead of
+        // crashing on it. Public Play Services API names, which obfuscation keeps.
+        DexRules.Answer("Lcom/google/android/gms/common/GoogleApiAvailability;", "isGooglePlayServicesAvailable", "Jogos param de pedir os Serviços do Google Play (Play Services vistos como ausentes)", 1),
+        DexRules.Answer("Lcom/google/android/gms/common/GoogleApiAvailabilityLight;", "isGooglePlayServicesAvailable", "Jogos param de pedir os Serviços do Google Play (Play Services vistos como ausentes)", 1),
+        DexRules.Answer("Lcom/google/android/gms/common/GooglePlayServicesUtil;", "isGooglePlayServicesAvailable", "Jogos param de pedir os Serviços do Google Play (Play Services vistos como ausentes)", 1),
+        DexRules.Answer("Lcom/google/android/gms/common/GooglePlayServicesUtilLight;", "isGooglePlayServicesAvailable", "Jogos param de pedir os Serviços do Google Play (Play Services vistos como ausentes)", 1),
     )
 
     class Report(
