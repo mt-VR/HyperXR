@@ -78,6 +78,31 @@ object Patching {
         ctx.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    /** Installs [apk] silently through Shizuku when it is ready, otherwise with the system installer. */
+    fun installPreferShizuku(ctx: Context, apk: File, done: (Boolean, String) -> Unit) {
+        if (ShizukuLog.state(ctx) == ShizukuState.READY) {
+            ShizukuLog.withService(ctx) { svc ->
+                if (svc == null) { install(ctx, apk, done); return@withService }
+                Thread {
+                    val err = runCatching {
+                        android.os.ParcelFileDescriptor.open(apk, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { svc.installApk(it, apk.length()) }
+                    }.getOrElse { "Shizuku: ${it.message}" }
+                    done(err.isEmpty(), if (err.isEmpty()) "Instalado (Shizuku)" else "Não instalou: $err")
+                }.start()
+            }
+        } else install(ctx, apk, done)
+    }
+
+    /** Removes [pkg] silently through Shizuku when ready, otherwise opens the system screen. */
+    fun uninstallPreferShizuku(ctx: Context, pkg: String, done: (Boolean, String) -> Unit) {
+        if (ShizukuLog.state(ctx) == ShizukuState.READY) {
+            ShizukuLog.withService(ctx) { svc ->
+                if (svc == null) { uninstall(ctx, pkg); done(false, "abrindo a tela do sistema"); return@withService }
+                Thread { val err = runCatching { svc.uninstall(pkg) }.getOrElse { it.message ?: "erro" }; done(err.isEmpty(), if (err.isEmpty()) "Desinstalado" else err) }.start()
+            }
+        } else { uninstall(ctx, pkg); done(false, "abrindo a tela do sistema") }
+    }
+
     enum class Signer { NOT_INSTALLED, THIS_PHONE, OTHER }
 
     /** Who signed the installed [pkg]: this app's key (patched here), someone else (Google), or nobody. */

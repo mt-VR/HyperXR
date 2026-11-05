@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() { super.onResume(); refresh++ }
-    override fun onDestroy() { emulator.stop(); io.shutdown(); super.onDestroy() }
+    override fun onDestroy() { emulator.stop(); ShizukuLog.unbind(); io.shutdown(); super.onDestroy() }
 
     fun pickFiles() = pick.launch(arrayOf("*/*"))
 
@@ -103,11 +103,50 @@ class MainActivity : ComponentActivity() {
             try {
                 Patching.patchAndSign(this, item)
                 runOnUiThread { busy = "Instalando ${item.report.packageName}…" }
-                Patching.install(this, item.patched!!) { ok, msg -> runOnUiThread { item.status = msg; busy = ""; refresh++ } }
+                Patching.installPreferShizuku(this, item.patched!!) { ok, msg -> runOnUiThread { item.status = msg; busy = ""; refresh++ } }
             } catch (t: Throwable) {
                 runOnUiThread { item.status = "Falhou: ${t.message}"; busy = ""; refresh++ }
             }
         }
+    }
+
+    fun uninstallOriginal(pkg: String) {
+        Patching.uninstallPreferShizuku(this, pkg) { _, msg -> runOnUiThread { busy = msg; refresh++ } }
+    }
+
+    // ------------------------------------------------------------ Shizuku log
+    var log by mutableStateOf("")
+
+    fun shizukuState() = ShizukuLog.state(this)
+
+    fun askShizuku() { ShizukuLog.requestPermission { runOnUiThread { refresh++ } } }
+
+    /** Clears the log, opens one of the VR apps, waits and captures the crash + filtered lines. */
+    fun captureLog(pkgToOpen: String?) {
+        if (shizukuState() != ShizukuState.READY) { log = "Shizuku não está pronto: instale e permita o HyperDreamed nele, depois tente de novo."; return }
+        busy = "Capturando log…"; log = ""
+        ShizukuLog.withService(this) { svc ->
+            if (svc == null) { runOnUiThread { busy = ""; log = "Não deu para falar com o Shizuku." }; return@withService }
+            io.execute {
+                runCatching {
+                    svc.clearLog()
+                    if (pkgToOpen != null) { svc.launch(pkgToOpen); Thread.sleep(6500) } else Thread.sleep(500)
+                    val vrPkgs = "com.google.vr.vrcore,com.google.android.vr.home,com.google.android.vr.inputmethod"
+                    svc.dump(vrPkgs, 12000)
+                }.onSuccess { out -> runOnUiThread { log = out.ifBlank { "Nada no log. Abra o Daydream até ele fechar e capture de novo." }; busy = "" } }
+                    .onFailure { runOnUiThread { log = "Erro: ${it.message}"; busy = "" } }
+            }
+        }
+    }
+
+    fun copyLog() {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("HyperDreamed log", log))
+    }
+
+    fun shareLog() {
+        startActivity(android.content.Intent.createChooser(
+            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, log), "Compartilhar log"))
     }
 
     fun hasBtPermissions(): Boolean = Build.VERSION.SDK_INT < 31 ||
@@ -141,11 +180,12 @@ private fun Screen(a: MainActivity) {
             Text("Daydream em celulares que nunca foram Daydream, do Android 11 ao 16", fontSize = 14.sp, color = Dim)
         }
         TabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
-            listOf("Patcher", "Controle", "Este celular").forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
+            listOf("Patcher", "Controle", "Log", "Celular").forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
         }
         when (tab) {
             0 -> PatcherTab(a)
             1 -> ControllerTab(a)
+            2 -> LogTab(a)
             else -> PhoneTab(a)
         }
     }
@@ -185,7 +225,7 @@ private fun PatcherTab(a: MainActivity) {
                 when (installed) {
                     Patching.Signer.OTHER -> {
                         Line("A versão original está instalada: desinstale antes de instalar a corrigida.", Color(0xFFFFC46B))
-                        OutlinedButton(onClick = { Patching.uninstall(a, rep.packageName) }) { Text("Desinstalar a original") }
+                        OutlinedButton(onClick = { a.uninstallOriginal(rep.packageName) }) { Text("Desinstalar a original") }
                     }
                     Patching.Signer.THIS_PHONE -> Line("A versão corrigida já está instalada.", Color(0xFF7BE0A0))
                     Patching.Signer.NOT_INSTALLED -> {}
@@ -276,6 +316,44 @@ private fun HoldButton(label: String, modifier: Modifier, onState: (Boolean) -> 
             }
         }, contentAlignment = Alignment.Center) {
         Text(label, color = if (pressed) Color(0xFF0E1320) else Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun LogTab(a: MainActivity) {
+    @Suppress("UNUSED_VARIABLE") val r = a.refresh
+    val st = a.shizukuState()
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Section("Log automático (Shizuku)") {
+            Line("O HyperDreamed não consegue ler o erro de outro app sozinho. Com o Shizuku (que roda como shell) ele lê o log do sistema, captura a queda do Daydream e você me manda o texto. O Shizuku também passa a instalar e desinstalar sem telas de confirmação.")
+            when (st) {
+                ShizukuState.NOT_INSTALLED -> Line("Shizuku não instalado. Instale o app Shizuku (Play Store) e inicie-o (por ADB sem fio ou root).", Color(0xFFFFC46B))
+                ShizukuState.NOT_RUNNING -> Line("Shizuku instalado mas parado. Abra o Shizuku e inicie o serviço.", Color(0xFFFFC46B))
+                ShizukuState.NO_PERMISSION -> Button(onClick = { a.askShizuku() }) { Text("Permitir o HyperDreamed no Shizuku") }
+                ShizukuState.READY -> Line("Shizuku pronto.", Color(0xFF7BE0A0))
+            }
+        }
+        if (st == ShizukuState.READY) {
+            Section("Capturar a queda") {
+                Line("Toque no botão: ele limpa o log, abre o Daydream, espera alguns segundos (encaixe no óculos ou deixe abrir) e traz o que apareceu, inclusive o erro fatal.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { a.captureLog("com.google.android.vr.home") }, enabled = a.busy.isEmpty()) { Text("Abrir Daydream e capturar") }
+                    OutlinedButton(onClick = { a.captureLog(VrServicesPatcher.VR_SERVICES) }, enabled = a.busy.isEmpty()) { Text("Serviço para RV") }
+                }
+                OutlinedButton(onClick = { a.captureLog(null) }, enabled = a.busy.isEmpty()) { Text("Só capturar o log atual (sem abrir nada)") }
+                if (a.busy.isNotEmpty()) Line(a.busy, MaterialTheme.colorScheme.primary)
+            }
+        }
+        if (a.log.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { a.copyLog() }, modifier = Modifier.weight(1f)) { Text("Copiar") }
+                Button(onClick = { a.shareLog() }, modifier = Modifier.weight(1f)) { Text("Compartilhar") }
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A0E18)).padding(10.dp).verticalScroll(rememberScrollState())) {
+                Text(a.log, fontSize = 11.sp, color = Color(0xFFCBD5E8), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            }
+        }
     }
 }
 

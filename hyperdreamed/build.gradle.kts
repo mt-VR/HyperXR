@@ -28,7 +28,7 @@ android {
         }
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; aidl = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -47,4 +47,7 @@ dependencies {
     implementation(libs.core.ktx)
     // signs the patched APKs (APK Signature Scheme v1-v3)
     implementation("com.android.tools.build:apksig:8.13.2")
+    // Shizuku: an optional helper (shell UID) that reads the crash log and installs silently
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 }

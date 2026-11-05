@@ -17,6 +17,7 @@
         <package android:name="com.google.android.vr.home" />
         <package android:name="com.google.vr.vrcore" />
         <package android:name="com.google.android.vr.inputmethod" />
+        <package android:name="moe.shizuku.privileged.api" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="com.google.intent.category.DAYDREAM" />
@@ -38,5 +39,13 @@
             </intent-filter>
         </activity>
         <receiver android:name=".InstallResult" android:exported="false" />
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>
