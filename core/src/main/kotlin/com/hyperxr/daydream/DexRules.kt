@@ -26,7 +26,7 @@ object DexRules {
      * only calls whose argument number [argIndex] (0 = the object itself) was loaded just before
      * by a const-string with one of those strings.
      */
-    class Answer(cls: String, name: String, label: String, val value: Int, val stringArg: Set<String>? = null, val argIndex: Int = 1) : Rule(cls, name, label)
+    class Answer(cls: String, name: String, label: String, val value: Int, val stringArg: Set<String>? = null, val argIndex: Int = 1, shorty: String? = null) : Rule(cls, name, label, shorty)
 
     /** A call that returns nothing, removed. */
     class Drop(cls: String, name: String, label: String, shorty: String? = null) : Rule(cls, name, label, shorty)

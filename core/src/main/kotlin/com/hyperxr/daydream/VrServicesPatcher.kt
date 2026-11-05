@@ -54,6 +54,11 @@ object VrServicesPatcher {
         DexRules.Answer("Lcom/google/android/gms/common/GoogleSignatureVerifier;", "isPackageGoogleSigned", "Verificação de assinatura do Google aceita a assinatura nova", 1),
         DexRules.Answer("Lcom/google/android/gms/common/GoogleSignatureVerifier;", "isUidGoogleSigned", "Verificação de assinatura do Google aceita a assinatura nova", 1),
         DexRules.Answer("Lcom/google/android/gms/common/GoogleSignatureVerifier;", "isGooglePublicSignedPackage", "Verificação de assinatura do Google aceita a assinatura nova", 1),
+        // the apps verify each other through the system (the Daydream binds the Serviço para RV and
+        // each checks the other's signature): both are re-signed with this phone's key, so
+        // PackageManager.checkSignatures between them is made to answer "the same" (SIGNATURE_MATCH = 0)
+        DexRules.Answer("Landroid/content/pm/PackageManager;", "checkSignatures", "Verificação de que os apps de RV têm a mesma assinatura aceita a nova", 0, shorty = "ILL"),
+        DexRules.Answer("Landroid/content/pm/PackageManager;", "checkSignatures", "Verificação de que os apps de RV têm a mesma assinatura aceita a nova", 0, shorty = "III"),
     )
 
     class Report(
